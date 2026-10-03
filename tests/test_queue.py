@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-import mergeweasel.queue as merge_queue
+from mergeweasel import queue
 from mergeweasel.gitea import Gitea
 
 QUEUE = "weasel-bot"
@@ -19,7 +19,7 @@ REQUIRED = [TEST, SMOKE]
 def statuses(**states):
     """statuses(test="success", smoke="failure") - keyword per required context."""
     contexts = {"test": TEST, "smoke": SMOKE}
-    return {contexts[key]: merge_queue.Status(contexts[key], state, f"https://ci/{key}")
+    return {contexts[key]: queue.Status(contexts[key], state, f"https://ci/{key}")
             for key, state in states.items()}
 
 
@@ -29,7 +29,7 @@ def green():
 
 def pull(number, *, labels=("automerge",), behind=False, approver="chli1", carried=None,
          checks=None, draft=False, rejected=False, queue_approved=False, renovate_retried=False):
-    return merge_queue.Pull(
+    return queue.Pull(
         number=number, head_ref=f"branch-{number}", head_sha=f"{number:040x}",
         labels={name: index for index, name in enumerate(labels)}, draft=draft, behind=behind,
         approver=approver, carried_reviewer=carried, rejected=rejected, queue_approved=queue_approved,
@@ -37,47 +37,47 @@ def pull(number, *, labels=("automerge",), behind=False, approver="chli1", carri
 
 
 def decide(pulls, required, account=QUEUE):
-    return merge_queue.decide(pulls, required, account)
+    return queue.decide(pulls, required, account)
 
 
 def run_pass(gitea, server, dry_run, account=QUEUE):
-    return merge_queue.run_pass(gitea, server, dry_run, account)
+    return queue.run_pass(gitea, server, dry_run, account)
 
 
 # --- decide: selection ---
 
 def test_idle_without_queued_pulls():
-    assert decide([], REQUIRED) == merge_queue.Idle()
+    assert decide([], REQUIRED) == queue.Idle()
 
 
 def test_lowest_number_first_when_all_are_behind():
     action = decide([pull(5, behind=True), pull(3, behind=True)], REQUIRED)
-    assert action == merge_queue.Rebase(3, "branch-3", f"{3:040x}", "chli1")
+    assert action == queue.Rebase(3, "branch-3", f"{3:040x}", "chli1")
 
 
 def test_up_to_date_pull_beats_a_lower_number():
     pending = statuses(test="pending", smoke="pending")
     action = decide([pull(2, behind=True), pull(7, checks=pending)], REQUIRED)
-    assert action == merge_queue.Wait(7)
+    assert action == queue.Wait(7)
 
 
 def test_unapproved_pull_is_not_queued():
-    assert decide([pull(1, approver=None)], REQUIRED) == merge_queue.Idle()
+    assert decide([pull(1, approver=None)], REQUIRED) == queue.Idle()
 
 
 def test_needs_fix_draft_and_unlabelled_pulls_are_not_queued():
     pulls = [pull(1, labels=("automerge", "needs-fix")), pull(2, draft=True), pull(3, labels=())]
-    assert decide(pulls, REQUIRED) == merge_queue.Idle()
+    assert decide(pulls, REQUIRED) == queue.Idle()
 
 
 def test_pull_with_a_standing_request_for_changes_is_not_queued():
-    assert decide([pull(1, carried="chli1", rejected=True)], REQUIRED) == merge_queue.Idle()
+    assert decide([pull(1, carried="chli1", rejected=True)], REQUIRED) == queue.Idle()
 
 
 def test_red_pull_behind_main_is_rebased_not_flagged():
     red = statuses(test="failure", smoke="success")
     action = decide([pull(4, behind=True, checks=red)], REQUIRED)
-    assert isinstance(action, merge_queue.Rebase)
+    assert isinstance(action, queue.Rebase)
 
 
 # --- decide: verdict ---
@@ -85,7 +85,7 @@ def test_red_pull_behind_main_is_rebased_not_flagged():
 def test_red_up_to_date_pull_is_flagged_with_its_failed_checks():
     red = statuses(test="failure", smoke="success")
     action = decide([pull(4, checks=red)], REQUIRED)
-    assert isinstance(action, merge_queue.FlagNeedsFix)
+    assert isinstance(action, queue.FlagNeedsFix)
     assert action.number == 4
     assert TEST in action.comment and "https://ci/test" in action.comment
     assert SMOKE not in action.comment
@@ -94,46 +94,46 @@ def test_red_up_to_date_pull_is_flagged_with_its_failed_checks():
 
 def test_missing_required_context_is_pending():
     action = decide([pull(1, checks=statuses(test="success"))], REQUIRED)
-    assert action == merge_queue.Wait(1)
+    assert action == queue.Wait(1)
 
 
 def test_failure_wins_over_a_missing_context():
     action = decide([pull(1, checks=statuses(test="failure"))], REQUIRED)
-    assert isinstance(action, merge_queue.FlagNeedsFix)
+    assert isinstance(action, queue.FlagNeedsFix)
 
 
 def test_skipped_counts_as_success_and_warning_as_failure():
     skipped = statuses(test="success", smoke="skipped")
-    assert isinstance(decide([pull(1, checks=skipped)], REQUIRED), merge_queue.Merge)
+    assert isinstance(decide([pull(1, checks=skipped)], REQUIRED), queue.Merge)
     warning = statuses(test="success", smoke="warning")
-    assert isinstance(decide([pull(1, checks=warning)], REQUIRED), merge_queue.FlagNeedsFix)
+    assert isinstance(decide([pull(1, checks=warning)], REQUIRED), queue.FlagNeedsFix)
 
 
 def test_required_contexts_are_glob_patterns():
     red = statuses(test="success", smoke="failure")
     action = decide([pull(1, checks=red)], ["build-and-push / *"])
-    assert isinstance(action, merge_queue.FlagNeedsFix)
+    assert isinstance(action, queue.FlagNeedsFix)
 
 
 def test_without_required_contexts_nothing_merges():
-    assert decide([pull(1)], []) == merge_queue.Wait(1)
+    assert decide([pull(1)], []) == queue.Wait(1)
 
 
 # --- decide: merge and approval ---
 
 def test_green_pull_with_a_valid_approval_merges_without_approving():
     action = decide([pull(6)], REQUIRED)
-    assert action == merge_queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0, keep_commits=False)
+    assert action == queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0, keep_commits=False)
 
 
 def test_green_pull_with_only_a_carry_over_is_approved_first():
     action = decide([pull(6, approver=None, carried="chli1")], REQUIRED)
-    assert action == merge_queue.Merge(6, f"{6:040x}", approve_first=True, reviewer="chli1", label_id=0, keep_commits=False)
+    assert action == queue.Merge(6, f"{6:040x}", approve_first=True, reviewer="chli1", label_id=0, keep_commits=False)
 
 
 def test_queue_approval_on_the_head_is_not_repeated():
     action = decide([pull(6, approver=None, carried="chli1", queue_approved=True)], REQUIRED)
-    assert action == merge_queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0, keep_commits=False)
+    assert action == queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0, keep_commits=False)
 
 
 def test_rebase_names_the_human_reviewer_over_the_queue():
@@ -151,30 +151,30 @@ def review(state="APPROVED", login="chli1", official=True, dismissed=False, stal
 
 def test_approver_takes_the_latest_valid_official_approval():
     reviews = [review(login="chli1"), review(login="approver-bot")]
-    assert merge_queue.approver(reviews) == "approver-bot"
+    assert queue.approver(reviews) == "approver-bot"
 
 
 def test_approver_ignores_dismissed_stale_unofficial_and_other_reviews():
     reviews = [review(dismissed=True), review(stale=True), review(official=False),
                review(state="COMMENT"), review(state="REQUEST_CHANGES")]
-    assert merge_queue.approver(reviews) is None
+    assert queue.approver(reviews) is None
 
 
 def test_request_for_changes_counts_per_reviewers_latest_verdict():
-    assert merge_queue.rejected([review(), review(state="REQUEST_CHANGES")])
-    assert not merge_queue.rejected([review(state="REQUEST_CHANGES"), review()])
-    assert not merge_queue.rejected([review(state="REQUEST_CHANGES"), review(dismissed=True)])
-    assert not merge_queue.rejected([review(state="REQUEST_CHANGES", dismissed=True)])
-    assert not merge_queue.rejected([review(state="REQUEST_CHANGES", official=False)])
-    assert merge_queue.rejected([review(state="REQUEST_CHANGES"), review(state="COMMENT")])
+    assert queue.rejected([review(), review(state="REQUEST_CHANGES")])
+    assert not queue.rejected([review(state="REQUEST_CHANGES"), review()])
+    assert not queue.rejected([review(state="REQUEST_CHANGES"), review(dismissed=True)])
+    assert not queue.rejected([review(state="REQUEST_CHANGES", dismissed=True)])
+    assert not queue.rejected([review(state="REQUEST_CHANGES", official=False)])
+    assert queue.rejected([review(state="REQUEST_CHANGES"), review(state="COMMENT")])
 
 
 def test_queue_approval_counts_only_on_the_head_and_undismissed():
     head = "a" * 40
-    assert merge_queue.queue_approved([review(login=QUEUE, official=False, commit_id=head)], head, QUEUE)
-    assert not merge_queue.queue_approved([review(login=QUEUE, commit_id="b" * 40)], head, QUEUE)
-    assert not merge_queue.queue_approved([review(login=QUEUE, dismissed=True, commit_id=head)], head, QUEUE)
-    assert not merge_queue.queue_approved([review(login="chli1", commit_id=head)], head, QUEUE)
+    assert queue.queue_approved([review(login=QUEUE, official=False, commit_id=head)], head, QUEUE)
+    assert not queue.queue_approved([review(login=QUEUE, commit_id="b" * 40)], head, QUEUE)
+    assert not queue.queue_approved([review(login=QUEUE, dismissed=True, commit_id=head)], head, QUEUE)
+    assert not queue.queue_approved([review(login="chli1", commit_id=head)], head, QUEUE)
 
 
 def status_json(context="mergeweasel/approval", state="success", creator=QUEUE,
@@ -184,28 +184,28 @@ def status_json(context="mergeweasel/approval", state="success", creator=QUEUE,
 
 
 def test_carry_over_names_its_reviewer():
-    assert merge_queue.carried_reviewer([status_json()], QUEUE) == "chli1"
+    assert queue.carried_reviewer([status_json()], QUEUE) == "chli1"
 
 
 def test_carry_over_counts_only_from_the_queue_account():
-    assert merge_queue.carried_reviewer([status_json(creator="stranger")], QUEUE) is None
-    assert merge_queue.carried_reviewer([status_json(state="pending")], QUEUE) is None
-    assert merge_queue.carried_reviewer([status_json(context="other")], QUEUE) is None
-    assert merge_queue.carried_reviewer([status_json(description="tampered")], QUEUE) is None
+    assert queue.carried_reviewer([status_json(creator="stranger")], QUEUE) is None
+    assert queue.carried_reviewer([status_json(state="pending")], QUEUE) is None
+    assert queue.carried_reviewer([status_json(context="other")], QUEUE) is None
+    assert queue.carried_reviewer([status_json(description="tampered")], QUEUE) is None
 
 
 def test_carry_over_description_round_trips():
-    description = merge_queue.carry_over_description("chli1", "abcdef0123456789")
-    assert merge_queue.carried_reviewer([status_json(description=description)], QUEUE) == "chli1"
+    description = queue.carry_over_description("chli1", "abcdef0123456789")
+    assert queue.carried_reviewer([status_json(description=description)], QUEUE) == "chli1"
 
 
 def test_without_an_account_any_carry_over_counts():
-    assert merge_queue.carried_reviewer([status_json(creator="someone-else")], None) == "chli1"
+    assert queue.carried_reviewer([status_json(creator="someone-else")], None) == "chli1"
 
 
 def test_without_an_account_no_approval_is_the_queues():
     head = "a" * 40
-    assert not merge_queue.queue_approved([review(login=QUEUE, commit_id=head)], head, None)
+    assert not queue.queue_approved([review(login=QUEUE, commit_id=head)], head, None)
 
 
 def test_without_an_account_every_approver_counts_as_human():
@@ -215,12 +215,12 @@ def test_without_an_account_every_approver_counts_as_human():
 
 def test_the_queues_own_statuses_never_count():
     own = [status_json(), status_json(context="mergeweasel-queue / pass (pull_request_target)", state="failure")]
-    assert merge_queue.statuses_by_context(own, "https://gitea.example") == {}
+    assert queue.statuses_by_context(own, "https://gitea.example") == {}
 
 
 def test_statuses_by_context_makes_links_absolute():
-    by_context = merge_queue.statuses_by_context([status_json(context=TEST)], "https://gitea.example")
-    assert by_context[TEST] == merge_queue.Status(
+    by_context = queue.statuses_by_context([status_json(context=TEST)], "https://gitea.example")
+    assert by_context[TEST] == queue.Status(
         TEST, "success", "https://gitea.example/org/repo/actions/runs/1/jobs/2")
 
 
@@ -234,20 +234,20 @@ def event(kind, login, event_id, label="needs-fix", body="1"):
 
 
 def test_renovate_push_after_the_flag_retries():
-    assert merge_queue.renovate_pushed_since_needs_fix([event("label", QUEUE, 10), event("pull_push", "renovate", 12)])
+    assert queue.renovate_pushed_since_needs_fix([event("label", QUEUE, 10), event("pull_push", "renovate", 12)])
 
 
 def test_older_or_foreign_pushes_retry_nothing():
-    assert not merge_queue.renovate_pushed_since_needs_fix([event("pull_push", "renovate", 8), event("label", QUEUE, 10)])
-    assert not merge_queue.renovate_pushed_since_needs_fix([event("label", QUEUE, 10), event("pull_push", "stranger", 12)])
-    assert not merge_queue.renovate_pushed_since_needs_fix([event("label", QUEUE, 10), event("label", "chli1", 11, label="automerge"),
+    assert not queue.renovate_pushed_since_needs_fix([event("pull_push", "renovate", 8), event("label", QUEUE, 10)])
+    assert not queue.renovate_pushed_since_needs_fix([event("label", QUEUE, 10), event("pull_push", "stranger", 12)])
+    assert not queue.renovate_pushed_since_needs_fix([event("label", QUEUE, 10), event("label", "chli1", 11, label="automerge"),
                                                             event("pull_push", QUEUE, 12)])
-    assert not merge_queue.renovate_pushed_since_needs_fix([event("pull_push", "renovate", 12)])
+    assert not queue.renovate_pushed_since_needs_fix([event("pull_push", "renovate", 12)])
 
 
 def test_needs_fix_to_clear_takes_the_retried_flagged_pulls():
     retried = pull(9, labels=("automerge", "needs-fix"), renovate_retried=True)
-    assert merge_queue.needs_fix_to_clear([retried, pull(8, labels=("automerge", "needs-fix")), pull(7)]) == [retried]
+    assert queue.needs_fix_to_clear([retried, pull(8, labels=("automerge", "needs-fix")), pull(7)]) == [retried]
 
 
 def http_error(code, message):
@@ -304,8 +304,8 @@ def gitea():
 
 
 def given(monkeypatch, pulls):
-    monkeypatch.setattr(merge_queue, "read_state",
-                        lambda gitea, server, account: merge_queue.State("f" * 40, REQUIRED, pulls))
+    monkeypatch.setattr(queue, "read_state",
+                        lambda gitea, server, account: queue.State("f" * 40, REQUIRED, pulls))
 
 
 def test_rebase_sets_the_carry_over_on_the_new_head(monkeypatch, gitea):
@@ -346,7 +346,7 @@ def test_conflict_flags_needs_fix_and_hands_over(monkeypatch, gitea):
     assert writes[1] == ("POST", "/issues/1/labels", {"labels": ["needs-fix"]})
     assert writes[2][1] == "/issues/1/comments" and "conflict" in writes[2][2]["body"]
     assert writes[3] == ("POST", "/pulls/2/update?style=rebase", None)
-    assert action == merge_queue.Rebase(2, "branch-2", f"{2:040x}", "chli1")
+    assert action == queue.Rebase(2, "branch-2", f"{2:040x}", "chli1")
 
 
 def test_every_candidate_failing_ends_the_pass(monkeypatch, gitea):
@@ -356,11 +356,11 @@ def test_every_candidate_failing_ends_the_pass(monkeypatch, gitea):
     action = run_pass(gitea, "https://gitea", dry_run=False)
     flagged = [path for method, path, body in gitea.call.side_effect.writes() if path.endswith("/labels")]
     assert flagged == ["/issues/1/labels", "/issues/2/labels"]
-    assert action == merge_queue.Idle()
+    assert action == queue.Idle()
 
 
 def test_carry_over_survives_a_transient_failure(monkeypatch, gitea):
-    monkeypatch.setattr(merge_queue.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(queue.time, "sleep", lambda seconds: None)
     given(monkeypatch, [pull(3, behind=True)])
     refs = [{"ref": "refs/heads/branch-3", "object": {"sha": "a" * 40}}]
     answers = iter([urllib.error.URLError("timed out"), refs])
@@ -410,7 +410,7 @@ def test_merge_removes_the_automerge_label(monkeypatch, gitea):
 
 def test_keep_commits_label_reaches_the_merge_action():
     action = decide([pull(6, labels=("automerge", "keep-commits"))], REQUIRED)
-    assert action == merge_queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0,
+    assert action == queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0,
                                        keep_commits=True)
 
 
@@ -448,7 +448,7 @@ def test_invalid_title_read_at_merge_time_flags_needs_fix_and_hands_over(monkeyp
     assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
     assert "PR title: subject must read" in writes[1][2]["body"]
     assert "`## Commit` section" in writes[1][2]["body"]
-    assert action == merge_queue.Rebase(7, "branch-7", f"{7:040x}", "chli1")
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", "chli1")
 
 
 def test_keep_commits_with_a_bad_commit_flags_needs_fix(monkeypatch, gitea):
@@ -475,7 +475,7 @@ def test_refused_merge_flags_needs_fix_with_giteas_reason_and_hands_over(monkeyp
     writes = gitea.call.side_effect.writes()
     assert writes[1] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
     assert "Does not have enough approvals" in writes[2][2]["body"]
-    assert action == merge_queue.Rebase(7, "branch-7", f"{7:040x}", "chli1")
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", "chli1")
 
 
 @pytest.mark.parametrize("refusal", [http_error(405, "Please try again later"), http_error(409, "head out of date")])
@@ -485,7 +485,7 @@ def test_transient_merge_refusal_ends_the_pass_quietly(monkeypatch, gitea, refus
     gitea.paged.side_effect = pages()
     action = run_pass(gitea, "https://gitea", dry_run=False)
     assert gitea.call.side_effect.writes() == [("POST", "/pulls/6/merge", squash(6))]
-    assert action == merge_queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0,
+    assert action == queue.Merge(6, f"{6:040x}", approve_first=False, reviewer="chli1", label_id=0,
                                        keep_commits=False)
 
 
@@ -496,7 +496,7 @@ def test_renovate_push_clears_needs_fix_then_runs_the_pass(monkeypatch, gitea):
     action = run_pass(gitea, "https://gitea", dry_run=False)
     writes = gitea.call.side_effect.writes()
     assert writes[0] == ("DELETE", "/issues/9/labels/1", None)
-    assert action == merge_queue.Merge(9, f"{9:040x}", approve_first=False, reviewer="chli1", label_id=0,
+    assert action == queue.Merge(9, f"{9:040x}", approve_first=False, reviewer="chli1", label_id=0,
                                        keep_commits=False)
 
 
@@ -509,7 +509,7 @@ def test_dry_run_writes_nothing(monkeypatch, gitea):
     assert gitea.call.side_effect.writes() == []
     # 1 is flagged (in memory only), 9 had its needs-fix cleared and is green: it merges before
     # 2, which is behind.
-    assert action == merge_queue.Merge(9, f"{9:040x}", approve_first=False, reviewer="chli1", label_id=0, keep_commits=False)
+    assert action == queue.Merge(9, f"{9:040x}", approve_first=False, reviewer="chli1", label_id=0, keep_commits=False)
 
 
 def test_read_state_builds_queued_pulls_from_the_api():
@@ -534,7 +534,7 @@ def test_read_state_builds_queued_pulls_from_the_api():
         "/pulls/8/reviews": [review(state="REQUEST_CHANGES")],
         "/issues/8/timeline": [event("label", QUEUE, 10), event("pull_push", "renovate", 11)],
     }[path]
-    state = merge_queue.read_state(gitea, "https://gitea", QUEUE)
+    state = queue.read_state(gitea, "https://gitea", QUEUE)
     assert state.main_sha == "f" * 40 and state.required == REQUIRED
     assert [p.number for p in state.pulls] == [5, 8]
     queued_pull, flagged_pull = state.pulls
@@ -552,27 +552,27 @@ def run(run_id, status="in_progress", event="workflow_run"):
 
 
 def test_alone_its_the_passes_turn():
-    assert merge_queue.turn([run(7), run(6, "completed")], 7, "workflow_run") == merge_queue.OwnTurn()
+    assert queue.turn([run(7), run(6, "completed")], 7, "workflow_run") == queue.OwnTurn()
 
 
 def test_an_unfinished_older_pass_goes_first():
     runs = [run(7), run(6, "queued"), run(5, "waiting")]
-    assert merge_queue.turn(runs, 7, "push") == merge_queue.AfterOlder(6)
+    assert queue.turn(runs, 7, "push") == queue.AfterOlder(6)
 
 
 def test_a_newer_events_pass_supersedes():
     runs = [run(9, "queued"), run(8), run(7), run(6)]
-    assert merge_queue.turn(runs, 7, "pull_request_target") == merge_queue.Superseded(9)
+    assert queue.turn(runs, 7, "pull_request_target") == queue.Superseded(9)
 
 
 def test_a_finished_newer_pass_supersedes_nothing():
-    assert merge_queue.turn([run(8, "completed"), run(7)], 7, "workflow_run") == merge_queue.OwnTurn()
+    assert queue.turn([run(8, "completed"), run(7)], 7, "workflow_run") == queue.OwnTurn()
 
 
 def test_a_dispatch_neither_supersedes_nor_is_superseded():
-    assert merge_queue.turn([run(8, event="workflow_dispatch"), run(7)], 7, "workflow_run") == merge_queue.OwnTurn()
+    assert queue.turn([run(8, event="workflow_dispatch"), run(7)], 7, "workflow_run") == queue.OwnTurn()
     runs = [run(9), run(8, event="workflow_dispatch"), run(7)]
-    assert merge_queue.turn(runs, 8, "workflow_dispatch") == merge_queue.AfterOlder(7)
+    assert queue.turn(runs, 8, "workflow_dispatch") == queue.AfterOlder(7)
 
 
 def runs_answers(*pages_of_runs):
@@ -582,21 +582,21 @@ def runs_answers(*pages_of_runs):
 
 def test_wait_for_turn_polls_until_the_older_pass_finished(monkeypatch, gitea):
     sleeps = []
-    monkeypatch.setattr(merge_queue.time, "sleep", sleeps.append)
+    monkeypatch.setattr(queue.time, "sleep", sleeps.append)
     gitea.call.side_effect = runs_answers([run(7), run(6)], [run(7), run(6, "completed")])
-    assert merge_queue.wait_for_turn(gitea, 7, "workflow_run")
-    assert sleeps == [merge_queue.TURN_POLL_SECONDS]
+    assert queue.wait_for_turn(gitea, 7, "workflow_run")
+    assert sleeps == [queue.TURN_POLL_SECONDS]
     assert gitea.call.call_args.args == ("GET", "/actions/workflows/mergeweasel-queue.yml/runs?limit=50")
 
 
 def test_wait_for_turn_leaves_to_a_newer_pass_while_waiting(monkeypatch, gitea):
-    monkeypatch.setattr(merge_queue.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(queue.time, "sleep", lambda seconds: None)
     gitea.call.side_effect = runs_answers([run(7), run(6)], [run(8, "queued"), run(7), run(6)])
-    assert not merge_queue.wait_for_turn(gitea, 7, "workflow_run")
+    assert not queue.wait_for_turn(gitea, 7, "workflow_run")
 
 
 def test_every_needs_fix_comment_names_mergeweasel():
     red = pull(1, checks=statuses(test="failure", smoke="success"))
-    comments = [merge_queue.failure_comment(red, REQUIRED), merge_queue.conflict_comment(),
-                merge_queue.refused_comment("no"), merge_queue.invalid_message_comment(["bad"], False)]
+    comments = [queue.failure_comment(red, REQUIRED), queue.conflict_comment(),
+                queue.refused_comment("no"), queue.invalid_message_comment(["bad"], False)]
     assert all(comment.startswith("mergeweasel: ") for comment in comments)
