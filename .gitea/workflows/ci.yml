@@ -72,14 +72,17 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u chli1 --password-stdin
+      # A Docker daemon can serve several jobs at once, so the registry names are shared: each exists
+      # only around its own push, and the cleanup removes nothing but this run's image.
       - name: Push X.Y.Z and latest
         run: |
           for tag in ${{ steps.version.outputs.version }} latest; do
             docker tag "$IMAGE" "$REGISTRY_IMAGE:$tag"
             docker push "$REGISTRY_IMAGE:$tag"
+            docker rmi "$REGISTRY_IMAGE:$tag"
           done
-      - name: Log out and remove the images
+      - name: Log out and remove the image
         if: always()
         run: |
           docker logout ghcr.io || true
-          docker rmi -f "$IMAGE" "$REGISTRY_IMAGE:${{ steps.version.outputs.version }}" "$REGISTRY_IMAGE:latest" || true
+          docker rmi -f "$IMAGE" || true
