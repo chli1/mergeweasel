@@ -32,6 +32,10 @@ def queue_pass(server, repository, dry_run):
             print(f"cannot read the queue account from MERGEWEASEL_TOKEN: {reason} - check the token, "
                   "e.g. missing scope read:user", file=sys.stderr)
             return 1
+        # Without its own login the pass would accept any carry-over as genuine.
+        if not account:
+            print("the account of MERGEWEASEL_TOKEN has no login", file=sys.stderr)
+            return 1
     elif dry_run:
         # CI's dry run has only the run token, which belongs to no account.
         gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))

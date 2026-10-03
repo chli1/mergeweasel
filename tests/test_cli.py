@@ -137,3 +137,13 @@ def test_a_failed_account_read_shows_giteas_reason(env, fake, capsys):
     assert cli.main(["pass"]) == 1
     err = capsys.readouterr().err
     assert "token is expired" in err and "e.g. missing scope read:user" in err
+
+
+@pytest.mark.parametrize("login", ["", None])
+def test_a_token_without_a_login_fails_the_pass(env, fake, capsys, login):
+    env.setenv("MERGEWEASEL_TOKEN", "pat")
+    built, client, run_pass = fake
+    client.own_login.return_value = login
+    assert cli.main(["pass"]) == 1
+    assert "no login" in capsys.readouterr().err
+    run_pass.assert_not_called()
