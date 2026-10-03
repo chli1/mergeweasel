@@ -1,0 +1,41 @@
+name: mergeweasel-queue
+on:
+  # pull_request_target: the workflow and the pinned image come from main.
+  pull_request_target:
+    branches: [main]
+    # No synchronize: a push starts the checks, whose completion (workflow_run) wakes the queue.
+    # closed: a merge moves the next pull request up.
+    types: [labeled, unlabeled, closed]
+  # The "checks finished" wake-up: the CI workflows whose results branch protection requires, and
+  # mergeweasel-commits. Never this workflow itself - it would wake itself.
+  workflow_run:
+    workflows: [ci, mergeweasel-commits]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report the decision; change nothing'
+        type: boolean
+        default: false
+# One pass at a time, serialized by mergeweasel itself, not by a concurrency group: Gitea reports
+# the runs such a group replaces as failed on their commit.
+jobs:
+  pass:
+    runs-on: ubuntu-latest
+    # A hung pass would otherwise hold every later pass, and every merge.
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/chli1/mergeweasel:0.1.0
+    steps:
+      - name: Run one queue pass
+        if: ${{ !inputs.dry_run }}
+        env:
+          # Not the run token: Gitea starts no workflow for the Actions bot's pushes, so the checks
+          # would never run on a rebase.
+          MERGEWEASEL_TOKEN: ${{ secrets.MERGEWEASEL_TOKEN }}
+        run: mergeweasel pass
+      - name: Run one queue pass (dry run)
+        if: ${{ inputs.dry_run }}
+        env:
+          MERGEWEASEL_TOKEN: ${{ secrets.MERGEWEASEL_TOKEN }}
+        run: mergeweasel pass --dry-run

@@ -1,0 +1,83 @@
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ['v*']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Tests
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet -r requirements-test.txt
+          .venv/bin/python -m pytest
+  image:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: mergeweasel:ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build the image
+        run: docker build -t "$IMAGE" .
+      # The event goes in on stdin: the job and the Docker daemon share no file system path.
+      - name: The built image checks this pull request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          docker run --rm -i -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_TOKEN "$IMAGE"
+          mergeweasel check-commits --event /dev/stdin < "$GITHUB_EVENT_PATH"
+      # The run token only, never the queue token: a dry run that writes by mistake must fail.
+      - name: The built image dry-runs a pass
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          docker run --rm -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_TOKEN "$IMAGE"
+          mergeweasel pass --dry-run
+      - name: Remove the image
+        if: always()
+        run: docker rmi -f "$IMAGE"
+  release:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: mergeweasel:release-${{ github.run_id }}
+      REGISTRY_IMAGE: ghcr.io/chli1/mergeweasel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      # Only reviewed code is published, and `latest` stays the newest release on main.
+      - name: Check the tag is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Read the version from the tag
+        id: version
+        run: |
+          if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "not a release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Build the image
+        run: >-
+          docker build -t "$IMAGE"
+          --label org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          --label org.opencontainers.image.revision=$GITHUB_SHA .
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u chli1 --password-stdin
+      - name: Push X.Y.Z and latest
+        run: |
+          for tag in ${{ steps.version.outputs.version }} latest; do
+            docker tag "$IMAGE" "$REGISTRY_IMAGE:$tag"
+            docker push "$REGISTRY_IMAGE:$tag"
+          done
+      - name: Log out and remove the images
+        if: always()
+        run: |
+          docker logout ghcr.io || true
+          docker rmi -f "$IMAGE" "$REGISTRY_IMAGE:${{ steps.version.outputs.version }}" "$REGISTRY_IMAGE:latest" || true

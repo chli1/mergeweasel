@@ -1,0 +1,9 @@
+# Allowlist of the image inputs. The release rule (docs/design.md, "Releases") reads it: a commit
+# touching none of these, nor the Dockerfile or this file, releases nothing. Keep the order - `*`,
+# then `!` re-includes, then excludes inside them.
+*
+!pyproject.toml
+!LICENSE
+!src
+**/__pycache__
+**/*.egg-info
