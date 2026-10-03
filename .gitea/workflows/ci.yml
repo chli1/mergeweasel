@@ -69,7 +69,9 @@ jobs:
           --label org.opencontainers.image.version=${{ steps.version.outputs.version }}
           --label org.opencontainers.image.revision=$GITHUB_SHA .
       - name: Log in to ghcr.io
-        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u chli1 --password-stdin
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u chli1 --password-stdin
       - name: Push X.Y.Z and latest
         run: |
           for tag in ${{ steps.version.outputs.version }} latest; do
