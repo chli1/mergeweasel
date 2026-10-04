@@ -56,8 +56,8 @@ The file and workflow names stay as they are: the pass finds its own runs and st
 
 ## Server setting
 
-With `ADD_CO_COMMITTER_TRAILERS` on, Gitea appends a `Co-authored-by` trailer to every squash the
-queue makes. To keep the commit messages as written, set in Gitea's `app.ini`:
+By default Gitea appends a `Co-authored-by` trailer to every squash the queue makes. mergeweasel
+works either way; to keep the commit messages exactly as written, set in Gitea's `app.ini`:
 
 ```ini
 [repository.pull-request]

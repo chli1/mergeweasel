@@ -41,6 +41,28 @@ jobs:
       - name: Remove the image
         if: always()
         run: docker rmi -f "$IMAGE"
+  e2e:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build the image
+        run: docker build -t "$MERGEWEASEL_E2E_IMAGE" .
+      # The test starts its own Gitea and runs passes of the built image against it.
+      - name: End-to-end test
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet -r requirements-test.txt
+          .venv/bin/python -m pytest e2e
+      # pytest removes its Gitea itself; this covers a pytest that died before its cleanup.
+      - name: Remove the containers and images
+        if: always()
+        run: |
+          docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" || true
+          docker rmi -f "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" "$MERGEWEASEL_E2E_IMAGE" || true
   release:
     if: github.event_name == 'push'
     needs: test

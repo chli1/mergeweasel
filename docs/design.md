@@ -179,7 +179,9 @@ bumping the image pin, never releases, so release and pin bump cannot loop. The 
 
 ## Gitea behaviour relied on
 
-Verified against Gitea v28.
+Verified against Gitea v28. The end-to-end test (`e2e/`) exercises stale approvals, the rebase, the
+squash and the refs against the Gitea version pinned in `e2e/gitea.Dockerfile` - a version bump that
+breaks one of them fails there first.
 
 - **Stale approvals**: with `dismiss_stale_approvals`, a push dismisses approvals only if the pull
   request's diff against the new merge base changed - so a rebase dismisses them exactly when a
@@ -194,8 +196,8 @@ Verified against Gitea v28.
 - **Rebase**: `POST pulls/{n}/update?style=rebase` answers `409` on a conflict.
 - **Squash**: `POST pulls/{n}/merge` with `Do: squash`, `MergeTitleField` and `MergeMessageField`
   produces exactly that message. The author is the pull request's poster, the committer the merging
-  account. With the server setting `ADD_CO_COMMITTER_TRAILERS` on, Gitea appends a `Co-authored-by`
-  trailer to every queue merge.
+  account. By default (the server setting `ADD_CO_COMMITTER_TRAILERS`), Gitea appends a
+  `Co-authored-by` trailer to every queue merge.
 - **Merge refusal**: `405` with "Please try again later" while the mergeable check still runs; `409`
   when `head_commit_id` no longer is the head.
 - **Refs**: `GET git/refs/heads/<branch>` matches by prefix and reads the repository directly, unlike
