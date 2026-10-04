@@ -3,9 +3,10 @@ on:
   # pull_request_target: the workflow and the pinned image come from main.
   pull_request_target:
     branches: [main]
-    # No synchronize: a push starts the checks, whose completion (workflow_run) wakes the queue.
+    # No synchronize: a push starts the checks, whose completion (workflow_run) wakes the queue. No
+    # labeled or unlabeled: a label change re-runs mergeweasel-commits, whose completion wakes it.
     # closed: a merge moves the next pull request up.
-    types: [labeled, unlabeled, closed]
+    types: [closed]
   # The "checks finished" wake-up: the CI workflows whose results branch protection requires, and
   # mergeweasel-commits. Never this workflow itself - it would wake itself.
   workflow_run:

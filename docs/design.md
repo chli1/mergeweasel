@@ -71,8 +71,9 @@ finished check run wakes the queue, so no schedule is needed. An approval wakes 
 ### Steps
 
 0. A `needs-fix` pull request whose timeline shows a push by `renovate` after the latest
-   `needs-fix` label loses the label; the pass continues. Renovate's rebase retries a failed update
-   without a human.
+   `needs-fix` label loses the label. Renovate's rebase retries a failed update without a human.
+   The removal re-runs `mergeweasel-commits`, so the pass forgets that pull request's statuses: it
+   waits (or is rebased, if behind) until that run's completion wakes the queue again.
 1. Read `main`'s head and the open pull requests.
 2. Candidate: the lowest-numbered queued pull request that is up to date, else the lowest-numbered
    queued one; none - stop. Preferring up-to-date ones keeps the pull request in flight in place.
@@ -202,7 +203,9 @@ Consumers pin an exact version.
 Release rule (#2): at the start of every pass the queue tags `main`'s head if commits since the
 last `vX.Y.Z` tag touched an image input - the `Dockerfile`, the `.dockerignore`, or a path its
 allowlist lets through, so a base image bump releases too. The bump comes from their types: `!`
-major, `feat` minor, anything else patch. A commit touching only workflows, such as Renovate
+major, `feat` minor, anything else patch. A change that needs consumers to update their copies of
+`mergeweasel-*.yml` is breaking (`!`) - Renovate bumps only the image pin; an optional workflow
+change is named in the commit body. A commit touching only workflows, such as Renovate
 bumping the image pin, never releases, so release and pin bump cannot loop. The tags are lightweight; `v0.1.0` is set by hand, and the first `!` change makes `1.0.0`.
 
 ## Gitea behaviour relied on

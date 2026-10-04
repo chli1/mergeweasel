@@ -510,7 +510,10 @@ def run_pass(gitea, server, dry_run, merger, approvers):
         print(f"#{retry.number}: {RENOVATE_ACCOUNT} pushed, removing {NEEDS_FIX}")
         if not dry_run:
             gitea.call("DELETE", f"/issues/{retry.number}/labels/{retry.labels[NEEDS_FIX]}")
-        pulls = relabel(pulls, retry.number, remove=NEEDS_FIX)
+        # The removal re-runs mergeweasel-commits, a required check: the statuses read above are
+        # stale, so the pull request waits this pass out. That run's completion wakes the queue again.
+        pulls = [dataclasses.replace(pull, statuses={}) if pull.number == retry.number else pull
+                 for pull in relabel(pulls, retry.number, remove=NEEDS_FIX)]
     while True:
         action = decide(pulls, state.required, state.needed, logins)
         print(action)

@@ -582,14 +582,22 @@ def test_transient_merge_refusal_ends_the_pass_quietly(monkeypatch, gitea, refus
     assert action == merge_action(6)
 
 
-def test_renovate_push_clears_needs_fix_then_runs_the_pass(monkeypatch, gitea):
+def test_renovate_push_clears_needs_fix_and_waits_for_the_rerun_checks(monkeypatch, gitea):
     given(monkeypatch, [pull(9, labels=("automerge", "needs-fix"), renovate_retried=True)])
-    gitea.call.side_effect = FakeResponses(pull_answer(9))
-    gitea.paged.side_effect = pages()
+    gitea.call.side_effect = FakeResponses({})
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[0] == ("DELETE", "/issues/9/labels/1", None)
-    assert action == merge_action(9)
+    assert gitea.call.side_effect.writes() == [("DELETE", "/issues/9/labels/1", None)]
+    assert action == queue.Wait(9)
+
+
+def test_cleared_pull_behind_main_is_rebased(monkeypatch, gitea):
+    given(monkeypatch, [pull(9, labels=("automerge", "needs-fix"), behind=True, renovate_retried=True)])
+    gitea.call.side_effect = FakeResponses({
+        ("GET", "/git/refs/heads/branch-9"): [{"ref": "refs/heads/branch-9", "object": {"sha": "a" * 40}}],
+    })
+    action = run_pass(gitea, "https://gitea", dry_run=False)
+    assert ("POST", "/pulls/9/update?style=rebase", None) in gitea.call.side_effect.writes()
+    assert isinstance(action, queue.Rebase)
 
 
 def test_dry_run_writes_nothing(monkeypatch, gitea):
@@ -599,9 +607,9 @@ def test_dry_run_writes_nothing(monkeypatch, gitea):
     gitea.call.side_effect = FakeResponses({})
     action = run_pass(gitea, "https://gitea", dry_run=True)
     assert gitea.call.side_effect.writes() == []
-    # 1 is flagged (in memory only), 9 had its needs-fix cleared and is green: it merges before
-    # 2, which is behind.
-    assert action == merge_action(9)
+    # 1 is flagged (in memory only), 9 had its needs-fix cleared and waits for its re-run checks
+    # ahead of 2, which is behind.
+    assert action == queue.Wait(9)
 
 
 def test_dry_run_with_unknown_approvers_assumes_enough(monkeypatch, gitea):

@@ -64,7 +64,7 @@ Copy `mergeweasel-queue.yml` and `mergeweasel-commits.yml` from this repository'
 [`.gitea/workflows/`](../.gitea/workflows/) into yours, unchanged, except:
 
 - the `workflow_run` list in `mergeweasel-queue.yml`, which names the workflows of your CI plus
-  `mergeweasel-commits` - their completion wakes the queue;
+  `mergeweasel-commits` - their completion wakes the queue, after a label change too;
 - the image tag, which pins an exact version.
 
 The file and workflow names stay as they are: the pass finds its own runs and statuses by them.

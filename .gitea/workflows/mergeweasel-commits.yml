@@ -4,7 +4,8 @@ on:
   pull_request:
     branches: [main]
     # edited: the title and the ## Commit section are the squash commit; labeled/unlabeled:
-    # keep-commits switches what is checked.
+    # keep-commits switches what is checked, and every label change wakes the queue through this
+    # run's completion - narrowing them leaves automerge and needs-fix changes unnoticed.
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 jobs:
   check:
