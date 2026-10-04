@@ -57,5 +57,5 @@ a new package needs its visibility set to public once.
 
 The repository needs two secrets:
 
-- `MERGEWEASEL_TOKEN` - the queue account's token ([onboarding](docs/onboarding.md#the-queue-account));
+- `MERGEWEASEL_TOKEN` - the queue account's token ([onboarding](docs/onboarding.md#the-accounts));
 - `GHCR_TOKEN` - a GitHub token with `write:packages` for the push to ghcr.io.

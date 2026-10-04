@@ -19,17 +19,17 @@ picks the next queued pull request and takes one step:
 1. Behind `main`: rebase it onto `main`, and keep its approval - Gitea may dismiss it on the rebase.
 2. Checks still running: wait for the next pass.
 3. A required check failed: flag it `needs-fix` with the failed checks, and move on to the next one.
-4. Green: approve it if the rebase cost it its approval, merge it, and remove `automerge`.
+4. Green: restore the approvals the rebase cost it, merge it, and remove `automerge`.
 
 The details, and the Gitea behaviour they rest on: [docs/design.md](docs/design.md).
 
 ## Quick start
 
-1. Create an account for the queue and a token for it -
-   [the queue account](docs/onboarding.md#the-queue-account).
-2. Store the token as the repository secret `MERGEWEASEL_TOKEN` and create the labels -
-   [labels](docs/onboarding.md#labels).
-3. Protect `main`: required checks, approvals, only the queue may merge -
+1. Create the merger and approver accounts and their tokens -
+   [the accounts](docs/onboarding.md#the-accounts).
+2. Store the tokens as the repository secrets `MERGEWEASEL_MERGER_TOKEN` and
+   `MERGEWEASEL_APPROVER_TOKENS` and create the labels - [labels](docs/onboarding.md#labels).
+3. Protect `main`: required checks, approvals, only the merger may merge -
    [branch protection](docs/onboarding.md#branch-protection).
 4. Copy the two workflows - [the workflows](docs/onboarding.md#the-workflows).
 5. Approve a pull request, then label it `automerge` - [usage](docs/usage.md).

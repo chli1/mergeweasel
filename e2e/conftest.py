@@ -23,6 +23,10 @@ ORPHAN_AGE = datetime.timedelta(hours=1)
 PASS_TIMEOUT_SECONDS = 300
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "required_approvals(n): the repository's required approvals, 1 by default")
+
+
 @dataclasses.dataclass(frozen=True)
 class Gitea:
     url: str
@@ -110,24 +114,27 @@ def accounts(url):
 
 @pytest.fixture
 def repo(gitea, request):
-    return create_repo(gitea.clients, request.node.name)
+    marker = request.node.get_closest_marker("required_approvals")
+    return create_repo(gitea.clients, request.node.name, required_approvals=marker.args[0] if marker else 1)
 
 
 @pytest.fixture
 def run_pass(gitea, image, repo):
-    def run(mergeable=None):
+    def run(mergeable=None, approvers=("queue",)):
         """One pass of the image under test, as mergeweasel-queue.yml runs it.
 
         No GITHUB_RUN_ID: there is no other pass to wait for. `mergeable` names a pull request whose
         mergeable check must settle first - otherwise Gitea defers the merge to a later pass.
+        `approvers` default: the merger's own token, one account in both roles.
         """
         if mergeable is not None:
             eventually(lambda: repo.pull(mergeable)["mergeable"])
         environment = {**os.environ, "GITHUB_SERVER_URL": gitea.url, "GITHUB_REPOSITORY": repo.name,
-                       "MERGEWEASEL_TOKEN": gitea.tokens["queue"]}
+                       "MERGEWEASEL_MERGER_TOKEN": gitea.tokens["queue"],
+                       "MERGEWEASEL_APPROVER_TOKENS": "\n".join(gitea.tokens[account] for account in approvers)}
         result = subprocess.run(
             ["docker", "run", "--rm", "--label", LABEL, "--env", "GITHUB_SERVER_URL", "--env", "GITHUB_REPOSITORY",
-             "--env", "MERGEWEASEL_TOKEN", image, "mergeweasel", "pass"],
+             "--env", "MERGEWEASEL_MERGER_TOKEN", "--env", "MERGEWEASEL_APPROVER_TOKENS", image, "mergeweasel", "pass"],
             env=environment, capture_output=True, text=True, timeout=PASS_TIMEOUT_SECONDS)
         # pytest shows it with a failing test: what the pass decided.
         print(f"pass:\n{result.stdout}{result.stderr}")

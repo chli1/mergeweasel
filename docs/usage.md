@@ -4,8 +4,8 @@ For pull request authors in a repository that runs mergeweasel.
 
 ## The labels
 
-- **`automerge`** - queue the pull request: approve it first, then set the label - an approval
-  alone does not wake the queue. It lands once its checks pass. Removing the label withdraws it,
+- **`automerge`** - queue the pull request: approve it first if the repository requires approvals,
+  then set the label - an approval alone does not wake the queue. It lands once its checks pass. Removing the label withdraws it,
   mid-check included.
 - **`needs-fix`** - set by mergeweasel, always with a comment that says why. Fix the cause, then
   remove the label to queue the pull request again. A push by Renovate removes it by itself.

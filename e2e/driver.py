@@ -8,10 +8,10 @@ import urllib.parse
 import urllib.request
 
 ADMIN = "root"
-# renovate is mergeweasel's fixed Renovate account; ci posts the required status.
-ACCOUNTS = ("queue", "reviewer", "author", "ci", "renovate")
+# renovate is mergeweasel's fixed Renovate account; ci posts the required status; queue is the merger.
+ACCOUNTS = ("queue", "reviewer", "reviewer2", "approver1", "approver2", "author", "ci", "renovate")
 PASSWORD = "e2e-password-1"
-# The queue's scopes from docs/onboarding.md; the other accounts get the same.
+# The merger's scopes from docs/onboarding.md; the other accounts get the same.
 TOKEN_SCOPES = ["write:repository", "write:issue", "read:user"]
 ORGANIZATION = "e2e"
 LABELS = ("automerge", "needs-fix", "keep-commits")
@@ -61,7 +61,7 @@ def eventually(probe, timeout=TIMEOUT_SECONDS, interval=0.5):
         time.sleep(interval)
 
 
-def create_repo(clients, name):
+def create_repo(clients, name, required_approvals=1):
     """A repository set up as docs/onboarding.md describes, with issue #1 for the titles to refer to."""
     admin = clients[ADMIN]
     admin.call("POST", f"/orgs/{ORGANIZATION}/repos", {"name": name, "auto_init": True, "default_branch": "main"})
@@ -76,9 +76,9 @@ def create_repo(clients, name):
     admin.call("POST", f"{path}/branch_protections", {
         "rule_name": "main",
         "enable_status_check": True, "status_check_contexts": [REQUIRED_CONTEXT],
-        "required_approvals": 1, "enable_approvals_whitelist": True,
+        "required_approvals": required_approvals, "enable_approvals_whitelist": True,
         # Singular: Gitea ignores approvals_whitelist_usernames.
-        "approvals_whitelist_username": ["reviewer", "queue"],
+        "approvals_whitelist_username": ["reviewer", "reviewer2", "queue", "approver1", "approver2"],
         "dismiss_stale_approvals": True, "block_on_outdated_branch": True,
         "enable_merge_whitelist": True, "merge_whitelist_usernames": ["queue"],
         # The admin moves main in the scenarios; everyone else lands through the queue.
@@ -127,8 +127,8 @@ class Repo:
     def post_status(self, sha, state, target_url=""):
         self.call("ci", "POST", f"/statuses/{sha}", {"state": state, "context": REQUIRED_CONTEXT, "target_url": target_url})
 
-    def approve(self, number):
-        self.call("reviewer", "POST", f"/pulls/{number}/reviews", {"event": "APPROVED", "body": "Looks good."})
+    def approve(self, number, account="reviewer"):
+        self.call(account, "POST", f"/pulls/{number}/reviews", {"event": "APPROVED", "body": "Looks good."})
 
     def add_label(self, account, number, name):
         self.call(account, "POST", f"/issues/{number}/labels", {"labels": [name]})

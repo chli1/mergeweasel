@@ -23,8 +23,9 @@ Both exit with 0 when done or passed, and 1 when they fail.
 |---|---|---|
 | `GITHUB_SERVER_URL` | Gitea Actions | both commands - the Gitea server |
 | `GITHUB_REPOSITORY` | Gitea Actions | both commands - `owner/repository` |
-| `MERGEWEASEL_TOKEN` | the workflow, from the secret | `pass` - required, except for `--dry-run`; the queue reads its own account from it |
-| `GITHUB_TOKEN` | the workflow, from the run token | `check-commits`; `pass --dry-run` without `MERGEWEASEL_TOKEN` - the queue account is then unknown and any carry-over counts |
+| `MERGEWEASEL_MERGER_TOKEN` | the workflow, from the secret | `pass` - required, except for `--dry-run`; the merger rebases, writes the carry-over and merges |
+| `MERGEWEASEL_APPROVER_TOKENS` | the workflow, from the secret | `pass` - optional, one token per line; the approver accounts restore the approvals a rebase dismissed. `--dry-run` without it assumes enough |
+| `GITHUB_TOKEN` | the workflow, from the run token | `check-commits`; `pass --dry-run` without `MERGEWEASEL_MERGER_TOKEN` - the merger is then unknown and any carry-over counts |
 | `GITHUB_RUN_ID`, `GITHUB_EVENT_NAME` | Gitea Actions | `pass` - serializes the passes; without `GITHUB_RUN_ID` it does not wait |
 
 ## Image
@@ -43,5 +44,5 @@ Both exit with 0 when done or passed, and 1 when they fail.
 | Scope | optional; non-empty and without whitespace |
 | `## Commit` lines | at most 72 characters, unless without whitespace |
 | Workflows | `mergeweasel-queue.yml` (workflow `mergeweasel-queue`), `mergeweasel-commits.yml` (workflow `mergeweasel-commits`) |
-| Carry-over status | context `mergeweasel/approval` |
+| Carry-over status | context `mergeweasel/approval`; description `approved at <old head>`, then one line `approved by <login>` per reviewer |
 | API calls | 30 s timeout; reading a rebased head and writing the carry-over tried 3 times, 5 s apart |

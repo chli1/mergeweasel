@@ -7,7 +7,10 @@ import urllib.error
 from mergeweasel import check, queue
 from mergeweasel.gitea import Gitea, error_message
 
-UNKNOWN_ACCOUNT = "queue account unknown, carry-over assumed genuine"
+MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
+APPROVER_TOKENS = "MERGEWEASEL_APPROVER_TOKENS"
+UNKNOWN_MERGER = "merger account unknown, carry-over assumed genuine"
+UNKNOWN_APPROVERS = "approver accounts unknown, assuming enough"
 
 
 class EnvironmentMissing(Exception):
@@ -21,34 +24,73 @@ def required(name):
     return value
 
 
+class TokenProblem(Exception):
+    pass
+
+
+def account_login(client, source):
+    """The login behind a token; source names the token in an error, never its value."""
+    try:
+        login = client.own_login()
+    except (OSError, LookupError, ValueError) as error:
+        if isinstance(error, urllib.error.HTTPError):
+            reason = error_message(error)
+        elif isinstance(error, ValueError):
+            # http.client quotes an invalid header, the token included.
+            reason = "the token or Gitea's answer is malformed"
+        else:
+            reason = error
+        raise TokenProblem(f"cannot read the account of {source}: {reason} - check the token, "
+                           "e.g. missing scope read:user") from error
+    # Without a login the pass could not tell the merger's carry-over or an approver's approval.
+    if not login:
+        raise TokenProblem(f"the account of {source} has no login")
+    return login
+
+
+def approver_clients(server, repository, text):
+    """One client per approver token, keyed by its login, in the secret's order."""
+    clients = {}
+    tokens = [line.strip() for line in text.splitlines() if line.strip()]
+    for position, token in enumerate(tokens, start=1):
+        source = f"token {position} of {APPROVER_TOKENS}"
+        client = Gitea(server, repository, token)
+        login = account_login(client, source)
+        if login in clients:
+            raise TokenProblem(f"{source} belongs to {login} again - Gitea counts one approval per account")
+        clients[login] = client
+    return clients
+
+
 def queue_pass(server, repository, dry_run):
-    token = os.environ.get("MERGEWEASEL_TOKEN", "")
-    if token:
-        gitea = Gitea(server, repository, token)
-        try:
-            account = gitea.own_login()
-        except (OSError, LookupError, ValueError) as error:
-            reason = error_message(error) if isinstance(error, urllib.error.HTTPError) else error
-            print(f"cannot read the queue account from MERGEWEASEL_TOKEN: {reason} - check the token, "
-                  "e.g. missing scope read:user", file=sys.stderr)
+    token = os.environ.get(MERGER_TOKEN, "").strip()
+    approver_tokens = os.environ.get(APPROVER_TOKENS, "")
+    try:
+        if token:
+            gitea = Gitea(server, repository, token)
+            merger = account_login(gitea, MERGER_TOKEN)
+        elif dry_run:
+            # CI's dry run has only the run token, which belongs to no account.
+            gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))
+            merger = None
+            print(UNKNOWN_MERGER)
+        else:
+            print(f"{MERGER_TOKEN} is not set", file=sys.stderr)
             return 1
-        # Without its own login the pass would accept any carry-over as genuine.
-        if not account:
-            print("the account of MERGEWEASEL_TOKEN has no login", file=sys.stderr)
-            return 1
-    elif dry_run:
-        # CI's dry run has only the run token, which belongs to no account.
-        gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))
-        account = None
-        print(UNKNOWN_ACCOUNT)
-    else:
-        print("MERGEWEASEL_TOKEN is not set", file=sys.stderr)
+        if approver_tokens.strip() or not dry_run:
+            approvers = approver_clients(server, repository, approver_tokens)
+            print(f"approvers: {', '.join(approvers) or 'none'}")
+        else:
+            approvers = None
+            print(UNKNOWN_APPROVERS)
+    except TokenProblem as problem:
+        print(problem, file=sys.stderr)
         return 1
     # Unset outside Actions: a local run has no other pass to wait for.
     own_id = os.environ.get("GITHUB_RUN_ID")
     if own_id and not queue.wait_for_turn(gitea, int(own_id), os.environ.get("GITHUB_EVENT_NAME", "")):
         return 0
-    queue.run_pass(gitea, server, dry_run, account)
+    queue.run_pass(gitea, server, dry_run, merger, approvers)
     return 0
 
 

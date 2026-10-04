@@ -1,9 +1,11 @@
-"""Real passes of the image under test against a throwaway Gitea: the seven scenarios of issue #4.
+"""Real passes of the image under test against a throwaway Gitea.
 
 The test plays the author, the reviewer, CI and Renovate; the pass does the rest. Comment texts are
 asserted only for the cause they name - their wording is the unit tests' business.
 """
-from driver import eventually
+import pytest
+
+from driver import ApiError, eventually
 
 TITLE = "feat: add a (#1)"
 BODY = "Adds a.\n\n## Commit\n\n- adds a\n"
@@ -70,7 +72,7 @@ def test_rebase_carries_the_approval_over(repo, run_pass):
                         if review["user"]["login"] == "reviewer" and review["dismissed"]])
     carry_over = [(status["status"], status["creator"]["login"], status["description"])
                   for status in repo.statuses(new_head) if status["context"] == "mergeweasel/approval"]
-    assert carry_over == [("success", "queue", f"approved by reviewer at {old_head[:7]}")]
+    assert carry_over == [("success", "queue", f"approved at {old_head[:7]}\napproved by reviewer")]
     assert not repo.pull(number)["merged"]
 
     repo.post_status(new_head, "success")
@@ -141,3 +143,43 @@ def test_renovate_push_clears_needs_fix(repo, run_pass):
     assert repo.labels(number) == {"automerge"}
     # The new head has no ci/test yet: pending, not merged.
     assert not repo.pull(number)["merged"]
+
+
+@pytest.mark.required_approvals(2)
+def test_rebase_restores_two_approvals_through_two_approvers(repo, run_pass):
+    approvers = ("approver1", "approver2")
+    repo.move_main({"a.txt": LINES}, "feat: add a (#1)")
+    repo.commit("author", "main", {"a.txt": changed(1, "first")}, "change the first line", new_branch="first-line")
+    number = repo.open_pull("author", "first-line", "feat: change the first line (#1)", BODY)
+    repo.post_status(repo.head(number), "success")
+    repo.approve(number)
+    repo.approve(number, account="reviewer2")
+    repo.add_label("author", number, "automerge")
+    old_head = repo.head(number)
+    repo.move_main({"a.txt": changed(10, "last")}, "feat: change the last line (#1)")
+
+    run_pass(mergeable=number, approvers=approvers)
+
+    new_head = eventually(lambda: (head := repo.head(number)) != old_head and head)
+    eventually(lambda: len([review for review in repo.reviews(number)
+                            if review["user"]["login"] in ("reviewer", "reviewer2") and review["dismissed"]]) == 2)
+    carry_over = [status["description"] for status in repo.statuses(new_head) if status["context"] == "mergeweasel/approval"]
+    assert carry_over == [f"approved at {old_head[:7]}\napproved by reviewer\napproved by reviewer2"]
+
+    repo.post_status(new_head, "success")
+    eventually(lambda: repo.pusher(number, new_head))
+    run_pass(mergeable=number, approvers=approvers)
+
+    assert repo.pull(number)["merged"]
+    restored = {review["user"]["login"] for review in repo.reviews(number)
+                if review["state"] == "APPROVED" and review["commit_id"] == new_head and not review["dismissed"]}
+    assert restored == set(approvers)
+
+
+def test_gitea_refuses_approving_ones_own_pull(repo):
+    # The approver choice skips the poster because of it.
+    repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
+    number = repo.open_pull("author", "add-a", TITLE, BODY)
+    with pytest.raises(ApiError) as refusal:
+        repo.approve(number, account="author")
+    assert refusal.value.code == 422

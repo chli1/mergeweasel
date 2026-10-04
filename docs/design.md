@@ -53,9 +53,11 @@ finished check run wakes the queue, so no schedule is needed. An approval wakes 
 - **Queued**: open, base `main`, not a draft, label `automerge`, no label `needs-fix`, no standing
   request for changes (an official reviewer's latest verdict is an undismissed `REQUEST_CHANGES`),
   and approved.
-- **Approved**: a valid official approval (`APPROVED`, not dismissed, not stale), or an approval
-  carry-over on the current head. An unapproved pull request with `automerge` waits; it is not
-  flagged.
+- **Approved**: the reviewers whose approval stands - valid official approvals (`APPROVED`, not
+  dismissed, not stale) and the reviewers of an approval carry-over on the current head, each login
+  once - reach `required_approvals` of `main`'s branch protection, read from `GET branches/main`.
+  With 0 required, `automerge` alone queues a pull request: setting it is the equivalent of
+  pressing merge. A pull request with too few waits; it is not flagged.
 - **Up to date**: `GET compare/{head}...{main}` reports no commits. Not the pull request's
   `merge_base`, which Gitea updates asynchronously after a push.
 - **Green, red, pending**: Gitea's own rule over the latest status per context and the required
@@ -82,21 +84,37 @@ finished check run wakes the queue, so no schedule is needed. An approval wakes 
    decide.
 5. Up to date and pending: stop.
 6. Up to date and green: validate what would land (see below) - an invalid message flags
-   `needs-fix` and hands over. Approve as the queue if the only approval is the carry-over and the
-   queue has not approved this head yet, then merge with `head_commit_id` = the head, then remove
-   `automerge`. A `405` other than "Please try again later" (Gitea's mergeable check still running)
+   `needs-fix` and hands over. Restore the missing approvals through the approver accounts (see
+   below) - too few usable ones flag `needs-fix` and hand over - then merge with `head_commit_id` =
+   the head, then remove `automerge`. A `405` other than "Please try again later" (Gitea's mergeable check still running)
    flags `needs-fix` with Gitea's message; that and a `409` (the head moved) end the pass.
 
 ### Approval carry-over
 
-A rebase can make Gitea dismiss the approval. Approving straight after the rebase races the
-asynchronous dismissal, which would dismiss the queue's approval too. Instead the queue records the
-approval as a commit status on the rebased head - context `mergeweasel/approval`, state `success`,
-description `approved by <reviewer> at <old head>` - and approves only in step 6, after the checks.
+A rebase can make Gitea dismiss the approvals. Approving straight after the rebase races the
+asynchronous dismissal, which would dismiss the restored approvals too. Instead the merger records
+every standing reviewer in one commit status on the rebased head - context `mergeweasel/approval`,
+state `success`, one write - and the approver accounts restore approvals only in step 6, after the
+checks:
+
+```
+approved at <old head>
+approved by alice
+approved by bob
+```
 
 The status is bound to that commit: any later push moves the head away from it. Only a status the
-queue's own account created counts, since anyone with write access can set a status of that name.
-A second rebase before the merge carries the carry-over forward, reviewer included.
+merger created counts, since anyone with write access can set a status of that name. A second
+rebase carries the reviewers forward; approvals by approver accounts on a head that already has a
+carry-over are its restorations and are not listed again. Without any standing reviewer nothing is
+written.
+
+Step 6 restores only what is missing: `required_approvals` minus the valid approvals on the head.
+The approver accounts approve in the order of `MERGEWEASEL_APPROVER_TOKENS`, each naming the
+reviewer it restores; an account that already approved the head, or that posted the pull request,
+is skipped - Gitea refuses approving one's own pull request. Too few usable accounts, none
+configured included, flag `needs-fix`: approved again by hand and the flag removed, the pull
+request queues again - an approval alone wakes no pass.
 
 ### Labels
 
@@ -118,14 +136,23 @@ runs of `mergeweasel-queue.yml` and finds itself by `GITHUB_RUN_ID`:
   replaces nor is replaced;
 - without `GITHUB_RUN_ID`, a local run, the pass does not wait.
 
-### The queue's own account
+### The merger and the approver accounts
 
-The queue reads its login from `MERGEWEASEL_TOKEN` (`GET /user`) at the start of every pass. It
-needs it to recognise its own approvals and to trust a carry-over. A pass that cannot read it fails.
+The merger rebases, writes the carry-over and merges. Its login comes from
+`MERGEWEASEL_MERGER_TOKEN` (`GET /user`) at the start of every pass; it needs it to trust a
+carry-over. The approver accounts restore approvals: every pass resolves each token of
+`MERGEWEASEL_APPROVER_TOKENS` the same way and prints the logins, never the tokens. A token that
+cannot be read, a token without a login, or two tokens of one account fail the pass - Gitea counts
+one approval per account.
 
-The one exception is a dry run without the token, as CI runs one with the run token: the login is
-unknown, so the dry run accepts any carry-over as genuine and says so in its output. Its decisions
-can then differ from a real pass in whether a merge would approve first.
+The merger never approves as itself. Its token may be one of the approver tokens; one account then
+fills both roles. An account used as approver must not open pull requests: Gitea refuses
+approving one's own.
+
+The exception is a dry run. Without the merger token, as CI runs one with the run token, the merger
+is unknown and the dry run accepts any carry-over as genuine; without approver tokens it assumes
+enough approver accounts. It says both in its output; its decisions can then differ from a real
+pass.
 
 ### Errors
 
@@ -136,7 +163,8 @@ the job a 30-minute one: a hung pass would hold every later pass.
 
 One window remains: after the rebase is pushed, the carry-over must still be written. Reading the
 new head and posting the status are retried; a pass that still dies there leaves the pull request
-rebased and unapproved until it is approved again.
+rebased and unapproved until it is approved again. A pass dying between the restored approvals and
+the merge leaves them valid on that head; the next pass only merges.
 
 ## What lands on main
 
@@ -180,12 +208,15 @@ bumping the image pin, never releases, so release and pin bump cannot loop. The 
 ## Gitea behaviour relied on
 
 Verified against Gitea v28. The end-to-end test (`e2e/`) exercises stale approvals, the rebase, the
-squash and the refs against the Gitea version pinned in `e2e/gitea.Dockerfile` - a version bump that
-breaks one of them fails there first.
+squash, the refs and the refused self-approval against the Gitea version pinned in
+`e2e/gitea.Dockerfile` - a version bump that breaks one of them fails there first.
 
 - **Stale approvals**: with `dismiss_stale_approvals`, a push dismisses approvals only if the pull
   request's diff against the new merge base changed - so a rebase dismisses them exactly when a
   file the pull request touches also changed on `main`. The dismissal runs asynchronously.
+- **Own pull requests**: approving one's own pull request is refused with `422`.
+- **Branch info**: `GET branches/{branch}` reports `required_approvals` without repository admin.
+- **Commit status descriptions** keep several lines unchanged; the carry-over relies on it.
 - **The Actions bot triggers nothing**: events whose doer is the built-in Actions user start no
   workflow. A rebase pushed with the run token would never start checks, so the queue needs an
   account of its own.
@@ -206,15 +237,18 @@ breaks one of them fails there first.
 
 ## Security model
 
-- **`MERGEWEASEL_TOKEN`** has merge rights. It appears only in `mergeweasel-queue.yml`, whose
-  triggers all take the workflow - and with it the image pin - from `main`. The pass never checks
-  out or executes pull request content, so a pull request cannot run code with the token through
-  this path.
+- **`MERGEWEASEL_MERGER_TOKEN`** has merge rights. It appears only in `mergeweasel-queue.yml`,
+  whose triggers all take the workflow - and with it the image pin - from `main`. The pass never
+  checks out or executes pull request content, so a pull request cannot run code with the token
+  through this path.
+- **`MERGEWEASEL_APPROVER_TOKENS`**: every approver token can satisfy the review requirement on its
+  own, so each is as sensitive as the merger token. They appear only in `mergeweasel-queue.yml`,
+  like the merger token.
 - **The run token** serves `check-commits` and the dry run in CI. Keeping the merge token out of
   CI protects against a bug in new code - a dry run that writes - not against an attacker.
 - **The trust boundary is write access.** Gitea hands repository secrets to every non-fork pull
   request run, so anyone with write access can read the merge token through a workflow on their own
   branch, and anyone who may push tags can publish an image. The approvals whitelist does not
   narrow that.
-- **Carry-over**: trusted only from the queue's own account; a forged status counts in a dry run
-  only, which writes nothing.
+- **Carry-over**: trusted only from the merger; a forged status counts in a dry run only, which
+  writes nothing.

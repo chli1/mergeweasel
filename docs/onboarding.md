@@ -8,15 +8,28 @@ listed in [configuration](configuration.md).
 - Gitea with Actions enabled, and a runner that runs jobs in containers (`container:` in a job).
 - The runner can pull the public image `ghcr.io/chli1/mergeweasel`.
 
-## The queue account
+## The accounts
 
-The queue acts as an account of its own:
+mergeweasel acts through accounts of its own, in two roles:
 
-1. Create an account for the queue - any name; mergeweasel reads it from the token.
-2. Give it write access to the repository.
-3. Create a token for it with the scopes `write:repository`, `write:issue` and `read:user`. The
-   pass reads its own login with `read:user` at its start.
-4. Store the token as the repository secret `MERGEWEASEL_TOKEN`.
+- the **merger** rebases, records the approvals across a rebase and merges;
+- the **approver accounts** restore the approvals a rebase dismissed - as many as the required
+  approvals, for the queue to restore them all.
+
+The merger can be one of the approver accounts; one account then fills both roles. An account used
+as approver must not open pull requests: Gitea refuses approving one's own pull request.
+
+1. Create the accounts - any names; mergeweasel reads them from the tokens.
+2. Give each write access to the repository.
+3. Create a token for each: the merger's with the scopes `write:repository`, `write:issue` and
+   `read:user`, an approver's with `write:repository` and `read:user`. Every pass reads each login
+   with `read:user` at its start.
+4. Store the merger's token as the repository secret `MERGEWEASEL_MERGER_TOKEN`, and the approver
+   tokens, one per line, as `MERGEWEASEL_APPROVER_TOKENS` - for one account in both roles, its
+   token in both.
+
+Without approver tokens the queue restores nothing: a pull request whose approvals a rebase
+dismissed gets `needs-fix` and has to be approved again by hand.
 
 Why not the run token: Gitea starts no workflow for pushes by the Actions bot, so the checks would
 never run on a pull request the queue rebased.
@@ -38,10 +51,12 @@ Protect `main` with these settings:
 - **Required status checks**: on, listing the contexts of your CI plus
   `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing -
   no status could tell a tested head from an untested one.
-- **Required approvals**: at least 1, with an approvals whitelist that includes the queue account.
-- **Merge whitelist**: only the queue account.
+- **Required approvals**: any number, 0 included. With an approvals whitelist, it must include the
+  approver accounts; without one, any approval by an account with write access counts.
+- **Merge whitelist**: only the merger.
 - **Block merge on outdated branch**: on.
-- **Dismiss stale approvals**: recommended. The queue carries an approval over its own rebase.
+- **Dismiss stale approvals**: recommended. The approver accounts restore the approvals a rebase
+  dismissed.
 
 ## The workflows
 
@@ -79,6 +94,12 @@ queue would take, and nothing changes.
   head only: fix them there, then remove `needs-fix`.
 - **"merge deferred: Please try again later".** Gitea's mergeable check was still running; the next
   pass retries.
-- **"cannot read the queue account from MERGEWEASEL_TOKEN".** The message carries Gitea's reason:
-  an expired or revoked token, or one without `read:user` - create a new token with the scopes
-  listed in [the queue account](#the-queue-account).
+- **"cannot read the account of MERGEWEASEL_MERGER_TOKEN"** (or of a token of
+  `MERGEWEASEL_APPROVER_TOKENS`, named by its position). The message carries Gitea's reason: an
+  expired or revoked token, or one without `read:user` - create a new token with the scopes listed
+  in [the accounts](#the-accounts).
+- **"... belongs to ... again".** Two approver tokens of one account; Gitea counts one approval per
+  account. Use a token of another account.
+- **"too few approver accounts to restore the approvals".** Add approver accounts to
+  `MERGEWEASEL_APPROVER_TOKENS` (and to the approvals whitelist, if set), or approve again by hand;
+  then remove `needs-fix`.

@@ -28,12 +28,15 @@ BASE_BRANCH = "main"
 
 FAILED = ("error", "failure", "warning")
 PASSED = ("success", "skipped")
-CARRY_OVER_PATTERN = re.compile(r"^approved by (\S+) at [0-9a-f]+$")
+# The carry-over's description: its first line, then one line per reviewer.
+CARRY_OVER_HEAD = re.compile(r"^approved at [0-9a-f]+$")
+CARRY_OVER_REVIEWER = re.compile(r"^approved by (\S+)$")
 RED_HINT = "Re-run the failed jobs or push a fix, then remove `needs-fix` to queue it again."
 CONFLICT_HINT = f"Rebase onto `{BASE_BRANCH}` and resolve the conflict, then remove `needs-fix` to queue it again."
 REFUSED_HINT = "Fix the cause, then remove `needs-fix` to queue it again."
 MESSAGE_HINT = "Fix the PR title or its `## Commit` section, then remove `needs-fix` to queue it again."
 COMMITS_HINT = "Reword the commits, or drop `keep-commits` to squash them, then remove `needs-fix` to queue it again."
+SHORTFALL_HINT = "Approve it again, then remove `needs-fix` to queue it again."
 # Gitea's 405 while its mergeable check still runs; the next pass retries.
 TRANSIENT_MERGE_REFUSAL = "Please try again later"
 
@@ -54,14 +57,15 @@ class Pull:
     draft: bool
     # True if main holds commits the head lacks.
     behind: bool
-    # Reviewer of the latest valid official approval, None if there is none.
-    approver: str | None
-    # Reviewer named by the queue's carry-over status on the head, None if there is none.
-    carried_reviewer: str | None
+    poster: str
+    # Distinct logins of the valid official approvals, in review order.
+    approvers: tuple
+    # Reviewers named by the merger's carry-over on the head, in its line order; empty without one.
+    carried: tuple
     # True if an official reviewer's latest verdict is an undismissed request for changes.
     rejected: bool
-    # True if the queue already approved the current head.
-    queue_approved: bool
+    # Logins that approved the current head, official or not: an approval Gitea ignores is not repeated.
+    approved_head: frozenset
     # True if renovate pushed after needs-fix was last set; always False without needs-fix.
     renovate_retried: bool
     statuses: dict
@@ -82,7 +86,8 @@ class Rebase:
     number: int
     head_ref: str
     head_sha: str
-    reviewer: str
+    # The reviewers the carry-over lists on the rebased head.
+    reviewers: tuple
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,8 +100,8 @@ class FlagNeedsFix:
 class Merge:
     number: int
     head_sha: str
-    approve_first: bool
-    reviewer: str
+    # (approver, reviewer) per missing approval; approver None when the approvers are unknown (dry run).
+    approvals: tuple
     # The automerge label's id, removed once the merge has landed.
     label_id: int
     # Fast-forward the commits as they are instead of squashing them.
@@ -181,16 +186,42 @@ def verdict(statuses, required):
     return "pending"
 
 
-def reviewer(pull, account):
-    """Who the approval goes back to: a human approval beats the queue's own."""
-    if pull.approver and pull.approver != account:
-        return pull.approver
-    return pull.carried_reviewer or pull.approver
+def standing(pull):
+    """Every reviewer whose approval stands: valid on the head or carried over a rebase."""
+    return set(pull.approvers) | set(pull.carried)
 
 
-def queued(pull, account):
+def queued(pull, needed):
     return (AUTOMERGE in pull.labels and NEEDS_FIX not in pull.labels and not pull.draft
-            and not pull.rejected and reviewer(pull, account) is not None)
+            and not pull.rejected and len(standing(pull)) >= needed)
+
+
+def carried_forward(pull, approvers):
+    """The reviewers for the rebased head's carry-over.
+
+    On a head that has a carry-over, the approver accounts' approvals are its restorations.
+    """
+    restored = set(approvers or ()) if pull.carried else set()
+    return pull.carried + tuple(login for login in pull.approvers
+                                if login not in pull.carried and login not in restored)
+
+
+def restorations(pull, needed, approvers):
+    """(approver, reviewer) per missing approval, None if too few approver accounts can approve.
+
+    approvers None: unknown (a dry run without approver tokens), assumed enough.
+    """
+    missing = needed - len(pull.approvers)
+    if missing <= 0:
+        return ()
+    reviewers = [login for login in pull.carried if login not in pull.approvers][:missing]
+    if approvers is None:
+        return tuple((None, login) for login in reviewers)
+    # Gitea refuses approving one's own pull request.
+    usable = [login for login in approvers if login != pull.poster and login not in pull.approved_head]
+    if len(usable) < missing:
+        return None
+    return tuple(zip(usable, reviewers))
 
 
 def failure_comment(pull, required):
@@ -208,23 +239,27 @@ def refused_comment(message):
     return f"mergeweasel: Gitea refused the merge: {message}\n\n{REFUSED_HINT}"
 
 
+def shortfall_comment():
+    return f"mergeweasel: too few approver accounts to restore the approvals.\n\n{SHORTFALL_HINT}"
+
+
 def invalid_message_comment(problems, keep_commits):
     lines = [f"- {problem}" for problem in problems]
     return "\n".join(["mergeweasel: what this pull request would land on main is invalid:", *lines, "",
                       COMMITS_HINT if keep_commits else MESSAGE_HINT])
 
 
-def carry_over_description(reviewer_login, head_sha):
-    return f"approved by {reviewer_login} at {head_sha[:7]}"
+def carry_over_description(reviewers, head_sha):
+    return "\n".join([f"approved at {head_sha[:7]}", *(f"approved by {login}" for login in reviewers)])
 
 
-def decide(pulls, required, account):
-    candidates = sorted((pull for pull in pulls if queued(pull, account)), key=lambda pull: (pull.behind, pull.number))
+def decide(pulls, required, needed, approvers):
+    candidates = sorted((pull for pull in pulls if queued(pull, needed)), key=lambda pull: (pull.behind, pull.number))
     if not candidates:
         return Idle()
     pull = candidates[0]
     if pull.behind:
-        return Rebase(pull.number, pull.head_ref, pull.head_sha, reviewer(pull, account))
+        return Rebase(pull.number, pull.head_ref, pull.head_sha, carried_forward(pull, approvers))
     if not required:
         # Without required checks nothing tells a tested head from an untested one.
         return Wait(pull.number)
@@ -233,16 +268,21 @@ def decide(pulls, required, account):
         return FlagNeedsFix(pull.number, failure_comment(pull, required))
     if state == "pending":
         return Wait(pull.number)
-    approve_first = pull.approver is None and not pull.queue_approved
-    return Merge(pull.number, pull.head_sha, approve_first=approve_first, reviewer=reviewer(pull, account),
-                 label_id=pull.labels[AUTOMERGE], keep_commits=KEEP_COMMITS in pull.labels)
+    approvals = restorations(pull, needed, approvers)
+    if approvals is None:
+        return FlagNeedsFix(pull.number, shortfall_comment())
+    return Merge(pull.number, pull.head_sha, approvals=approvals, label_id=pull.labels[AUTOMERGE],
+                 keep_commits=KEEP_COMMITS in pull.labels)
 
 
-def approver(reviews):
-    valid = [review for review in reviews
-             if review["state"] == "APPROVED" and review["official"]
-             and not review["dismissed"] and not review["stale"]]
-    return valid[-1]["user"]["login"] if valid else None
+def valid_approvers(reviews):
+    logins = []
+    for review in reviews:
+        login = review["user"]["login"]
+        if (review["state"] == "APPROVED" and review["official"] and not review["dismissed"]
+                and not review["stale"] and login not in logins):
+            logins.append(login)
+    return tuple(logins)
 
 
 def rejected(reviews):
@@ -253,12 +293,10 @@ def rejected(reviews):
     return any(review["state"] == "REQUEST_CHANGES" and not review["dismissed"] for review in latest.values())
 
 
-def queue_approved(reviews, head_sha, account):
+def head_approvers(reviews, head_sha):
     """Official or not: an approval the whitelist ignores must not be repeated every pass."""
-    if account is None:
-        return False
-    return any(review["state"] == "APPROVED" and review["user"]["login"] == account
-               and not review["dismissed"] and review["commit_id"] == head_sha for review in reviews)
+    return frozenset(review["user"]["login"] for review in reviews
+                     if review["state"] == "APPROVED" and not review["dismissed"] and review["commit_id"] == head_sha)
 
 
 def renovate_pushed_since_needs_fix(timeline):
@@ -271,16 +309,25 @@ def renovate_pushed_since_needs_fix(timeline):
                for entry in timeline)
 
 
-def carried_reviewer(statuses, account):
-    """Only the queue's own carry-over counts; without an account (a dry run) any does."""
+def parse_carry_over(description):
+    """The reviewers a carry-over description lists, None if it is none."""
+    first, *rest = description.split("\n")
+    matches = [CARRY_OVER_REVIEWER.match(line) for line in rest]
+    if not CARRY_OVER_HEAD.match(first) or not matches or not all(matches):
+        return None
+    return tuple(match.group(1) for match in matches)
+
+
+def carried_reviewers(statuses, merger):
+    """Only the merger's carry-over counts; without a merger login (a dry run) any does."""
     for status in statuses:
         creator = (status.get("creator") or {}).get("login")
         if (status["context"] == CARRY_OVER_CONTEXT and status["status"] == "success"
-                and (account is None or creator == account)):
-            match = CARRY_OVER_PATTERN.match(status.get("description") or "")
-            if match:
-                return match.group(1)
-    return None
+                and (merger is None or creator == merger)):
+            reviewers = parse_carry_over(status.get("description") or "")
+            if reviewers:
+                return reviewers
+    return ()
 
 
 def statuses_by_context(statuses, server):
@@ -320,10 +367,12 @@ class MessageInvalid(Exception):
 class State:
     main_sha: str
     required: list
+    # required_approvals of main's branch protection.
+    needed: int
     pulls: list
 
 
-def read_state(gitea, server, account):
+def read_state(gitea, server, merger):
     # branches/main, not branch_protections: the protection API needs repo admin.
     branch = gitea.call("GET", f"/branches/{BASE_BRANCH}")
     main_sha = branch["commit"]["id"]
@@ -341,12 +390,12 @@ def read_state(gitea, server, account):
         flagged = NEEDS_FIX in labels
         pulls.append(Pull(
             number=raw["number"], head_ref=raw["head"]["ref"], head_sha=head_sha, labels=labels,
-            draft=raw.get("draft", False), behind=behind, approver=approver(reviews),
-            carried_reviewer=carried_reviewer(statuses, account), rejected=rejected(reviews),
-            queue_approved=queue_approved(reviews, head_sha, account),
+            draft=raw.get("draft", False), behind=behind, poster=raw["user"]["login"],
+            approvers=valid_approvers(reviews), carried=carried_reviewers(statuses, merger),
+            rejected=rejected(reviews), approved_head=head_approvers(reviews, head_sha),
             renovate_retried=flagged and renovate_pushed_since_needs_fix(gitea.paged(f"/issues/{raw['number']}/timeline")),
             statuses=statuses_by_context(statuses, server)))
-    return State(main_sha, required, pulls)
+    return State(main_sha, required, branch["required_approvals"], pulls)
 
 
 def rebase(gitea, action):
@@ -356,12 +405,15 @@ def rebase(gitea, action):
         if error.code == 409:
             raise Conflict() from error
         raise
+    if not action.reviewers:
+        # No approval stands, nothing to carry over.
+        return
     # Retried: once the rebase is pushed, Gitea dismisses the approval, and without the carry-over
     # the pull request would wait unapproved.
     new_head = retried(lambda: rebased_head(gitea, action.head_ref))
     retried(lambda: gitea.call("POST", f"/statuses/{new_head}", {
         "state": "success", "context": CARRY_OVER_CONTEXT,
-        "description": carry_over_description(action.reviewer, action.head_sha)}))
+        "description": carry_over_description(action.reviewers, action.head_sha)}))
 
 
 def rebased_head(gitea, head_ref):
@@ -398,13 +450,13 @@ def merge_request(gitea, action):
     return request
 
 
-def merge(gitea, action):
-    # Before the approval: a pull request that may not land is not approved either.
+def merge(gitea, action, approvers):
+    # Before the approvals: a pull request that may not land is not approved either.
     request = merge_request(gitea, action)
-    if action.approve_first:
-        gitea.call("POST", f"/pulls/{action.number}/reviews", {
+    for approver, reviewer in action.approvals:
+        approvers[approver].call("POST", f"/pulls/{action.number}/reviews", {
             "event": "APPROVED", "commit_id": action.head_sha,
-            "body": f"Approval of {action.reviewer}, carried over the merge queue's rebase."})
+            "body": f"Approval of {reviewer}, carried over the merge queue's rebase."})
     try:
         gitea.call("POST", f"/pulls/{action.number}/merge", request)
     except urllib.error.HTTPError as error:
@@ -433,13 +485,13 @@ def relabel(pulls, number, add=None, remove=None):
     return changed
 
 
-def execute(gitea, action):
+def execute(gitea, action, approvers):
     """Carry out a Rebase or Merge; a conflict, a refused merge or an invalid message becomes a needs-fix hand-over."""
     try:
         if isinstance(action, Rebase):
             rebase(gitea, action)
         elif isinstance(action, Merge):
-            merge(gitea, action)
+            merge(gitea, action, approvers)
     except Conflict:
         return FlagNeedsFix(action.number, conflict_comment())
     except MergeRefused as refusal:
@@ -449,8 +501,10 @@ def execute(gitea, action):
     return action
 
 
-def run_pass(gitea, server, dry_run, account):
-    state = read_state(gitea, server, account)
+def run_pass(gitea, server, dry_run, merger, approvers):
+    """approvers: login -> client in secret order, or None if unknown (a dry run without approver tokens)."""
+    state = read_state(gitea, server, merger)
+    logins = None if approvers is None else list(approvers)
     pulls = state.pulls
     for retry in needs_fix_to_clear(pulls):
         print(f"#{retry.number}: {RENOVATE_ACCOUNT} pushed, removing {NEEDS_FIX}")
@@ -458,10 +512,10 @@ def run_pass(gitea, server, dry_run, account):
             gitea.call("DELETE", f"/issues/{retry.number}/labels/{retry.labels[NEEDS_FIX]}")
         pulls = relabel(pulls, retry.number, remove=NEEDS_FIX)
     while True:
-        action = decide(pulls, state.required, account)
+        action = decide(pulls, state.required, state.needed, logins)
         print(action)
         if not dry_run:
-            executed = execute(gitea, action)
+            executed = execute(gitea, action, approvers)
             if executed != action:
                 print(executed)
             action = executed
