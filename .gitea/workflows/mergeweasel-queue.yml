@@ -25,17 +25,19 @@ jobs:
     # A hung pass would otherwise hold every later pass, and every merge.
     timeout-minutes: 30
     container:
-      image: ghcr.io/chli1/mergeweasel:0.1.1
+      image: ghcr.io/chli1/mergeweasel:0.2.0
     steps:
       - name: Run one queue pass
         if: ${{ !inputs.dry_run }}
         env:
           # Not the run token: Gitea starts no workflow for the Actions bot's pushes, so the checks
           # would never run on a rebase.
-          MERGEWEASEL_TOKEN: ${{ secrets.MERGEWEASEL_TOKEN }}
+          MERGEWEASEL_MERGER_TOKEN: ${{ secrets.MERGEWEASEL_MERGER_TOKEN }}
+          MERGEWEASEL_APPROVER_TOKENS: ${{ secrets.MERGEWEASEL_APPROVER_TOKENS }}
         run: mergeweasel pass
       - name: Run one queue pass (dry run)
         if: ${{ inputs.dry_run }}
         env:
-          MERGEWEASEL_TOKEN: ${{ secrets.MERGEWEASEL_TOKEN }}
+          MERGEWEASEL_MERGER_TOKEN: ${{ secrets.MERGEWEASEL_MERGER_TOKEN }}
+          MERGEWEASEL_APPROVER_TOKENS: ${{ secrets.MERGEWEASEL_APPROVER_TOKENS }}
         run: mergeweasel pass --dry-run
