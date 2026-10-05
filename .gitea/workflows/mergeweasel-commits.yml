@@ -11,7 +11,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/chli1/mergeweasel:0.2.0
+      image: ghcr.io/chli1/mergeweasel:1.0.0
     steps:
       - name: Check what lands on main
         env:
