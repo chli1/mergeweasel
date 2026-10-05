@@ -6,7 +6,7 @@ listed in [configuration](configuration.md).
 ## Requirements
 
 - Gitea with Actions enabled, and a runner that runs jobs in containers (`container:` in a job).
-- The runner can pull the public image `ghcr.io/chli1/mergeweasel`.
+- The runner can pull the public image `docker.io/chli1ro/mergeweasel`.
 
 ## The accounts
 

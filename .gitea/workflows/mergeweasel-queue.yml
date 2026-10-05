@@ -26,7 +26,7 @@ jobs:
     # A hung pass would otherwise hold every later pass, and every merge.
     timeout-minutes: 30
     container:
-      image: ghcr.io/chli1/mergeweasel:1.0.0
+      image: docker.io/chli1ro/mergeweasel:1.0.0
     steps:
       - name: Run one queue pass
         if: ${{ !inputs.dry_run }}

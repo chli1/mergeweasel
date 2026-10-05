@@ -40,7 +40,7 @@
     },
     {
       "description": "This repository is mergeweasel's canary: its own image without release age.",
-      "matchPackageNames": ["ghcr.io/chli1/mergeweasel"],
+      "matchPackageNames": ["docker.io/chli1ro/mergeweasel"],
       "minimumReleaseAge": null
     },
     {

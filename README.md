@@ -45,7 +45,8 @@ Renovate label them `automerge` (its `addLabels` option) instead of merging them
 approver accounts configured, they approve Renovate's own updates, so no human needs to; without
 them, or once anyone else pushed to an update, it waits for a human approval. When an update fails
 its checks and gets `needs-fix`, Renovate's next push to it - its rebase, say - removes the label,
-so the update is retried without anyone stepping in.
+so the update is retried without anyone stepping in. The image is on Docker Hub, where Renovate
+finds its release dates: a `minimumReleaseAge` applies to mergeweasel like to any other image.
 
 ## Documentation
 

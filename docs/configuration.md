@@ -31,7 +31,7 @@ release failed - after running the pass.
 
 ## Image
 
-`ghcr.io/chli1/mergeweasel`, tagged `X.Y.Z` and `latest`. Pin `X.Y.Z`.
+`docker.io/chli1ro/mergeweasel`, tagged `X.Y.Z` and `latest`. Pin `X.Y.Z`.
 
 ## Fixed values
 

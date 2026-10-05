@@ -52,12 +52,11 @@ The required checks are `ci / test (pull_request)`, `ci / image (pull_request)`,
 ## Releases
 
 A tag `vX.Y.Z` on `main` starts the `release` job of `ci.yml`: it builds the image and pushes it to
-`ghcr.io/chli1/mergeweasel` as `X.Y.Z` and `latest`. The queue sets the tags: every merge with a releasing commit makes the next version
-([design](docs/design.md#releases)). The first push of
-a new package needs its visibility set to public once.
+`docker.io/chli1ro/mergeweasel` as `X.Y.Z` and `latest`. The queue sets the tags: every merge with
+a releasing commit makes the next version ([design](docs/design.md#releases)).
 
 The repository needs three secrets:
 
 - `MERGEWEASEL_MERGER_TOKEN` - the merger's token ([onboarding](docs/onboarding.md#the-accounts));
 - `MERGEWEASEL_APPROVER_TOKENS` - the approver accounts' tokens, one per line;
-- `GHCR_TOKEN` - a GitHub token with `write:packages` for the push to ghcr.io.
+- `DOCKERHUB_TOKEN` - a Docker Hub access token of `chli1ro` with write access to the repository.

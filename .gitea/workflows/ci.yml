@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: mergeweasel:release-${{ github.run_id }}
-      REGISTRY_IMAGE: ghcr.io/chli1/mergeweasel
+      REGISTRY_IMAGE: docker.io/chli1ro/mergeweasel
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -89,11 +89,12 @@ jobs:
         run: >-
           docker build -t "$IMAGE"
           --label org.opencontainers.image.version=${{ steps.version.outputs.version }}
-          --label org.opencontainers.image.revision=$GITHUB_SHA .
-      - name: Log in to ghcr.io
+          --label org.opencontainers.image.revision=$GITHUB_SHA
+          --label org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ) .
+      - name: Log in to Docker Hub
         env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u chli1 --password-stdin
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u chli1ro --password-stdin
       # A Docker daemon can serve several jobs at once, so the registry names are shared: each exists
       # only around its own push, and the cleanup removes nothing but this run's image.
       - name: Push X.Y.Z and latest
@@ -106,5 +107,5 @@ jobs:
       - name: Log out and remove the image
         if: always()
         run: |
-          docker logout ghcr.io || true
+          docker logout || true
           docker rmi -f "$IMAGE" || true
