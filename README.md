@@ -3,11 +3,13 @@
 No more weaseling around a broken main: mergeweasel takes your pull request from rebase and commit
 check to merge and a fresh release.
 
-mergeweasel is a merge queue for [Gitea](https://about.gitea.com/), shipped as a container image.
+mergeweasel is a merge queue for [Gitea](https://about.gitea.com/) that releases what it lands,
+shipped as a container image.
 Label an approved pull request `automerge`, and mergeweasel takes it from there: it rebases the pull
 request when `main` has moved on, waits for the required checks, and lands it - squashed by default,
 fast-forwarded with `keep-commits` - one pull request at a time. A pull request it cannot land gets
-the label `needs-fix` and a comment saying why.
+the label `needs-fix` and a comment saying why. After a merge it releases: a tag and release
+notes, versioned from the commit types.
 
 The logic lives in the image; each repository carries only two small workflows that run it.
 
@@ -20,6 +22,8 @@ picks the next queued pull request and takes one step:
 2. Checks still running: wait for the next pass.
 3. A required check failed: flag it `needs-fix` with the failed checks, and move on to the next one.
 4. Green: restore the approvals the rebase cost it, merge it, and remove `automerge`.
+5. Merged: the next pass tags `main` with the next version and publishes release notes - for
+   `feat`, `fix` and breaking changes.
 
 The details, and the Gitea behaviour they rest on: [docs/design.md](docs/design.md).
 
@@ -37,14 +41,11 @@ The details, and the Gitea behaviour they rest on: [docs/design.md](docs/design.
 ## Works with Renovate
 
 mergeweasel lands [Renovate](https://docs.renovatebot.com/)'s pull requests like any other: let
-Renovate label them `automerge` (its `addLabels` option) instead of merging them itself, and approve
-them as usual. When an update fails its checks and gets `needs-fix`, Renovate's next push to it -
-its rebase, say - removes the label, so the update is retried without anyone stepping in.
-
-## Status
-
-mergeweasel is at 0.x: it lands this repository's own pull requests, but it is not ready for other
-repositories yet. Version `1.0.0` marks it ready.
+Renovate label them `automerge` (its `addLabels` option) instead of merging them itself. With
+approver accounts configured, they approve Renovate's own updates, so no human needs to; without
+them, or once anyone else pushed to an update, it waits for a human approval. When an update fails
+its checks and gets `needs-fix`, Renovate's next push to it - its rebase, say - removes the label,
+so the update is retried without anyone stepping in.
 
 ## Documentation
 

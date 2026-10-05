@@ -15,7 +15,7 @@ The split follows Renovate: the logic ships as a container image, and each repos
 a thin workflow layer that runs it.
 
 - **Image** `mergeweasel`: a Python package, standard library only, with a CLI of two commands:
-  - `mergeweasel pass [--dry-run]` - one queue pass;
+  - `mergeweasel pass [--dry-run]` - one queue pass, which releases first;
   - `mergeweasel check-commits --event <path>` - the check of what a pull request would land.
 - **Thin layer** in each repository: `mergeweasel-queue.yml` runs the pass,
   `mergeweasel-commits.yml` runs the check. Both run the image as their job container. This
@@ -46,18 +46,23 @@ Principles:
 Each pass reads the current state, takes at most one step on one candidate and ends; a candidate
 flagged `needs-fix` hands over to the next one within the same pass. Every merge, label change and
 finished check run wakes the queue, so no schedule is needed. An approval wakes nothing: the label
-`automerge` comes after it.
+`automerge` comes after it. Before its step, a pass releases `main` (see [Releases](#releases)).
 
 ### Definitions
 
 - **Queued**: open, base `main`, not a draft, label `automerge`, no label `needs-fix`, no standing
   request for changes (an official reviewer's latest verdict is an undismissed `REQUEST_CHANGES`),
-  and approved.
+  and approved - or a trusted Renovate pull request.
 - **Approved**: the reviewers whose approval stands - valid official approvals (`APPROVED`, not
   dismissed, not stale) and the reviewers of an approval carry-over on the current head, each login
   once - reach `required_approvals` of `main`'s branch protection, read from `GET branches/main`.
   With 0 required, `automerge` alone queues a pull request: setting it is the equivalent of
   pressing merge. A pull request with too few waits; it is not flagged.
+- **Trusted Renovate pull request**: posted by `renovate`, every push in its timeline by `renovate`
+  or the merger, and the latest `automerge` label added by `renovate`. Anyone else's push makes it
+  an ordinary pull request; a human who labels it approves it like any other, or labelling alone
+  would bypass the review requirement. Without any approver account configured, it is an ordinary
+  pull request too.
 - **Up to date**: `GET compare/{head}...{main}` reports no commits. Not the pull request's
   `merge_base`, which Gitea updates asynchronously after a push.
 - **Green, red, pending**: Gitea's own rule over the latest status per context and the required
@@ -86,7 +91,8 @@ finished check run wakes the queue, so no schedule is needed. An approval wakes 
 5. Up to date and pending: stop.
 6. Up to date and green: validate what would land (see below) - an invalid message flags
    `needs-fix` and hands over. Restore the missing approvals through the approver accounts (see
-   below) - too few usable ones flag `needs-fix` and hand over - then merge with `head_commit_id` =
+   below), or give a trusted Renovate pull request the approvals it is missing - too few usable
+   accounts flag `needs-fix` and hand over - then merge with `head_commit_id` =
    the head, then remove `automerge`. A `405` other than "Please try again later" (Gitea's mergeable check still running)
    flags `needs-fix` with Gitea's message; that and a `409` (the head moved) end the pass.
 
@@ -146,6 +152,9 @@ carry-over. The approver accounts restore approvals: every pass resolves each to
 cannot be read, a token without a login, or two tokens of one account fail the pass - Gitea counts
 one approval per account.
 
+The approver accounts also give a trusted Renovate pull request the approvals it is missing, in
+the same order and with the same skips, naming the reason in the review.
+
 The merger never approves as itself. Its token may be one of the approver tokens; one account then
 fills both roles. An account used as approver must not open pull requests: Gitea refuses
 approving one's own.
@@ -196,23 +205,47 @@ status must not turn red.
 
 ## Releases
 
-The image is published to a public registry as `X.Y.Z` and `latest` when a tag `vX.Y.Z` is pushed;
-the version exists only as that tag and the image label `org.opencontainers.image.version`.
-Consumers pin an exact version.
+Every pass releases the repository it runs in, before its step: if `main` holds releasing commits
+since the previous release, it creates a Gitea release on `main`'s head - the lightweight tag
+`vX.Y.Z` and the notes - with one `POST releases`.
 
-Release rule (#2): at the start of every pass the queue tags `main`'s head if commits since the
-last `vX.Y.Z` tag touched an image input - the `Dockerfile`, the `.dockerignore`, or a path its
-allowlist lets through, so a base image bump releases too. The bump comes from their types: `!`
-major, `feat` minor, anything else patch. A change that needs consumers to update their copies of
-`mergeweasel-*.yml` is breaking (`!`) - Renovate bumps only the image pin; an optional workflow
-change is named in the commit body. A commit touching only workflows, such as Renovate
-bumping the image pin, never releases, so release and pin bump cannot loop. The tags are lightweight; `v0.1.0` is set by hand, and the first `!` change makes `1.0.0`.
+The previous release is the nearest commit in `main`'s history that carries a `vX.Y.Z` tag - the
+highest one, if it carries several. `main` is linear, so that is its predecessor, whatever other
+branches tag: a maintenance branch cut once `main` moved past its line never decides `main`'s next
+version. The pass reads every tag with one `GET git/refs/tags` and walks `main` back, 50 commits per
+call, as far as the limit in [configuration](configuration.md#fixed-values). The bump comes from the commit types:
+
+- `!` - major, in 0.x too;
+- `feat` - minor;
+- `fix`, `perf`, `revert` and git's `Revert "..."` - patch;
+- every other type releases nothing; neither does a subject outside the rule.
+
+The notes list the releasing commits oldest first under "Breaking changes", "Features" and
+"Fixes"; a breaking change carries its commit body, which names what users must change. Without a
+`vX.Y.Z` tag nothing is released: there is nothing to bump from.
+
+Each merge wakes a pass, so each merge gets its own release. A release that fails is printed and
+fails the job at its end; the pass still runs, so a release problem never holds up the queue. It
+fails when no `vX.Y.Z` tag lies on `main` within that limit, when the next version is tagged
+on another commit already, or on any unexpected API answer. A tag that appears between reading the
+tags and creating the release is another pass's, not an error.
+
+The merger creates the release, so the tag push starts the repository's tag-triggered workflows;
+the Actions bot's would start none. mergeweasel's own: the `release` job of `ci.yml` publishes the
+image to a public registry as `X.Y.Z` and `latest`; the version exists only as the tag and the
+image label `org.opencontainers.image.version`. Consumers pin an exact version.
+
+A change that needs consumers to update their copies of `mergeweasel-*.yml` is breaking (`!`) -
+Renovate bumps only the image pin. This repository's Renovate types its updates so that only the
+image's base image releases (`fix(deps)`); the pin bump of its own image is `ci(deps)` and releases
+nothing, so release and pin bump cannot loop.
 
 ## Gitea behaviour relied on
 
-Verified against Gitea v28. The end-to-end test (`e2e/`) exercises stale approvals, the rebase, the
-squash, the refs and the refused self-approval against the Gitea version pinned in
-`e2e/gitea.Dockerfile` - a version bump that breaks one of them fails there first.
+Verified against the Gitea pinned in `e2e/gitea.Dockerfile`. The end-to-end test (`e2e/`)
+exercises stale approvals, the rebase, the squash, the refs and the refused self-approval against
+it - a version bump that breaks one of them fails there first. Renovate bumps that pin, and a new
+major or minor Gitea is a release whose notes say "support Gitea vX.Y".
 
 - **Stale approvals**: with `dismiss_stale_approvals`, a push dismisses approvals only if the pull
   request's diff against the new merge base changed - so a rebase dismisses them exactly when a
@@ -237,6 +270,9 @@ squash, the refs and the refused self-approval against the Gitea version pinned 
 - **Refs**: `GET git/refs/heads/<branch>` matches by prefix and reads the repository directly, unlike
   the pull request's `head.sha`, which can lag after a rebase.
 - **Lists** cap at 50 entries per page whatever `limit` asks for.
+- **Releases**: `POST releases` with a new `tag_name` creates the lightweight tag on
+  `target_commitish` and fires its push with the calling account as pusher.
+- **Tag refs**: `GET git/refs/tags` lists every tag in one answer, unpaged.
 
 ## Security model
 
@@ -253,5 +289,9 @@ squash, the refs and the refused self-approval against the Gitea version pinned 
   request run, so anyone with write access can read the merge token through a workflow on their own
   branch, and anyone who may push tags can publish an image. The approvals whitelist does not
   narrow that.
+- **Releases**: whoever lands a `feat` or `fix` causes a release, and anyone who may push tags can
+  publish one - inside the write-access boundary.
+- **The `renovate` account** gets its own updates approved: its token is as sensitive as an
+  approver token. The required checks remain the gate.
 - **Carry-over**: trusted only from the merger; a forged status counts in a dry run only, which
   writes nothing.

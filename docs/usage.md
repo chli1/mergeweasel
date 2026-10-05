@@ -53,6 +53,13 @@ The section is optional, keeps to the line limit in
 [configuration](configuration.md#fixed-values), and carries no `Co-authored-by:` or "Generated with"
 line.
 
+## What releases
+
+After the merge, the queue releases if the repository has a `vX.Y.Z` tag: `feat` makes a minor
+release, `fix`, `perf` and `revert` a patch release, `!` a major one; the other types release
+nothing. The release notes list the description of each releasing commit; a breaking change's
+`## Commit` section appears under it - say there what users must change.
+
 ## `keep-commits`
 
 Every commit of the pull request lands as it is, so every commit follows the subject rule above, and

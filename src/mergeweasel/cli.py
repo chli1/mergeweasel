@@ -4,7 +4,7 @@ import os
 import sys
 import urllib.error
 
-from mergeweasel import check, queue
+from mergeweasel import check, queue, release
 from mergeweasel.gitea import Gitea, error_message
 
 MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
@@ -90,8 +90,9 @@ def queue_pass(server, repository, dry_run):
     own_id = os.environ.get("GITHUB_RUN_ID")
     if own_id and not queue.wait_for_turn(gitea, int(own_id), os.environ.get("GITHUB_EVENT_NAME", "")):
         return 0
+    released = release.run(gitea, dry_run)
     queue.run_pass(gitea, server, dry_run, merger, approvers)
-    return 0
+    return 0 if released else 1
 
 
 def main(argv=None):

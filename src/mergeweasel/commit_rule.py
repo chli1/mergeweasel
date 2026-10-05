@@ -11,14 +11,15 @@ TYPES = ("feat", "fix", "perf", "refactor", "style", "docs", "test", "build", "c
 FORMAT = "<type>[(<scope>)][!]: <description> (#<issue>)"
 # The shape only: the type is matched loosely and checked against its list afterwards, so that an
 # unknown one is named instead of failing the whole pattern.
-SUBJECT = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?!?: \S.*? "
-                     r"\((?:#(?P<issue>\d+)|PR #(?P<pull>\d+))\)$")
+SUBJECT = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!)?: (?P<description>\S.*?) "
+                     r"\((?P<reference>#(?P<issue>\d+)|PR #(?P<pull>\d+))\)$")
 # `git commit --fixup`/`--autosquash` prepend "fixup!"/"squash!" to the
 # original subject, and `git revert` produces `Revert "<original subject>"`.
 # None of the three can carry a reference of their own - they inherit the
 # original commit's - so they are exempt from the format instead of forcing
 # every fixup/revert workflow to hand-edit the generated subject.
 EXEMPT = re.compile(r'^(fixup!|squash!)\s+\S|^Revert ".*"$')
+REVERT = re.compile(r'^Revert "(?P<original>.*)"$')
 # main stays linear. Gitea's fast-forward-only merge would carry a merge commit
 # from the PR branch into main unchanged, so it is rejected whatever its subject.
 MERGE_REJECTED = "merge commits are not allowed - rebase onto main instead"
@@ -50,6 +51,24 @@ def check_subject(subject):
     if scope is not None and (not scope or re.search(r"\s", scope)):
         return f"scope must be non-empty and without whitespace, got {scope!r}; leave out the parentheses for no scope"
     return None
+
+
+@dataclasses.dataclass(frozen=True)
+class Subject:
+    type: str
+    scope: str | None
+    breaking: bool
+    description: str
+    # "#N" or "PR #N", as written.
+    reference: str
+
+
+def parse_subject(subject):
+    """The parts of a subject the rule accepts; None for any other, the exempt ones included."""
+    if EXEMPT.match(subject) or check_subject(subject):
+        return None
+    match = SUBJECT.match(subject)
+    return Subject(match["type"], match["scope"], bool(match["breaking"]), match["description"], match["reference"])
 
 
 def check_reference(subject, known_issues, pr_number):

@@ -39,10 +39,20 @@ never run on a pull request the queue rebased.
 Create `automerge`, `needs-fix` and `keep-commits`, at organization or repository level. Their
 meaning: [usage](usage.md#the-labels).
 
+## Releases
+
+The queue releases `main` after each merge that holds a `feat`, `fix`, `perf`, `revert` or breaking
+change: a tag `vX.Y.Z` and a Gitea release with notes. It bumps from the nearest `vX.Y.Z` tag in
+`main`'s history; set the first one by hand on a commit of `main`, `v0.1.0` say, to start. Without
+such a tag nothing is released. Tags on other branches do not count: cut a maintenance branch only
+once `main` has moved past its line. The merger creates the tag, so workflows triggered by tag
+pushes run on it.
+
 ## Merge styles
 
 In the repository settings, allow squash and fast-forward-only merges. The queue uses squash by
-default and fast-forward-only for `keep-commits`.
+default and fast-forward-only for `keep-commits`. Turn on *Delete pull request branch after merge
+by default*: Gitea then deletes the branch of every pull request the queue merges.
 
 ## Branch protection
 
@@ -100,6 +110,8 @@ queue would take, and nothing changes.
   in [the accounts](#the-accounts).
 - **"... belongs to ... again".** Two approver tokens of one account; Gitea counts one approval per
   account. Use a token of another account.
+- **"release failed: ...".** The pass ran, but releasing did not: the message carries Gitea's
+  reason. The next pass tries again; nothing is lost.
 - **"too few approver accounts to restore the approvals".** Add approver accounts to
   `MERGEWEASEL_APPROVER_TOKENS` (and to the approvals whitelist, if set), or approve again by hand;
   then remove `needs-fix`.

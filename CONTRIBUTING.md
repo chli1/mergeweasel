@@ -52,7 +52,8 @@ The required checks are `ci / test (pull_request)`, `ci / image (pull_request)`,
 ## Releases
 
 A tag `vX.Y.Z` on `main` starts the `release` job of `ci.yml`: it builds the image and pushes it to
-`ghcr.io/chli1/mergeweasel` as `X.Y.Z` and `latest`. Tags are set by hand for now. The first push of
+`ghcr.io/chli1/mergeweasel` as `X.Y.Z` and `latest`. The queue sets the tags: every merge with a releasing commit makes the next version
+([design](docs/design.md#releases)). The first push of
 a new package needs its visibility set to public once.
 
 The repository needs three secrets:

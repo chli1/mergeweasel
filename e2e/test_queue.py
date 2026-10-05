@@ -183,3 +183,56 @@ def test_gitea_refuses_approving_ones_own_pull(repo):
     with pytest.raises(ApiError) as refusal:
         repo.approve(number, account="author")
     assert refusal.value.code == 422
+
+
+def test_renovates_own_update_is_approved_and_merged(repo, run_pass):
+    number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"})
+
+    run_pass(mergeable=number, approvers=("approver1",))
+
+    assert repo.pull(number)["merged"]
+    [approval] = [review for review in repo.reviews(number) if review["state"] == "APPROVED"]
+    assert approval["user"]["login"] == "approver1"
+    assert "renovate" in approval["body"]
+
+
+def test_renovate_update_someone_else_pushed_to_waits_for_a_human(repo, run_pass):
+    number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"})
+    pushed = repo.commit("author", "renovate/a", {"a.txt": "a 2\n"}, "fix(deps): update a (#1)")
+    eventually(lambda: repo.pusher(number, pushed))
+    repo.post_status(pushed, "success")
+
+    run_pass(mergeable=number, approvers=("approver1",))
+
+    assert not repo.pull(number)["merged"]
+    assert not [review for review in repo.reviews(number) if review["state"] == "APPROVED"]
+
+
+def test_renovates_update_labelled_at_creation_is_approved_and_merged(repo, run_pass):
+    # Gitea must record the label set in the creating call as renovate's, or no update is trusted.
+    number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"}, label_at_creation=True)
+    assert "automerge" in repo.labels(number)
+
+    run_pass(mergeable=number, approvers=("approver1",))
+
+    assert repo.pull(number)["merged"]
+
+
+def test_renovates_update_stays_trusted_across_the_queues_rebase(repo, run_pass):
+    number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"})
+    old_head = repo.head(number)
+    repo.move_main({"b.txt": "b\n"}, "feat: add b (#1)")
+
+    run_pass(mergeable=number, approvers=("approver1",))
+
+    new_head = eventually(lambda: (head := repo.head(number)) != old_head and head)
+    # The rule rests on it: Gitea records the queue's rebase as the merger's push.
+    assert eventually(lambda: repo.pusher(number, new_head)) == "queue"
+    assert not repo.pull(number)["merged"]
+
+    repo.post_status(new_head, "success")
+    run_pass(mergeable=number, approvers=("approver1",))
+
+    assert repo.pull(number)["merged"]
+    assert [review for review in repo.reviews(number)
+            if review["user"]["login"] == "approver1" and review["state"] == "APPROVED" and review["commit_id"] == new_head]

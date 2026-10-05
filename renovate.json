@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests", "helpers:pinGitHubActionDigests"],
+  "semanticCommits": "enabled",
+  "commitMessageSuffix": "(#16)",
+  "dependencyDashboard": true,
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "No update releases by default: mergeweasel's release step releases fix, feat and breaking commits only.",
+      "matchPackageNames": ["*"],
+      "semanticCommitType": "build",
+      "semanticCommitScope": "deps",
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "The image's base: an update changes what ships, so it releases.",
+      "matchFileNames": ["Dockerfile"],
+      "semanticCommitType": "fix"
+    },
+    {
+      "description": "Test dependencies and the Gitea the end-to-end test runs against.",
+      "matchFileNames": ["requirements-test.txt", "e2e/**"],
+      "semanticCommitType": "test"
+    },
+    {
+      "description": "The Gitea the end-to-end test passes against is the one mergeweasel supports: a new major or minor releases, and the notes name it.",
+      "matchFileNames": ["e2e/gitea.Dockerfile"],
+      "matchUpdateTypes": ["major", "minor"],
+      "semanticCommitType": "feat",
+      "semanticCommitScope": "gitea",
+      "commitMessageAction": "support",
+      "commitMessageTopic": "Gitea",
+      "commitMessageExtra": "v{{newMajor}}.{{newMinor}}"
+    },
+    {
+      "description": "Workflows: the actions and the pinned mergeweasel image.",
+      "matchFileNames": [".gitea/workflows/**"],
+      "semanticCommitType": "ci"
+    },
+    {
+      "description": "This repository is mergeweasel's canary: its own image without release age.",
+      "matchPackageNames": ["ghcr.io/chli1/mergeweasel"],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "The merge queue lands non-major updates; a major update waits for a human.",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "addLabels": ["automerge"]
+    }
+  ]
+}

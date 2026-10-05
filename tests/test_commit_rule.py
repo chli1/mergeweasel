@@ -1,3 +1,5 @@
+import pytest
+
 from mergeweasel import commit_rule as commit_message
 from mergeweasel.commit_rule import Commit, check_reference, check_subject, commit_problems, commit_section, squash_message
 
@@ -234,3 +236,20 @@ def test_an_unterminated_html_comment_is_rejected():
 def test_a_title_may_not_use_the_commit_exemptions():
     for title in ('Revert "anything"', "squash! ci: x (#99)", "fixup! ci: x (#99)"):
         assert squash_message(title, "", ISSUES, 213).problems[0].startswith("PR title: subject must read")
+
+
+def test_parse_subject_returns_its_parts():
+    assert commit_message.parse_subject("feat(cli)!: drop the old flag (#8)") == commit_message.Subject(
+        type="feat", scope="cli", breaking=True, description="drop the old flag", reference="#8")
+    assert commit_message.parse_subject("fix: retry on 409 (PR #12)") == commit_message.Subject(
+        type="fix", scope=None, breaking=False, description="retry on 409", reference="PR #12")
+
+
+@pytest.mark.parametrize("subject", ["wip", "feat(): x (#1)", "feature: x (#1)", 'Revert "feat: x (#1)"',
+                                     "fixup! feat: x (#1)"])
+def test_parse_subject_rejects_what_the_rule_rejects_or_exempts(subject):
+    assert commit_message.parse_subject(subject) is None
+
+
+def test_revert_pattern_captures_the_original_subject():
+    assert commit_message.REVERT.match('Revert "feat: x (#1)"')["original"] == "feat: x (#1)"

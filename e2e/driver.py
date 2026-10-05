@@ -121,8 +121,11 @@ class Repo:
     def move_main(self, files, message):
         return self.commit(ADMIN, "main", files, message)
 
-    def open_pull(self, account, branch, title, body=""):
-        return self.call(account, "POST", "/pulls", {"head": branch, "base": "main", "title": title, "body": body})["number"]
+    def open_pull(self, account, branch, title, body="", labels=()):
+        """labels: set in the creating call itself, as Renovate does."""
+        ids = [label["id"] for label in self.read("/labels") if label["name"] in labels]
+        return self.call(account, "POST", "/pulls", {"head": branch, "base": "main", "title": title, "body": body,
+                                                     "labels": ids})["number"]
 
     def post_status(self, sha, state, target_url=""):
         self.call("ci", "POST", f"/statuses/{sha}", {"state": state, "context": REQUIRED_CONTEXT, "target_url": target_url})
@@ -138,6 +141,23 @@ class Repo:
         self.post_status(self.head(number), state, target_url)
         self.approve(number)
         self.add_label(labeller, number, "automerge")
+
+    def tag(self, name):
+        """The tag a repository's owner sets by hand on main to enable releases."""
+        self.call(ADMIN, "POST", "/tags", {"tag_name": name, "target": "main"})
+
+    def open_renovate_pull(self, branch, files, title="fix(deps): update a (#1)", label_at_creation=False):
+        """Renovate's update: its commit, its pull request, its automerge label - CI green on the head.
+
+        label_at_creation: the label comes with the pull request, as Renovate's addLabels sets it;
+        otherwise in a call of its own.
+        """
+        self.commit("renovate", "main", files, title, new_branch=branch)
+        number = self.open_pull("renovate", branch, title, labels=("automerge",) if label_at_creation else ())
+        self.post_status(self.head(number), "success")
+        if not label_at_creation:
+            self.add_label("renovate", number, "automerge")
+        return number
 
     # What the assertions read.
 
@@ -165,6 +185,17 @@ class Repo:
 
     def statuses(self, sha):
         return self.read(f"/commits/{sha}/statuses")
+
+    def tags(self):
+        return {tag["name"]: tag["commit"]["sha"] for tag in self.read("/tags")}
+
+    def release(self, tag):
+        try:
+            return self.read(f"/releases/tags/{urllib.parse.quote(tag)}")
+        except ApiError as error:
+            if error.code == 404:
+                return None
+            raise
 
     def pusher(self, number, sha):
         """Who pushed the commit, as the pull request's timeline records it; None if not recorded."""

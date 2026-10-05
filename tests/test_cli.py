@@ -29,6 +29,7 @@ class Fake:
     # What own_login answers per token: a login, or an exception it raises.
     logins: dict
     run_pass: mock.Mock
+    release: mock.Mock
 
     def args(self):
         return self.run_pass.call_args.args
@@ -37,7 +38,7 @@ class Fake:
 @pytest.fixture
 def fake(monkeypatch):
     """Gitea replaced by one mock per token, the pass by a mock."""
-    fake = Fake({}, {"pat": "weasel-bot", "a-1": "approver-1", "a-2": "approver-2"}, mock.Mock())
+    fake = Fake({}, {"pat": "weasel-bot", "a-1": "approver-1", "a-2": "approver-2"}, mock.Mock(), mock.Mock(return_value=True))
 
     def factory(server, repository, token):
         client = mock.Mock(spec=Gitea)
@@ -55,6 +56,7 @@ def fake(monkeypatch):
 
     monkeypatch.setattr(cli, "Gitea", factory)
     monkeypatch.setattr(cli.queue, "run_pass", fake.run_pass)
+    monkeypatch.setattr(cli.release, "run", fake.release)
     return fake
 
 
@@ -226,3 +228,28 @@ def test_a_malformed_token_is_not_printed(env, fake, capsys):
     assert cli.main(["pass"]) == 1
     err = capsys.readouterr().err
     assert "secret-value" not in err and "MERGEWEASEL_MERGER_TOKEN" in err
+
+
+def test_pass_releases_before_it_runs(env, fake):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    order = []
+    fake.release.side_effect = lambda gitea, dry_run: order.append(("release", dry_run)) or True
+    fake.run_pass.side_effect = lambda *args: order.append(("pass",))
+    assert cli.main(["pass"]) == 0
+    assert order == [("release", False), ("pass",)]
+    assert fake.release.call_args.args[0] is fake.clients["pat"]
+
+
+def test_release_error_still_runs_the_pass_and_exits_1(env, fake):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    fake.release.return_value = False
+    assert cli.main(["pass"]) == 1
+    fake.run_pass.assert_called_once()
+
+
+def test_superseded_pass_does_not_release(env, fake, monkeypatch):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    env.setenv("GITHUB_RUN_ID", "7")
+    monkeypatch.setattr(cli.queue, "wait_for_turn", lambda gitea, own_id, event: False)
+    assert cli.main(["pass"]) == 0
+    fake.release.assert_not_called()

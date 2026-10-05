@@ -11,11 +11,12 @@ mergeweasel pass [--dry-run]
 mergeweasel check-commits --event <path>
 ```
 
-- `pass` runs one queue pass. `--dry-run` decides and reports, and changes nothing.
+- `pass` runs one queue pass, which releases `main` first. `--dry-run` decides and reports, and changes nothing.
 - `check-commits` checks what a pull request would land on `main`; `<path>` is the `pull_request`
   event payload (`$GITHUB_EVENT_PATH` in a workflow).
 
-Both exit with 0 when done or passed, and 1 when they fail.
+Both exit with 0 when done or passed, and 1 when they fail. `pass` also exits with 1 when its
+release failed - after running the pass.
 
 ## Environment
 
@@ -34,11 +35,15 @@ Both exit with 0 when done or passed, and 1 when they fail.
 
 ## Fixed values
 
+Upcoming releases make some of these configurable.
+
 | What | Value |
 |---|---|
 | Labels | `automerge`, `needs-fix`, `keep-commits` |
 | Base branch | `main` |
-| Renovate account | `renovate` - its push removes `needs-fix` |
+| Renovate account | `renovate` - its push removes `needs-fix`; its own updates - pushed only by it or the merger, `automerge` last added by it - get approved by the approver accounts |
+| Release tag | `vX.Y.Z`; the nearest one in `main`'s history is the previous release, searched at most 1000 commits back; none - no release |
+| Releasing types | `!` major; `feat` minor; `fix`, `perf`, `revert`, `Revert "..."` patch |
 | Commit types | `feat`, `fix`, `perf`, `refactor`, `style`, `docs`, `test`, `build`, `ci`, `chore`, `revert` (the list of `@commitlint/config-conventional`) |
 | Subject | `<type>[(<scope>)][!]: <description> (#<issue>)` or `... (PR #<pr>)` |
 | Scope | optional; non-empty and without whitespace |

@@ -29,12 +29,13 @@ def green():
 
 
 def pull(number, *, labels=("automerge",), behind=False, approvers=("chli1",), carried=(), poster="author",
-         approved_head=frozenset(), checks=None, draft=False, rejected=False, renovate_retried=False):
+         approved_head=frozenset(), checks=None, draft=False, rejected=False, renovate_retried=False,
+         renovate_trusted=False):
     return queue.Pull(
         number=number, head_ref=f"branch-{number}", head_sha=f"{number:040x}",
         labels={name: index for index, name in enumerate(labels)}, draft=draft, behind=behind,
         poster=poster, approvers=approvers, carried=carried, approved_head=approved_head, rejected=rejected,
-        renovate_retried=renovate_retried, statuses=green() if checks is None else checks)
+        renovate_retried=renovate_retried, renovate_trusted=renovate_trusted, statuses=green() if checks is None else checks)
 
 
 def decide(pulls, required, needed=1, approvers=(APPROVER,)):
@@ -628,6 +629,7 @@ def test_read_state_builds_queued_pulls_from_the_api():
     unlabelled = {**raw_pull, "number": 7, "labels": []}
     flagged = {**raw_pull, "number": 8, "labels": [{"name": "automerge", "id": 13}, {"name": "needs-fix", "id": 14}],
                "head": {"ref": "renovate/x", "sha": "8" * 40}}
+    by_renovate = {**raw_pull, "number": 9, "user": {"login": "renovate"}, "head": {"ref": "renovate/y", "sha": "9" * 40}}
     gitea = mock.Mock(spec=Gitea)
     gitea.call.side_effect = FakeResponses({
         ("GET", "/branches/main"): {"commit": {"id": "f" * 40}, "status_check_contexts": REQUIRED,
@@ -636,17 +638,22 @@ def test_read_state_builds_queued_pulls_from_the_api():
         ("GET", f"/compare/{'5' * 40}...{'f' * 40}"): {"total_commits": 2},
         ("GET", f"/commits/{'8' * 40}/status?limit=50"): {"statuses": []},
         ("GET", f"/compare/{'8' * 40}...{'f' * 40}"): {"total_commits": 0},
+        ("GET", f"/commits/{'9' * 40}/status?limit=50"): {"statuses": []},
+        ("GET", f"/compare/{'9' * 40}...{'f' * 40}"): {"total_commits": 0},
     })
     gitea.paged.side_effect = lambda path: {
-        "/pulls?state=open": [raw_pull, other_base, unlabelled, flagged],
+        "/pulls?state=open": [raw_pull, other_base, unlabelled, flagged, by_renovate],
         "/pulls/5/reviews": [review(), review(login=QUEUE, official=False, commit_id="5" * 40)],
         "/pulls/8/reviews": [review(state="REQUEST_CHANGES")],
         "/issues/8/timeline": [event("label", QUEUE, 10), event("pull_push", "renovate", 11)],
+        "/pulls/9/reviews": [],
+        "/issues/9/timeline": [event("label", "renovate", 20, label="automerge")],
     }[path]
     state = queue.read_state(gitea, "https://gitea", QUEUE)
     assert state.main_sha == "f" * 40 and state.required == REQUIRED and state.needed == 2
-    assert [p.number for p in state.pulls] == [5, 8]
-    queued_pull, flagged_pull = state.pulls
+    assert [p.number for p in state.pulls] == [5, 8, 9]
+    queued_pull, flagged_pull, renovate_pull = state.pulls
+    assert renovate_pull.renovate_trusted and not queued_pull.renovate_trusted and not flagged_pull.renovate_trusted
     assert queued_pull.behind and queued_pull.poster == "author"
     assert queued_pull.approvers == ("chli1",) and queued_pull.carried == ("chli1",)
     assert queued_pull.approved_head == frozenset({QUEUE})
@@ -712,3 +719,67 @@ def test_every_needs_fix_comment_names_mergeweasel():
                 queue.refused_comment("no"), queue.invalid_message_comment(["bad"], False),
                 queue.shortfall_comment()]
     assert all(comment.startswith("mergeweasel: ") for comment in comments)
+
+
+# --- trusted Renovate ---
+
+def test_renovate_trust_needs_renovates_pushes_and_label():
+    timeline = [event("label", "renovate", 10, label="automerge"), event("pull_push", "renovate", 11),
+                event("pull_push", QUEUE, 12)]
+    assert queue.renovate_trusted("renovate", timeline, QUEUE)
+
+
+def test_renovate_trust_lost_by_a_foreign_push():
+    timeline = [event("label", "renovate", 10, label="automerge"), event("pull_push", "author", 11)]
+    assert not queue.renovate_trusted("renovate", timeline, QUEUE)
+
+
+def test_renovate_trust_lost_when_a_human_labelled_last():
+    timeline = [event("label", "renovate", 10, label="automerge"), event("label", "renovate", 11, label="automerge", body="0"),
+                event("label", "chli1", 12, label="automerge")]
+    assert not queue.renovate_trusted("renovate", timeline, QUEUE)
+
+
+def test_renovate_trust_needs_renovate_as_poster():
+    assert not queue.renovate_trusted("author", [event("label", "renovate", 10, label="automerge")], QUEUE)
+
+
+def test_renovate_trust_without_a_known_merger_accepts_other_pushes():
+    # A dry run without the merger token: like the carry-over, assumed genuine.
+    timeline = [event("label", "renovate", 10, label="automerge"), event("pull_push", "someone", 11)]
+    assert queue.renovate_trusted("renovate", timeline, None)
+
+
+def test_trusted_renovate_pull_is_queued_and_approved_by_an_approver():
+    trusted = pull(6, approvers=(), poster="renovate", renovate_trusted=True)
+    assert decide([trusted], REQUIRED) == merge_action(6, approvals=((APPROVER, None),))
+
+
+def test_untrusted_renovate_pull_waits_for_a_human():
+    assert decide([pull(6, approvers=(), poster="renovate")], REQUIRED) == queue.Idle()
+
+
+def test_trusted_renovate_pull_in_a_dry_run_with_unknown_approvers():
+    trusted = pull(6, approvers=(), poster="renovate", renovate_trusted=True)
+    assert decide([trusted], REQUIRED, needed=2, approvers=None) == merge_action(6, approvals=((None, None), (None, None)))
+
+
+def test_trusted_renovate_pull_with_too_few_approvers_flags_needs_fix():
+    trusted = pull(6, approvers=(), poster="renovate", renovate_trusted=True)
+    assert isinstance(decide([trusted], REQUIRED, needed=2), queue.FlagNeedsFix)
+
+
+def test_merge_approves_a_trusted_renovate_pull_with_its_reason(monkeypatch, gitea):
+    given(monkeypatch, [pull(6, approvers=(), poster="renovate", renovate_trusted=True)])
+    log = []
+    gitea.call.side_effect = FakeResponses(pull_answer(6))
+    gitea.paged.side_effect = pages()
+    run_pass(gitea, "https://gitea", dry_run=False, approvers=approver_clients(log, "a1"))
+    assert log == [("a1", "POST", "/pulls/6/reviews",
+                    {"event": "APPROVED", "commit_id": f"{6:040x}", "body": queue.RENOVATE_APPROVAL})]
+
+
+def test_trusted_renovate_pull_without_approver_accounts_waits_for_a_human():
+    # Approver accounts are optional: without any, Renovate's update is approved by hand, not flagged.
+    trusted = pull(6, approvers=(), poster="renovate", renovate_trusted=True)
+    assert decide([trusted], REQUIRED, approvers=()) == queue.Idle()

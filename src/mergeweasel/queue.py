@@ -37,6 +37,8 @@ REFUSED_HINT = "Fix the cause, then remove `needs-fix` to queue it again."
 MESSAGE_HINT = "Fix the PR title or its `## Commit` section, then remove `needs-fix` to queue it again."
 COMMITS_HINT = "Reword the commits, or drop `keep-commits` to squash them, then remove `needs-fix` to queue it again."
 SHORTFALL_HINT = "Approve it again, then remove `needs-fix` to queue it again."
+RENOVATE_APPROVAL = (f"Approves {RENOVATE_ACCOUNT}'s update: posted, pushed and labelled `{AUTOMERGE}` "
+                     f"by {RENOVATE_ACCOUNT}, rebased only by the merge queue.")
 # Gitea's 405 while its mergeable check still runs; the next pass retries.
 TRANSIENT_MERGE_REFUSAL = "Please try again later"
 
@@ -68,6 +70,8 @@ class Pull:
     approved_head: frozenset
     # True if renovate pushed after needs-fix was last set; always False without needs-fix.
     renovate_retried: bool
+    # Posted, pushed and labelled automerge by renovate alone: the approver accounts approve it.
+    renovate_trusted: bool
     statuses: dict
 
 
@@ -191,9 +195,11 @@ def standing(pull):
     return set(pull.approvers) | set(pull.carried)
 
 
-def queued(pull, needed):
+def queued(pull, needed, approvers):
+    """approvers: the approver logins, None if unknown; without any, Renovate's update is approved by hand."""
+    renovate_approvable = pull.renovate_trusted and (approvers is None or bool(approvers))
     return (AUTOMERGE in pull.labels and NEEDS_FIX not in pull.labels and not pull.draft
-            and not pull.rejected and len(standing(pull)) >= needed)
+            and not pull.rejected and (renovate_approvable or len(standing(pull)) >= needed))
 
 
 def carried_forward(pull, approvers):
@@ -209,12 +215,15 @@ def carried_forward(pull, approvers):
 def restorations(pull, needed, approvers):
     """(approver, reviewer) per missing approval, None if too few approver accounts can approve.
 
+    reviewer None: an approval a trusted Renovate pull request is missing.
     approvers None: unknown (a dry run without approver tokens), assumed enough.
     """
     missing = needed - len(pull.approvers)
     if missing <= 0:
         return ()
     reviewers = [login for login in pull.carried if login not in pull.approvers][:missing]
+    if pull.renovate_trusted:
+        reviewers += [None] * (missing - len(reviewers))
     if approvers is None:
         return tuple((None, login) for login in reviewers)
     # Gitea refuses approving one's own pull request.
@@ -254,7 +263,7 @@ def carry_over_description(reviewers, head_sha):
 
 
 def decide(pulls, required, needed, approvers):
-    candidates = sorted((pull for pull in pulls if queued(pull, needed)), key=lambda pull: (pull.behind, pull.number))
+    candidates = sorted((pull for pull in pulls if queued(pull, needed, approvers)), key=lambda pull: (pull.behind, pull.number))
     if not candidates:
         return Idle()
     pull = candidates[0]
@@ -307,6 +316,21 @@ def renovate_pushed_since_needs_fix(timeline):
         return False
     return any(entry["type"] == "pull_push" and entry["user"]["login"] == RENOVATE_ACCOUNT and entry["id"] > max(flags)
                for entry in timeline)
+
+
+def renovate_trusted(poster, timeline, merger):
+    """Renovate's own update: no one else pushed - the merger's rebases aside - and renovate set automerge last.
+
+    Without a merger login (a dry run) any other pusher is taken for the merger, like the carry-over.
+    """
+    if poster != RENOVATE_ACCOUNT:
+        return False
+    pushers = {entry["user"]["login"] for entry in timeline if entry["type"] == "pull_push"}
+    if merger is not None and not pushers <= {RENOVATE_ACCOUNT, merger}:
+        return False
+    added = [entry["user"]["login"] for entry in timeline if entry["type"] == "label"
+             and (entry.get("label") or {}).get("name") == AUTOMERGE and entry.get("body") == "1"]
+    return bool(added) and added[-1] == RENOVATE_ACCOUNT
 
 
 def parse_carry_over(description):
@@ -388,12 +412,16 @@ def read_state(gitea, server, merger):
         behind = gitea.call("GET", f"/compare/{head_sha}...{main_sha}")["total_commits"] > 0
         reviews = gitea.paged(f"/pulls/{raw['number']}/reviews")
         flagged = NEEDS_FIX in labels
+        poster = raw["user"]["login"]
+        timeline = (gitea.paged(f"/issues/{raw['number']}/timeline")
+                    if flagged or poster == RENOVATE_ACCOUNT else [])
         pulls.append(Pull(
             number=raw["number"], head_ref=raw["head"]["ref"], head_sha=head_sha, labels=labels,
-            draft=raw.get("draft", False), behind=behind, poster=raw["user"]["login"],
+            draft=raw.get("draft", False), behind=behind, poster=poster,
             approvers=valid_approvers(reviews), carried=carried_reviewers(statuses, merger),
             rejected=rejected(reviews), approved_head=head_approvers(reviews, head_sha),
-            renovate_retried=flagged and renovate_pushed_since_needs_fix(gitea.paged(f"/issues/{raw['number']}/timeline")),
+            renovate_retried=flagged and renovate_pushed_since_needs_fix(timeline),
+            renovate_trusted=renovate_trusted(poster, timeline, merger),
             statuses=statuses_by_context(statuses, server)))
     return State(main_sha, required, branch["required_approvals"], pulls)
 
@@ -454,9 +482,9 @@ def merge(gitea, action, approvers):
     # Before the approvals: a pull request that may not land is not approved either.
     request = merge_request(gitea, action)
     for approver, reviewer in action.approvals:
+        body = RENOVATE_APPROVAL if reviewer is None else f"Approval of {reviewer}, carried over the merge queue's rebase."
         approvers[approver].call("POST", f"/pulls/{action.number}/reviews", {
-            "event": "APPROVED", "commit_id": action.head_sha,
-            "body": f"Approval of {reviewer}, carried over the merge queue's rebase."})
+            "event": "APPROVED", "commit_id": action.head_sha, "body": body})
     try:
         gitea.call("POST", f"/pulls/{action.number}/merge", request)
     except urllib.error.HTTPError as error:
