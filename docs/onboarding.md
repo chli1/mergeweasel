@@ -1,6 +1,6 @@
 # Onboarding a repository
 
-How to let mergeweasel land the pull requests of a Gitea repository. The values named here are
+How to let mergeweasel land the pull requests of a Gitea repository. Every value named here is
 listed in [configuration](configuration.md).
 
 ## Requirements
@@ -12,77 +12,98 @@ listed in [configuration](configuration.md).
 
 mergeweasel acts through accounts of its own, in two roles:
 
-- the **merger** rebases, records the approvals across a rebase and merges;
-- the **approver accounts** restore the approvals a rebase dismissed - as many as the required
-  approvals, for the queue to restore them all.
+- The **merger** rebases pull requests, records their approvals across a rebase, and merges them.
+- The **approver accounts** restore the approvals that a rebase dismissed. To restore all of them,
+  you need as many approver accounts as the number of required approvals.
 
-The merger can be one of the approver accounts; one account then fills both roles. An account used
-as approver must not open pull requests: Gitea refuses approving one's own pull request.
+One account can fill both roles: the merger can also be an approver account. An account used as an
+approver must not open pull requests, because Gitea does not let anyone approve their own pull
+request.
 
-1. Create the accounts - any names; mergeweasel reads them from the tokens.
-2. Give each write access to the repository.
-3. Create a token for each: the merger's with the scopes `write:repository`, `write:issue` and
-   `read:user`, an approver's with `write:repository` and `read:user`. Every pass reads each login
-   with `read:user` at its start.
+1. Create the accounts. Any names work; mergeweasel reads them from the tokens.
+2. Give each account write access to the repository.
+3. Create a token for each account:
+   - the merger's token with the scopes `write:repository`, `write:issue` and `read:user`;
+   - an approver's token with the scopes `write:repository` and `read:user`.
+
+   Every pass reads each account's login at its start, which needs `read:user`.
 4. Store the merger's token as the repository secret `MERGEWEASEL_MERGER_TOKEN`, and the approver
-   tokens, one per line, as `MERGEWEASEL_APPROVER_TOKENS` - for one account in both roles, its
-   token in both.
+   tokens, one per line, as `MERGEWEASEL_APPROVER_TOKENS`. If one account fills both roles, its
+   token goes into both secrets.
 
-Without approver tokens the queue restores nothing: a pull request whose approvals a rebase
+Without approver tokens the queue restores no approvals: a pull request whose approvals a rebase
 dismissed gets `needs-fix` and has to be approved again by hand.
 
-Why not the run token: Gitea starts no workflow for pushes by the Actions bot, so the checks would
-never run on a pull request the queue rebased.
+Why not the workflow's run token: Gitea starts no workflow for pushes by the Actions bot, so the
+checks would never run on a pull request the queue rebased.
 
 ## Labels
 
-Create `automerge`, `needs-fix` and `keep-commits`, at organization or repository level. Their
-meaning: [usage](usage.md#the-labels).
+Create the labels `automerge`, `needs-fix` and `keep-commits`, at organization or repository
+level. [Usage](usage.md#the-labels) explains what they mean.
+
+## Configuration
+
+This step is optional: mergeweasel works without any configuration. To change a default, add
+`mergeweasel.toml` to the root of the repository and merge it to `main`.
+[Configuration](configuration.md#the-configuration-file) lists the keys.
 
 ## Releases
 
-The queue releases `main` after each merge that holds a `feat`, `fix`, `perf`, `revert` or breaking
-change: a tag `vX.Y.Z` and a Gitea release with notes. It bumps from the nearest `vX.Y.Z` tag in
-`main`'s history; set the first one by hand on a commit of `main`, `v0.1.0` say, to start. Without
-such a tag nothing is released. Tags on other branches do not count: cut a maintenance branch only
-once `main` has moved past its line. The merger creates the tag, so workflows triggered by tag
-pushes run on it.
+After each merge, the queue checks whether the merged commits call for a release: a `feat`, `fix`,
+`perf` or `revert` commit, or a breaking change (`!`). If so, it creates a tag on `main` and a
+Gitea release with notes. `release.tag` sets the version format
+([configuration](configuration.md#the-release-tag)):
+
+- **SemVer**, `vX.Y.Z`, the default: mergeweasel counts up from the previous `vX.Y.Z` tag on
+  `main`. To start, tag a commit on `main` by hand, for example `v0.1.0`. Until that tag exists,
+  nothing is released.
+- **CalVer**, for example `tag = "{YY}.{MM}.{DD}.{count}+{sha}"`: no first tag is needed; the first
+  merge that releases creates it.
+
+Tags on other branches are ignored. If you keep a maintenance branch for an older version, create
+it only once `main` has moved past that version line - otherwise both branches can arrive at the
+same version. The merger account creates the tag, so workflows that run on tag pushes start for
+it.
 
 ## Merge styles
 
-In the repository settings, allow squash and fast-forward-only merges. The queue uses squash by
-default and fast-forward-only for `keep-commits`. Turn on *Delete pull request branch after merge
-by default*: Gitea then deletes the branch of every pull request the queue merges.
+In the repository settings, allow squash and fast-forward-only merges. The queue squashes by
+default and fast-forwards pull requests labelled `keep-commits`. Also turn on *Delete pull request
+branch after merge by default*, so Gitea deletes the branch of every pull request the queue merges.
 
 ## Branch protection
 
 Protect `main` with these settings:
 
-- **Required status checks**: on, listing the contexts of your CI plus
-  `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing -
-  no status could tell a tested head from an untested one.
-- **Required approvals**: any number, 0 included. With an approvals whitelist, it must include the
-  approver accounts; without one, any approval by an account with write access counts.
-- **Merge whitelist**: only the merger.
-- **Block merge on outdated branch**: on.
-- **Dismiss stale approvals**: recommended. The approver accounts restore the approvals a rebase
+- **Required status checks:** on, listing the checks of your CI plus
+  `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing,
+  because no status could tell a tested head from an untested one.
+- **Required approvals:** any number, 0 included. If you use an approvals whitelist, it must include
+  the approver accounts; without one, any approval by an account with write access counts.
+- **Merge whitelist:** only the merger.
+- **Block merge on outdated branch:** on.
+- **Dismiss stale approvals:** recommended. The approver accounts restore the approvals a rebase
   dismissed.
 
 ## The workflows
 
 Copy `mergeweasel-queue.yml` and `mergeweasel-commits.yml` from this repository's
-[`.gitea/workflows/`](../.gitea/workflows/) into yours, unchanged, except:
+[`.gitea/workflows/`](../.gitea/workflows/) into yours. Leave them unchanged except for:
 
-- the `workflow_run` list in `mergeweasel-queue.yml`, which names the workflows of your CI plus
-  `mergeweasel-commits` - their completion wakes the queue, after a label change too;
+- the `workflow_run` list in `mergeweasel-queue.yml`: it names the workflows of your CI plus
+  `mergeweasel-commits`. When one of them completes, the queue wakes up - this is also how a label
+  change reaches the queue;
 - the image tag, which pins an exact version.
 
-The file and workflow names stay as they are: the pass finds its own runs and statuses by them.
+Keep the file names and workflow names as they are: the pass finds its own runs and statuses by
+them.
 
 ## Server setting
 
-By default Gitea appends a `Co-authored-by` trailer to every squash the queue makes. mergeweasel
-works either way; to keep the commit messages exactly as written, set in Gitea's `app.ini`:
+By default Gitea appends a `Co-authored-by` trailer to every squash commit the queue makes.
+mergeweasel works either way. To keep the commit messages exactly as written, set this in Gitea's
+`app.ini`:
 
 ```ini
 [repository.pull-request]
@@ -91,27 +112,29 @@ ADD_CO_COMMITTER_TRAILERS = false
 
 ## Verify
 
-Run the workflow `mergeweasel-queue` by hand with `dry_run` checked. Its log shows the decision the
-queue would take, and nothing changes.
+Run the workflow `mergeweasel-queue` by hand with `dry_run` checked. Its log shows what the queue
+would do, and nothing changes.
 
 ## Troubleshooting
 
 - **The queue waits forever.** Check that `main` has required status checks, that every required
-  check reports on the pull request, and that the pull request is approved. An approval wakes
-  nothing: approved after `automerge` was set, the pull request waits for the next event - remove
-  and set `automerge` again to wake the queue.
-- **`needs-fix` comes back.** The comment names the reason. Checks are judged on the up-to-date
-  head only: fix them there, then remove `needs-fix`.
-- **"merge deferred: Please try again later".** Gitea's mergeable check was still running; the next
-  pass retries.
-- **"cannot read the account of MERGEWEASEL_MERGER_TOKEN"** (or of a token of
-  `MERGEWEASEL_APPROVER_TOKENS`, named by its position). The message carries Gitea's reason: an
-  expired or revoked token, or one without `read:user` - create a new token with the scopes listed
-  in [the accounts](#the-accounts).
-- **"... belongs to ... again".** Two approver tokens of one account; Gitea counts one approval per
-  account. Use a token of another account.
-- **"release failed: ...".** The pass ran, but releasing did not: the message carries Gitea's
-  reason. The next pass tries again; nothing is lost.
+  check reports on the pull request, and that the pull request is approved. An approval does not
+  wake the queue: a pull request approved after `automerge` was set waits for the next event.
+  Remove `automerge` and set it again to wake the queue.
+- **`needs-fix` comes back.** The comment names the reason. Checks count only on the up-to-date
+  head of the pull request: fix them there, then remove `needs-fix`.
+- **"merge deferred: Please try again later".** Gitea was still checking whether the pull request
+  can be merged; the next pass retries.
+- **"cannot read the account of MERGEWEASEL_MERGER_TOKEN"**, or of a token of
+  `MERGEWEASEL_APPROVER_TOKENS`, named by its position. The message gives Gitea's reason: the token
+  expired, was revoked, or lacks `read:user`. Create a new token with the scopes listed in
+  [the accounts](#the-accounts).
+- **"... belongs to ... again".** Two approver tokens belong to the same account, and Gitea counts
+  only one approval per account. Use a token of another account.
+- **"release failed: ...".** The pass ran, but the release did not; the message gives Gitea's
+  reason. The next pass tries again, so nothing is lost.
+- **"release failed: mergeweasel.toml: ...".** The file on `main` is invalid, and the message names
+  the key. Fix it in a pull request - the queue still lands it.
 - **"too few approver accounts to restore the approvals".** Add approver accounts to
-  `MERGEWEASEL_APPROVER_TOKENS` (and to the approvals whitelist, if set), or approve again by hand;
-  then remove `needs-fix`.
+  `MERGEWEASEL_APPROVER_TOKENS` (and to the approvals whitelist, if you use one), or approve again
+  by hand. Then remove `needs-fix`.

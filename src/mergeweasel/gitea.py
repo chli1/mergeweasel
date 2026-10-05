@@ -53,7 +53,19 @@ class Gitea:
                 return items
             page += 1
 
+    def total_count(self, path):
+        """Gitea's count of all items of a list call, from its X-Total-Count header."""
+        _, headers = self._exchange("GET", f"{self.api}{path}")
+        value = headers.get("X-Total-Count")
+        if value is None:
+            raise LookupError(f"Gitea sent no X-Total-Count for {path}")
+        return int(value)
+
     def _request(self, method, url, body=None):
+        payload, _ = self._exchange(method, url, body)
+        return json.loads(payload) if payload.strip() else None
+
+    def _exchange(self, method, url, body=None):
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(url, data=data, method=method)
         if self.token:
@@ -61,8 +73,7 @@ class Gitea:
         if data is not None:
             request.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            payload = response.read()
-        return json.loads(payload) if payload.strip() else None
+            return response.read(), response.headers
 
 
 def issue_numbers(gitea):

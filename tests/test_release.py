@@ -1,3 +1,5 @@
+import base64
+import datetime
 import io
 import json
 import urllib.error
@@ -9,15 +11,6 @@ from mergeweasel import release
 from mergeweasel.gitea import Gitea
 
 HISTORY_PATH = "/commits?sha=main&stat=false&verification=false&files=false&limit=50&page={}"
-
-
-def test_latest_version_orders_numerically_and_ignores_other_tags():
-    tags = ["v1.9.0", "v1.10.0", "v1.0", "v01.0.0", "v2.0.0-rc.1", "2.0.0", "latest", "v1.2.3"]
-    assert release.latest_version(tags) == (1, 10, 0)
-
-
-def test_latest_version_without_a_version_tag_is_none():
-    assert release.latest_version(["latest", "v1"]) is None
 
 
 @pytest.mark.parametrize("message, kind, line", [
@@ -80,10 +73,6 @@ def test_notes_group_the_changes_in_order():
         "- speed c up (#3)\n")
 
 
-def test_tag_name():
-    assert release.tag_name((1, 0, 1)) == "v1.0.1"
-
-
 # --- the release step ---
 
 def sha(number):
@@ -98,12 +87,20 @@ def tag_ref(name, number, kind="commit"):
     return {"ref": f"refs/tags/{name}", "object": {"type": kind, "sha": sha(number)}}
 
 
-def fake_gitea(refs=(tag_ref("v1.0.0", 1),), history=(history_commit(1, "feat: start (#1)"),), post=None, answers=None):
-    """refs: GET git/refs/tags; history: main's commits, newest first, served 50 per page."""
+MISSING = urllib.error.HTTPError("url", 404, "Not Found", hdrs=None, fp=None)
+CALVER = '[release]\ntag = "{YY}.{MM}.{DD}.{count}+{sha}"\n'
+NOW = datetime.datetime(2026, 10, 5, 14, 0, tzinfo=datetime.timezone.utc)
+
+
+def fake_gitea(refs=(tag_ref("v1.0.0", 1),), history=(history_commit(1, "feat: start (#1)"),), post=None, answers=None,
+               config=None, count=None):
+    """refs: GET git/refs/tags; history: main's commits, newest first, served 50 per page;
+    config: mergeweasel.toml on main, None for none; count: X-Total-Count of the commits API."""
     gitea = mock.Mock(spec=Gitea)
     pages = {HISTORY_PATH.format(page): list(history[(page - 1) * 50:page * 50]) for page in range(1, len(history) // 50 + 2)}
-    known = {("GET", "/git/refs/tags"): list(refs), **{("GET", path): batch for path, batch in pages.items()},
-             **(answers or {})}
+    config_answer = MISSING if config is None else {"type": "file", "content": base64.b64encode(config.encode()).decode()}
+    known = {("GET", "/git/refs/tags"): list(refs), ("GET", "/contents/mergeweasel.toml?ref=main"): config_answer,
+             **{("GET", path): batch for path, batch in pages.items()}, **(answers or {})}
 
     def call(method, path, body=None):
         if method == "POST" and post is not None:
@@ -114,6 +111,7 @@ def fake_gitea(refs=(tag_ref("v1.0.0", 1),), history=(history_commit(1, "feat: s
         return answer
 
     gitea.call.side_effect = call
+    gitea.total_count.return_value = count
     return gitea
 
 
@@ -190,8 +188,8 @@ def test_tag_on_mains_head_releases_nothing():
 def test_no_version_tag_reads_no_history(capsys, refs):
     gitea = fake_gitea(refs=refs)
     assert release.run(gitea, dry_run=False)
-    assert posts(gitea) == [] and reads(gitea) == ["/git/refs/tags"]
-    assert "no vX.Y.Z tag" in capsys.readouterr().out
+    assert posts(gitea) == [] and reads(gitea) == ["/contents/mergeweasel.toml?ref=main", "/git/refs/tags"]
+    assert "no tag matching v{major}.{minor}.{patch} to bump from" in capsys.readouterr().out
 
 
 def test_no_tags_at_all_answers_404():
@@ -203,7 +201,7 @@ def test_no_version_tag_on_main_is_an_error(capsys):
     gitea = fake_gitea(refs=[tag_ref("v1.0.0", 99)], history=[history_commit(2, "fix: repair (#2)")])
     assert not release.run(gitea, dry_run=False)
     assert posts(gitea) == []
-    assert "no vX.Y.Z tag on main" in capsys.readouterr().err
+    assert "no tag matching v{major}.{minor}.{patch} on main" in capsys.readouterr().err
 
 
 def test_the_walk_stops_at_its_limit(capsys):
@@ -250,3 +248,82 @@ def test_any_unexpected_answer_is_a_release_error(capsys):
     gitea = fake_gitea(refs=[{"ref": "refs/tags/v1.0.0", "object": None}])
     assert not release.run(gitea, dry_run=False)
     assert "release failed" in capsys.readouterr().err
+
+
+COUNT_PATH = "/commits?sha={}&stat=false&verification=false&files=false&limit=1"
+
+
+def test_a_custom_semver_template_bumps_from_its_own_tags():
+    gitea = fake_gitea(config='[release]\ntag = "release-{major}.{minor}.{patch}"\n',
+                       refs=[tag_ref("release-1.4.0", 1), tag_ref("v9.0.0", 1)],
+                       history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
+    assert release.run(gitea, dry_run=False)
+    assert posts(gitea)[0][2]["tag_name"] == "release-1.4.1"
+
+
+def test_the_default_template_reads_no_count():
+    gitea = fake_gitea(history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
+    release.run(gitea, dry_run=False)
+    gitea.total_count.assert_not_called()
+
+
+def test_calver_without_a_tag_of_its_shape_releases_mains_head(capsys):
+    # The old v1.0.0 is no release under the new template; the head alone decides.
+    gitea = fake_gitea(config=CALVER, count=412,
+                       history=[history_commit(3, "fix: repair (#2)"), history_commit(2, "feat: older (#1)"),
+                                history_commit(1, "feat: start (#1)")])
+    assert release.run(gitea, dry_run=False, now=NOW)
+    assert posts(gitea) == [("POST", "/releases", {
+        "tag_name": "26.10.5.412+0000000", "target_commitish": sha(3), "name": "26.10.5.412+0000000",
+        "body": "## Fixes\n\n- repair (#2)\n"})]
+    gitea.total_count.assert_called_once_with(COUNT_PATH.format(sha(3)))
+    assert HISTORY_PATH.format(2) not in reads(gitea)
+    assert "released 26.10.5.412+0000000" in capsys.readouterr().out
+
+
+def test_calver_without_a_tag_waits_for_a_releasing_head(capsys):
+    gitea = fake_gitea(config=CALVER, count=3, refs=[],
+                       history=[history_commit(3, "ci: switch to CalVer (#1)"), history_commit(2, "feat: older (#1)")])
+    assert release.run(gitea, dry_run=False, now=NOW)
+    assert posts(gitea) == []
+    assert "nothing to release on 0000000" in capsys.readouterr().out
+
+
+def test_calver_walks_back_to_its_previous_release():
+    gitea = fake_gitea(config=CALVER, count=412, refs=[tag_ref("26.10.4.410+0000001", 1)],
+                       history=[history_commit(3, "feat: add a (#1)"), history_commit(2, "fix: repair b (#2)"),
+                                history_commit(1, "feat: start (#1)")])
+    assert release.run(gitea, dry_run=False, now=NOW)
+    assert posts(gitea)[0][2]["tag_name"] == "26.10.5.412+0000000"
+    assert posts(gitea)[0][2]["body"] == "## Features\n\n- add a (#1)\n\n## Fixes\n\n- repair b (#2)\n"
+
+
+def test_a_calver_name_taken_already_is_an_error(capsys):
+    gitea = fake_gitea(config='[release]\ntag = "{YY}.{MM}.{DD}"\n', refs=[tag_ref("26.10.5", 1)],
+                       history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
+    assert not release.run(gitea, dry_run=False, now=NOW)
+    assert posts(gitea) == []
+    assert "26.10.5 exists on another commit" in capsys.readouterr().err
+
+
+def test_dry_run_names_the_calver_release(capsys):
+    gitea = fake_gitea(config=CALVER, count=412, history=[history_commit(3, "fix: repair (#2)")])
+    assert release.run(gitea, dry_run=True, now=NOW)
+    assert posts(gitea) == []
+    assert "would release 26.10.5.412+0000000" in capsys.readouterr().out
+
+
+def test_an_invalid_configuration_is_a_release_error(capsys):
+    gitea = fake_gitea(config='[release]\ntag = "{yy}"\n')
+    assert not release.run(gitea, dry_run=False)
+    assert "release failed: mergeweasel.toml: release.tag: unknown placeholder {yy}" in capsys.readouterr().err
+
+
+def test_without_a_given_time_the_date_is_utc():
+    gitea = fake_gitea(config='[release]\ntag = "{YYYY}.{MM}.{DD}.{count}"\n', count=5,
+                       history=[history_commit(2, "fix: repair (#2)")])
+    before = datetime.datetime.now(datetime.timezone.utc)
+    release.run(gitea, dry_run=False)
+    after = datetime.datetime.now(datetime.timezone.utc)
+    dates = {f"{moment.year}.{moment.month}.{moment.day}.5" for moment in (before, after)}
+    assert posts(gitea)[0][2]["tag_name"] in dates

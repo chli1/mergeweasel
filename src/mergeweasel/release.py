@@ -1,23 +1,24 @@
 """The release step: tag main and publish a Gitea release with notes when it holds releasing commits.
 
-The version comes from the Conventional Commits since the nearest `vX.Y.Z` tag in main's history. How and why:
-docs/design.md, "Releases".
+The commit types since the previous release - the nearest tag in main's history of the template's shape - decide
+whether to release; the template in mergeweasel.toml names the release. How and why: docs/design.md, "Releases".
 """
 import dataclasses
-import re
+import datetime
+import itertools
 import sys
 import urllib.error
 
-from mergeweasel import commit_rule
+from mergeweasel import commit_rule, config
 from mergeweasel.gitea import PAGE_SIZE, error_message
 from mergeweasel.queue import BASE_BRANCH
 
-VERSION_TAG = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 BREAKING, FEATURE, FIX = "breaking", "feature", "fix"
 # semantic-release's default rules; every other type releases nothing.
 PATCH_TYPES = ("fix", "perf", "revert")
 SECTIONS = ((BREAKING, "Breaking changes"), (FEATURE, "Features"), (FIX, "Fixes"))
 TAG_REFS = "refs/tags/"
+COMMIT_QUERY = "stat=false&verification=false&files=false"
 # How far back main's history is searched for the previous release.
 MAX_COMMITS = 1000
 
@@ -29,12 +30,6 @@ class Change:
     line: str
     # A breaking change's commit body - what users must do; empty for the others.
     body: str
-
-
-def latest_version(tag_names):
-    versions = [tuple(int(part) for part in match.groups())
-                for match in map(VERSION_TAG.match, tag_names) if match]
-    return max(versions, default=None)
 
 
 def change(message):
@@ -84,25 +79,26 @@ def notes(changes):
     return "\n".join(blocks)
 
 
-def tag_name(version):
-    return "v{}.{}.{}".format(*version)
+def newest(template, names):
+    """The previous release among the tags on one commit: the highest version, for SemVer."""
+    return max(names, key=template.version) if template.semver else max(names)
 
 
-def run(gitea, dry_run):
+def run(gitea, dry_run, now=None):
     """Release main if it holds releasing commits; False after an error, which it prints.
 
     Never raises: a failed release must not hold up the queue, the job fails at its end.
     """
     try:
-        return _release(gitea, dry_run)
+        return _release(gitea, dry_run, now or datetime.datetime.now(datetime.timezone.utc))
     except Exception as error:
         reason = error_message(error) if isinstance(error, urllib.error.HTTPError) else error
         print(f"release failed: {reason}", file=sys.stderr)
         return False
 
 
-def version_tags(gitea):
-    """Tag name -> commit sha of every vX.Y.Z tag; the git refs API lists them all in one call."""
+def release_tags(gitea, template):
+    """Tag name -> commit sha of every tag of the template's shape; the git refs API lists them all in one call."""
     try:
         refs = gitea.call("GET", "/git/refs/tags")
     except urllib.error.HTTPError as error:
@@ -113,7 +109,7 @@ def version_tags(gitea):
     tags = {}
     for ref in refs:
         name = ref["ref"].removeprefix(TAG_REFS)
-        if not VERSION_TAG.match(name):
+        if not template.matches(name):
             continue
         target = ref["object"]
         # An annotated tag's ref points at the tag object, not at the commit.
@@ -125,43 +121,49 @@ def version_tags(gitea):
 def history(gitea):
     """main's commits, newest first, at most MAX_COMMITS of them."""
     for page in range(1, MAX_COMMITS // PAGE_SIZE + 1):
-        batch = gitea.call("GET", f"/commits?sha={BASE_BRANCH}&stat=false&verification=false&files=false"
-                                  f"&limit={PAGE_SIZE}&page={page}")
+        batch = gitea.call("GET", f"/commits?sha={BASE_BRANCH}&{COMMIT_QUERY}&limit={PAGE_SIZE}&page={page}")
         yield from batch
         if len(batch) < PAGE_SIZE:
             return
 
 
-def _release(gitea, dry_run):
-    tags = version_tags(gitea)
-    if not tags:
-        print("release: no vX.Y.Z tag to bump from, nothing released")
+def _release(gitea, dry_run, now):
+    template = config.load(gitea).tag
+    tags = release_tags(gitea, template)
+    if not tags and template.semver:
+        print(f"release: no tag matching {template.text} to bump from, nothing released")
         return True
-    on_commit = {}
-    for name, commit in tags.items():
-        on_commit.setdefault(commit, []).append(name)
-    # main is linear: the nearest tagged commit in its history is the previous release.
-    since, version, walked = [], None, 0
-    for commit in history(gitea):
-        walked += 1
-        if commit["sha"] in on_commit:
-            version = latest_version(on_commit[commit["sha"]])
-            break
-        since.append(commit)
-    if version is None:
-        where = f"within the last {MAX_COMMITS} commits of" if walked >= MAX_COMMITS else "on"
-        print(f"release failed: no vX.Y.Z tag {where} {BASE_BRANCH}", file=sys.stderr)
-        return False
-    base = tag_name(version)
+    since, base = [], None
+    if tags:
+        on_commit = {}
+        for name, commit in tags.items():
+            on_commit.setdefault(commit, []).append(name)
+        # main is linear: the nearest tagged commit in its history is the previous release.
+        walked = 0
+        for commit in history(gitea):
+            walked += 1
+            if commit["sha"] in on_commit:
+                base = newest(template, on_commit[commit["sha"]])
+                break
+            since.append(commit)
+        if base is None:
+            where = f"within the last {MAX_COMMITS} commits of" if walked >= MAX_COMMITS else "on"
+            print(f"release failed: no tag matching {template.text} {where} {BASE_BRANCH}", file=sys.stderr)
+            return False
+    else:
+        # Without SemVer fields the name needs no previous release: main's head alone decides the first one.
+        since = list(itertools.islice(history(gitea), 1))
     if not since:
         return True
     head = since[0]["sha"]
     changes = [item for item in (change(commit["commit"]["message"]) for commit in reversed(since)) if item]
-    following = next_version(version, changes)
-    if following is None:
-        print(f"release: nothing to release since {base}")
+    if not changes:
+        print(f"release: nothing to release since {base}" if base
+              else f"release: nothing to release on {head[:7]}, the first {template.text} release waits for a releasing commit")
         return True
-    name, text = tag_name(following), notes(changes)
+    version = next_version(template.version(base), changes) if template.semver else None
+    count = gitea.total_count(f"/commits?sha={head}&{COMMIT_QUERY}&limit=1") if template.uses_count else None
+    name, text = template.render(version=version, now=now, count=count, sha=head), notes(changes)
     if name in tags:
         print(f"release failed: {name} exists on another commit, {tags[name][:7]}", file=sys.stderr)
         return False

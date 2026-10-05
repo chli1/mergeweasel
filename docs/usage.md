@@ -4,18 +4,19 @@ For pull request authors in a repository that runs mergeweasel.
 
 ## The labels
 
-- **`automerge`** - queue the pull request: approve it first if the repository requires approvals,
-  then set the label - an approval alone does not wake the queue. It lands once its checks pass. Removing the label withdraws it,
-  mid-check included.
-- **`needs-fix`** - set by mergeweasel, always with a comment that says why. Fix the cause, then
-  remove the label to queue the pull request again. A push by Renovate removes it by itself.
-- **`keep-commits`** - land the branch's commits as they are instead of squashing them.
+- **`automerge`** queues the pull request. If the repository requires approvals, approve the pull
+  request first and set the label afterwards: an approval alone does not wake the queue. The pull
+  request lands once its checks pass. Removing the label withdraws it, even while its checks run.
+- **`needs-fix`** is set by mergeweasel, always together with a comment that says why. Fix the
+  cause, then remove the label to queue the pull request again. A push by Renovate removes the
+  label by itself.
+- **`keep-commits`** lands the branch's commits as they are instead of squashing them into one.
 
 ## The commit message
 
-By default mergeweasel squashes: the pull request's **title** becomes the commit's subject, and the
-**`## Commit` section** of its description becomes the commit's body. The rules are listed in
-[configuration](configuration.md#fixed-values).
+By default mergeweasel squashes the pull request into one commit. The pull request's **title**
+becomes the commit's subject, and the **`## Commit` section** of its description becomes the
+commit's body. [Configuration](configuration.md#fixed-values) lists the exact rules.
 
 Valid titles:
 
@@ -26,8 +27,10 @@ feat!: drop the v1 endpoints (#30)
 chore: tidy the README (PR #31)
 ```
 
-`(#N)` names an issue of the repository; `(PR #N)` is for a change without an issue and names the
-pull request itself. Rejected titles:
+`(#N)` names an issue of the repository. `(PR #N)` is for a change without an issue and names the
+pull request itself.
+
+Rejected titles:
 
 ```
 feat(): add dark mode (#12)        an empty scope - leave out the parentheses
@@ -35,7 +38,7 @@ feat(my ui): add dark mode (#12)   a scope with whitespace
 add dark mode                      no type, no reference
 ```
 
-A description with a `## Commit` section; only that section lands, everything from the next `##`
+A description with a `## Commit` section. Only that section lands; everything from the next `##`
 heading on stays in the pull request:
 
 ```markdown
@@ -49,29 +52,35 @@ browser.
 Screenshots and the review discussion stay here.
 ```
 
-The section is optional, keeps to the line limit in
-[configuration](configuration.md#fixed-values), and carries no `Co-authored-by:` or "Generated with"
-line.
+The section is optional. It must keep to the line limit in
+[configuration](configuration.md#fixed-values) and must not contain a `Co-authored-by:` or
+"Generated with" line.
 
 ## What releases
 
-After the merge, the queue releases if the repository has a `vX.Y.Z` tag: `feat` makes a minor
-release, `fix`, `perf` and `revert` a patch release, `!` a major one; the other types release
-nothing. The release notes list the description of each releasing commit; a breaking change's
-`## Commit` section appears under it - say there what users must change.
+After the merge, the queue releases if the repository is set up for it
+([onboarding](onboarding.md#releases)). The commit types decide whether a merge releases: `feat`,
+`fix`, `perf`, `revert` and breaking changes (`!`) do, the other types do not. With SemVer
+versions, the default, they also decide the increase: `!` raises the major version, `feat` the
+minor version, and the others the patch version.
+
+The release notes list the description of each releasing commit. Under a breaking change they also
+show its `## Commit` section, so say there what users must change.
 
 ## `keep-commits`
 
-Every commit of the pull request lands as it is, so every commit follows the subject rule above, and
-none is a merge commit. Subjects made by `git commit --fixup`, `--squash` and `git revert`
-(`fixup! ...`, `squash! ...`, `Revert "..."`) are exempt - they refer to an earlier commit.
+Every commit of the pull request lands as it is. So every commit must follow the subject rule
+above, and none may be a merge commit. Subjects made by `git commit --fixup`, `git commit --squash`
+and `git revert` (`fixup! ...`, `squash! ...`, `Revert "..."`) are exempt, because they refer to an
+earlier commit.
 
 ## What a `needs-fix` comment means
 
-- **Required checks failed** - re-run the failed jobs or push a fix.
-- **Rebasing onto `main` failed with a conflict** - rebase onto `main` yourself and resolve it.
-- **Gitea refused the merge** - fix the cause Gitea names.
-- **What this pull request would land on main is invalid** - fix the title, the `## Commit`
+- **Required checks failed:** re-run the failed jobs or push a fix.
+- **Rebasing onto `main` failed with a conflict:** rebase onto `main` yourself and resolve the
+  conflict.
+- **Gitea refused the merge:** fix the cause Gitea names.
+- **What this pull request would land on main is invalid:** fix the title or the `## Commit`
   section, or with `keep-commits` the commits.
 
 Then remove `needs-fix`.

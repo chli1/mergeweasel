@@ -1,4 +1,6 @@
 """The release step against a real Gitea: the tag, the release and its notes."""
+import datetime
+import re
 
 TITLE = "fix: repair a (#1)"
 
@@ -42,7 +44,7 @@ def test_without_a_version_tag_nothing_is_released(repo, run_pass):
     output = run_pass()
 
     assert repo.tags() == {}
-    assert "no vX.Y.Z tag" in output
+    assert "no tag matching v{major}.{minor}.{patch}" in output
 
 
 def test_gitea_lists_every_tag_ref_in_one_call(repo):
@@ -52,3 +54,41 @@ def test_gitea_lists_every_tag_ref_in_one_call(repo):
         repo.tag(name)
     refs = repo.read("/git/refs/tags")
     assert {ref["ref"].removeprefix("refs/tags/") for ref in refs} == names
+
+
+CALVER = '[release]\ntag = "{YYYY}.{MM}.{DD}.{count}+{sha}"\n'
+
+
+def utc_dates(*moments):
+    return {f"{moment.year}.{moment.month}.{moment.day}" for moment in moments}
+
+
+def release_on(repo, sha):
+    names = [name for name, commit in repo.tags().items() if commit == sha]
+    assert len(names) == 1, names
+    return names[0]
+
+
+def commit_count(repo, sha):
+    return len(repo.read(f"/commits?sha={sha}&stat=false&verification=false&files=false&limit=50"))
+
+
+def test_calver_releases_from_the_first_releasing_merge(repo, run_pass):
+    before = datetime.datetime.now(datetime.timezone.utc)
+    repo.move_main({"mergeweasel.toml": CALVER}, "ci: release with CalVer (#1)")
+    first = merge_through_the_queue(repo, run_pass, TITLE)
+
+    run_pass()
+
+    name = release_on(repo, first)
+    date, count, short = re.fullmatch(r"(\d{4}\.\d+\.\d+)\.(\d+)\+([0-9a-f]{7})", name).groups()
+    assert date in utc_dates(before, datetime.datetime.now(datetime.timezone.utc))
+    assert int(count) == commit_count(repo, first) and short == first[:7]
+    assert repo.release(name)["body"] == "## Fixes\n\n- repair a (#1)\n"
+
+    second = merge_through_the_queue(repo, run_pass, "feat: add b (#1)", branch="second")
+    run_pass()
+
+    following = release_on(repo, second)
+    assert following.endswith(f".{commit_count(repo, second)}+{second[:7]}")
+    assert repo.release(following)["body"] == "## Features\n\n- add b (#1)\n"

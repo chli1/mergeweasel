@@ -10,8 +10,9 @@ from mergeweasel.commit_rule import Commit
 
 
 class Response:
-    def __init__(self, payload):
+    def __init__(self, payload, headers=None):
         self.payload = payload
+        self.headers = headers or {}
 
     def __enter__(self):
         return self
@@ -85,3 +86,22 @@ def test_error_message_reads_giteas_message():
     error = urllib.error.HTTPError("url", 405, "Method Not Allowed", hdrs=None,
                                    fp=io.BytesIO(b'{"message": "Please try again later"}'))
     assert gitea_module.error_message(error) == "Please try again later"
+
+
+def test_total_count_reads_gitea_s_count_header(monkeypatch):
+    seen = []
+
+    def urlopen(request, timeout=None):
+        seen.append(request.full_url)
+        return Response([{}], {"X-Total-Count": "412"})
+
+    monkeypatch.setattr(gitea_module.urllib.request, "urlopen", urlopen)
+    client = gitea_module.Gitea("https://git.example", "org/repo", "secret")
+    assert client.total_count("/commits?sha=abc&limit=1") == 412
+    assert seen == ["https://git.example/api/v1/repos/org/repo/commits?sha=abc&limit=1"]
+
+
+def test_total_count_without_the_header_is_an_error(monkeypatch):
+    monkeypatch.setattr(gitea_module.urllib.request, "urlopen", lambda request, timeout=None: Response([{}]))
+    with pytest.raises(LookupError, match="X-Total-Count"):
+        gitea_module.Gitea("https://git.example", "org/repo", "").total_count("/commits?limit=1")
