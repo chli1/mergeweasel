@@ -39,7 +39,8 @@ def subject_problem(subject):
     return f"subject must read '{FORMAT}', or end in '(PR #<pr>)' without an issue, got: {subject!r}"
 
 
-def check_subject(subject):
+def check_subject(subject, scopes=None):
+    """scopes: the allowed ones, None for any (mergeweasel.toml's commits.scopes)."""
     if EXEMPT.match(subject):
         return None
     match = SUBJECT.match(subject)
@@ -50,6 +51,9 @@ def check_subject(subject):
     scope = match["scope"]
     if scope is not None and (not scope or re.search(r"\s", scope)):
         return f"scope must be non-empty and without whitespace, got {scope!r}; leave out the parentheses for no scope"
+    if scope is not None and scopes is not None and scope not in scopes:
+        allowed = f"expected one of: {', '.join(scopes)}" if scopes else "this repository allows no scope"
+        return f"unknown scope {scope!r}, {allowed}"
     return None
 
 
@@ -71,8 +75,8 @@ def parse_subject(subject):
     return Subject(match["type"], match["scope"], bool(match["breaking"]), match["description"], match["reference"])
 
 
-def check_reference(subject, known_issues, pr_number):
-    problem = check_subject(subject)
+def check_reference(subject, known_issues, pr_number, scopes=None):
+    problem = check_subject(subject, scopes)
     match = SUBJECT.match(subject)
     if problem or not match:
         return problem
@@ -91,14 +95,14 @@ class Commit:
     parent_count: int
 
 
-def commit_problems(commits, known_issues, pr_number):
+def commit_problems(commits, known_issues, pr_number, scopes=None):
     """A keep-commits pull request: every commit lands as it is, so every commit is checked."""
     problems = []
     for commit in commits:
         if commit.parent_count > 1:
             problems.append(f"{commit.sha[:7]}: {MERGE_REJECTED}")
             continue
-        problem = check_reference(commit.subject, known_issues, pr_number)
+        problem = check_reference(commit.subject, known_issues, pr_number, scopes)
         if problem:
             problems.append(f"{commit.sha[:7]}: {problem}")
     return problems
@@ -153,7 +157,7 @@ class SquashMessage:
     problems: tuple
 
 
-def squash_message(title, pr_body, known_issues, pr_number):
+def squash_message(title, pr_body, known_issues, pr_number, scopes=None):
     """The squash commit a pull request lands as: its title, then its `## Commit` section."""
     subject = (title or "").strip()
     body, problems = commit_section(pr_body)
@@ -161,7 +165,7 @@ def squash_message(title, pr_body, known_issues, pr_number):
     if EXEMPT.match(subject):
         title_problem = subject_problem(subject)
     else:
-        title_problem = check_reference(subject, known_issues, pr_number)
+        title_problem = check_reference(subject, known_issues, pr_number, scopes)
     if title_problem:
         problems = [f"PR title: {title_problem}", *problems]
     return SquashMessage(subject, body, tuple(problems))

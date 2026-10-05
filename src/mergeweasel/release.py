@@ -10,8 +10,8 @@ import sys
 import urllib.error
 
 from mergeweasel import commit_rule, config
+from mergeweasel.config import BASE_BRANCH
 from mergeweasel.gitea import PAGE_SIZE, error_message
-from mergeweasel.queue import BASE_BRANCH
 
 BREAKING, FEATURE, FIX = "breaking", "feature", "fix"
 # semantic-release's default rules; every other type releases nothing.

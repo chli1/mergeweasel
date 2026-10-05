@@ -8,7 +8,7 @@ import json
 import sys
 import urllib.error
 
-from mergeweasel import commit_rule
+from mergeweasel import commit_rule, config
 from mergeweasel.gitea import issue_numbers, pull_commits
 from mergeweasel.queue import KEEP_COMMITS
 
@@ -28,6 +28,8 @@ def run(gitea, event_path):
     number = pull["number"]
     keep_commits = KEEP_COMMITS in {label["name"] for label in pull.get("labels") or []}
     try:
+        # The pull request's own version: one that breaks the file fails here, not on main.
+        scopes = config.load(gitea, pull["head"]["sha"]).scopes
         issues = issue_numbers(gitea)
         commits = pull_commits(gitea, number) if keep_commits else []
     except urllib.error.HTTPError as error:
@@ -39,15 +41,18 @@ def run(gitea, event_path):
     except urllib.error.URLError as error:
         print(f"could not reach the Gitea API: {error.reason}", file=sys.stderr)
         return 1
+    except config.ConfigError as error:
+        print(error)
+        return 1
 
     if keep_commits:
         if not commits:
             print("the pull request has no commits - refusing to pass vacuously")
             return 1
-        problems = commit_rule.commit_problems(commits, issues, number)
+        problems = commit_rule.commit_problems(commits, issues, number, scopes)
         print(f"{KEEP_COMMITS}: {len(commits)} commit(s) checked, {len(problems)} problem(s)")
     else:
-        message = commit_rule.squash_message(pull["title"], pull.get("body"), issues, number)
+        message = commit_rule.squash_message(pull["title"], pull.get("body"), issues, number, scopes)
         problems = list(message.problems)
         print("squash commit:\n")
         print(f"{message.subject}\n\n{message.body}" if message.body else message.subject)

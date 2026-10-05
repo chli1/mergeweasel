@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import io
 import json
@@ -333,9 +334,14 @@ class FakeResponses:
         return [(method, path, body) for method, path, body in self.calls if method != "GET"]
 
 
-def pull_answer(number, title=None, body=""):
-    """GET /pulls/{n} as the queue reads it right before merging."""
-    return {("GET", f"/pulls/{number}"): {"title": title or f"ci: land {number} (#1)", "body": body}}
+def pull_answer(number, title=None, body="", config=None):
+    """GET /pulls/{n} and mergeweasel.toml (None: no file) as the queue reads them right before merging."""
+    if config is None:
+        toml = http_error(404, "not found")
+    else:
+        toml = {"type": "file", "content": base64.b64encode(config.encode()).decode()}
+    return {("GET", f"/pulls/{number}"): {"title": title or f"ci: land {number} (#1)", "body": body},
+            ("GET", f"/contents/mergeweasel.toml?ref={number:040x}"): toml}
 
 
 def pages(issues=(1,), commits=None):
@@ -556,6 +562,32 @@ def test_keep_commits_with_a_bad_commit_flags_needs_fix(monkeypatch, gitea):
     assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
     assert "aaaaaaa: subject must read" in writes[1][2]["body"]
     assert "drop `keep-commits`" in writes[1][2]["body"]
+
+
+def test_unknown_scope_at_merge_time_flags_needs_fix(monkeypatch, gitea):
+    given(monkeypatch, [pull(6)])
+    gitea.call.side_effect = FakeResponses(
+        pull_answer(6, title="feat(domian): x (#1)", config='[commits]\nscopes = ["domain", "ui"]\n'))
+    gitea.paged.side_effect = pages()
+    run_pass(gitea, "https://gitea", dry_run=False)
+    writes = gitea.call.side_effect.writes()
+    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
+    assert "unknown scope 'domian', expected one of: domain, ui" in writes[1][2]["body"]
+
+
+def test_invalid_config_on_the_branch_flags_needs_fix_and_hands_over(monkeypatch, gitea):
+    given(monkeypatch, [pull(6), pull(7, behind=True)])
+    gitea.call.side_effect = FakeResponses({
+        **pull_answer(6, config="[comits]\n"),
+        ("GET", "/git/refs/heads/branch-7"): [{"ref": "refs/heads/branch-7", "object": {"sha": "e" * 40}}],
+    })
+    gitea.paged.side_effect = pages()
+    action = run_pass(gitea, "https://gitea", dry_run=False)
+    writes = gitea.call.side_effect.writes()
+    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
+    assert "mergeweasel.toml: unknown key comits" in writes[1][2]["body"]
+    assert "Fix `mergeweasel.toml` on the branch" in writes[1][2]["body"]
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
 
 
 def test_refused_merge_flags_needs_fix_with_giteas_reason_and_hands_over(monkeypatch, gitea):

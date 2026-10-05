@@ -1,3 +1,4 @@
+import base64
 import json
 import urllib.error
 from unittest import mock
@@ -15,8 +16,17 @@ def raw_commit(sha, subject, parents=1):
     return {"sha": sha, "commit": {"message": f"{subject}\n\nbody"}, "parents": [{"sha": "p" * 40}] * parents}
 
 
-def api(commits=(), issues=(99, 209)):
+def api(commits=(), issues=(99, 209), config=None):
+    """config: mergeweasel.toml's text at the head, None without the file."""
     gitea = mock.Mock(spec=Gitea)
+
+    def call(method, path):
+        assert (method, path) == ("GET", f"/contents/mergeweasel.toml?ref={'h' * 40}")
+        if config is None:
+            raise urllib.error.HTTPError("url", 404, "Not Found", hdrs=None, fp=None)
+        return {"type": "file", "content": base64.b64encode(config.encode()).decode()}
+
+    gitea.call.side_effect = call
 
     def paged(path):
         if path == ISSUES_PATH:
@@ -68,8 +78,38 @@ def test_squash_fails_on_a_bad_section(tmp_path, capsys):
 def test_null_body_and_labels_are_a_subject_only_commit(tmp_path):
     path = tmp_path / "event.json"
     path.write_text(json.dumps({"pull_request": {
-        "number": 213, "title": "ci: x (#209)", "body": None, "labels": None, "base": {"sha": "b" * 40}}}))
+        "number": 213, "title": "ci: x (#209)", "body": None, "labels": None,
+        "base": {"sha": "b" * 40}, "head": {"sha": "h" * 40}}}))
     assert check.run(api(), str(path)) == 0
+
+
+# --- configured scopes ---
+
+SCOPES = '[commits]\nscopes = ["domain", "ui"]\n'
+
+
+def test_a_configured_scope_passes(tmp_path):
+    assert check.run(api(config=SCOPES), event(tmp_path, title="feat(ui): x (#209)")) == 0
+
+
+def test_an_unknown_scope_fails_naming_the_allowed_ones(tmp_path, capsys):
+    assert check.run(api(config=SCOPES), event(tmp_path, title="feat(domian): x (#209)")) == 1
+    assert "unknown scope 'domian', expected one of: domain, ui" in capsys.readouterr().out
+
+
+def test_without_the_file_any_scope_passes(tmp_path):
+    assert check.run(api(), event(tmp_path, title="feat(domian): x (#209)")) == 0
+
+
+def test_an_unknown_scope_fails_a_kept_commit(tmp_path, capsys):
+    gitea = api(commits=[raw_commit("a" * 40, "feat(domian): x (#99)")], config=SCOPES)
+    assert check.run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
+    assert "aaaaaaa: unknown scope 'domian'" in capsys.readouterr().out
+
+
+def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
+    assert check.run(api(config="[comits]\n"), event(tmp_path)) == 1
+    assert "mergeweasel.toml: unknown key comits" in capsys.readouterr().out
 
 
 # --- keep-commits ---
@@ -107,7 +147,7 @@ def test_a_merged_pull_request_passes_without_a_check(tmp_path, capsys, labels):
 # --- failures around the check ---
 
 def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
-    gitea = mock.Mock(spec=Gitea)
+    gitea = api()
     gitea.paged.side_effect = urllib.error.HTTPError(
         "https://git.example/api/v1/repos/org/repo/issues", 403, "Forbidden", hdrs=None, fp=None)
     assert check.run(gitea, event(tmp_path)) == 1

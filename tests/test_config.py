@@ -24,6 +24,12 @@ def test_the_file_is_read_from_main():
     gitea.call.assert_called_once_with("GET", "/contents/mergeweasel.toml?ref=main")
 
 
+def test_the_file_is_read_at_a_given_commit():
+    gitea = gitea_with(contents(""))
+    config.load(gitea, "a" * 40)
+    gitea.call.assert_called_once_with("GET", f"/contents/mergeweasel.toml?ref={'a' * 40}")
+
+
 def test_without_the_file_everything_is_default():
     missing = urllib.error.HTTPError("url", 404, "Not Found", hdrs=None, fp=None)
     assert config.load(gitea_with(missing)).tag.text == config.DEFAULT_TAG
@@ -44,6 +50,18 @@ def test_missing_keys_take_their_default(text):
     assert config.parse(text).tag.text == config.DEFAULT_TAG
 
 
+def test_without_scopes_any_scope_passes():
+    assert config.parse("").scopes is None
+
+
+@pytest.mark.parametrize("text, scopes", [
+    ('[commits]\nscopes = ["domain", "ui"]\n', ("domain", "ui")),
+    ("[commits]\nscopes = []\n", ()),
+])
+def test_scopes_are_read(text, scopes):
+    assert config.parse(text).scopes == scopes
+
+
 def test_crlf_line_ends_parse():
     assert config.parse('[release]\r\ntag = "{YY}.{count}"\r\n').tag.text == "{YY}.{count}"
 
@@ -55,6 +73,11 @@ def test_crlf_line_ends_parse():
     ("[release]\ntag = 1\n", "mergeweasel.toml: release.tag must be a string"),
     ('[release]\ntag = "{yy}"\n', "mergeweasel.toml: release.tag: unknown placeholder {yy}"),
     ("[release\n", "mergeweasel.toml: "),
+    ('[commits]\nscopes = "ui"\n', "mergeweasel.toml: commits.scopes must be a list of strings"),
+    ("[commits]\nscopes = [1]\n", "mergeweasel.toml: commits.scopes: 1 is not a scope"),
+    ('[commits]\nscopes = [""]\n', "mergeweasel.toml: commits.scopes: '' is not a scope"),
+    ('[commits]\nscopes = ["my ui"]\n', "mergeweasel.toml: commits.scopes: 'my ui' is not a scope"),
+    ('[commits]\nscopes = ["u)i"]\n', "mergeweasel.toml: commits.scopes: 'u)i' is not a scope"),
 ])
 def test_invalid_files_name_the_key(text, message):
     with pytest.raises(config.ConfigError) as raised:

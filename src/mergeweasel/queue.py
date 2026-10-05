@@ -10,7 +10,8 @@ import time
 import urllib.error
 import urllib.parse
 
-from mergeweasel import commit_rule
+from mergeweasel import commit_rule, config
+from mergeweasel.config import BASE_BRANCH
 from mergeweasel.gitea import PAGE_SIZE, error_message, issue_numbers, pull_commits, retried
 
 # The workflow's name: Gitea prefixes its job statuses with it.
@@ -24,7 +25,6 @@ AUTOMERGE = "automerge"
 NEEDS_FIX = "needs-fix"
 KEEP_COMMITS = "keep-commits"
 CARRY_OVER_CONTEXT = "mergeweasel/approval"
-BASE_BRANCH = "main"
 
 FAILED = ("error", "failure", "warning")
 PASSED = ("success", "skipped")
@@ -35,6 +35,7 @@ RED_HINT = "Re-run the failed jobs or push a fix, then remove `needs-fix` to que
 CONFLICT_HINT = f"Rebase onto `{BASE_BRANCH}` and resolve the conflict, then remove `needs-fix` to queue it again."
 REFUSED_HINT = "Fix the cause, then remove `needs-fix` to queue it again."
 MESSAGE_HINT = "Fix the PR title or its `## Commit` section, then remove `needs-fix` to queue it again."
+CONFIG_HINT = f"Fix `{config.CONFIG_FILE}` on the branch, then remove `needs-fix` to queue it again."
 COMMITS_HINT = "Reword the commits, or drop `keep-commits` to squash them, then remove `needs-fix` to queue it again."
 SHORTFALL_HINT = "Approve it again, then remove `needs-fix` to queue it again."
 RENOVATE_APPROVAL = (f"Approves {RENOVATE_ACCOUNT}'s update: posted, pushed and labelled `{AUTOMERGE}` "
@@ -258,6 +259,10 @@ def invalid_message_comment(problems, keep_commits):
                       COMMITS_HINT if keep_commits else MESSAGE_HINT])
 
 
+def invalid_config_comment(error):
+    return f"mergeweasel: {error}\n\n{CONFIG_HINT}"
+
+
 def carry_over_description(reviewers, head_sha):
     return "\n".join([f"approved at {head_sha[:7]}", *(f"approved by {login}" for login in reviewers)])
 
@@ -456,20 +461,22 @@ def rebased_head(gitea, head_ref):
 
 
 def merge_request(gitea, action):
-    """What Gitea is asked to land; MessageInvalid if it may not land.
+    """What Gitea is asked to land; MessageInvalid or ConfigError if it may not land.
 
     Read here, not in read_state: the title, body and commits can change after the commit-message
     check ran, and only this read decides what lands.
     """
+    # The pull request's own version, as in check-commits: one that breaks the file does not land.
+    scopes = config.load(gitea, action.head_sha).scopes
     issues = issue_numbers(gitea)
     if action.keep_commits:
         commits = pull_commits(gitea, action.number)
-        problems = commit_rule.commit_problems(commits, issues, action.number)
+        problems = commit_rule.commit_problems(commits, issues, action.number, scopes)
         request = {"Do": "fast-forward-only", "head_commit_id": action.head_sha}
     else:
         pull_request = gitea.call("GET", f"/pulls/{action.number}")
         message = commit_rule.squash_message(
-            pull_request["title"], pull_request.get("body"), issues, action.number)
+            pull_request["title"], pull_request.get("body"), issues, action.number, scopes)
         problems = list(message.problems)
         request = {"Do": "squash", "MergeTitleField": message.subject, "MergeMessageField": message.body,
                    "head_commit_id": action.head_sha}
@@ -514,7 +521,10 @@ def relabel(pulls, number, add=None, remove=None):
 
 
 def execute(gitea, action, approvers):
-    """Carry out a Rebase or Merge; a conflict, a refused merge or an invalid message becomes a needs-fix hand-over."""
+    """Carry out a Rebase or Merge.
+
+    A conflict, a refused merge, an invalid config or message becomes a needs-fix hand-over.
+    """
     try:
         if isinstance(action, Rebase):
             rebase(gitea, action)
@@ -524,6 +534,8 @@ def execute(gitea, action, approvers):
         return FlagNeedsFix(action.number, conflict_comment())
     except MergeRefused as refusal:
         return FlagNeedsFix(action.number, refused_comment(refusal.message))
+    except config.ConfigError as error:
+        return FlagNeedsFix(action.number, invalid_config_comment(error))
     except MessageInvalid as invalid:
         return FlagNeedsFix(action.number, invalid_message_comment(invalid.problems, invalid.keep_commits))
     return action

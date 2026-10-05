@@ -100,8 +100,8 @@ approval wakes nothing: the label `automerge` comes after it. Before its step, a
    up-to-date head decide.
 5. **Up to date and pending:** stop.
 6. **Up to date and green:**
-   1. Validate what would land (see [What lands on main](#what-lands-on-main)). An invalid message
-      flags `needs-fix` and hands over.
+   1. Validate what would land (see [What lands on main](#what-lands-on-main)). An invalid message,
+      or an invalid `mergeweasel.toml` on the branch, flags `needs-fix` and hands over.
    2. Restore the missing approvals through the approver accounts (see below), or give a trusted
       Renovate pull request the approvals it is missing. Too few usable accounts flag `needs-fix`
       and hand over.
@@ -194,10 +194,20 @@ and merging leaves them valid on that head, so the next pass only merges.
 `check-commits` and the queue share one rule, so they cannot disagree. The queue validates again
 right before the merge, because the title, body and commits can change after the check ran.
 
-**Subject**: Conventional Commits with the issue as suffix. The format, the types and the scope rule
-are in [configuration](configuration.md#fixed-values).
+**Subject**: Conventional Commits with the issue as suffix. The format and the types are in
+[configuration](configuration.md#fixed-values), the scopes in
+[configuration](configuration.md#scopes).
 
 - No scope means no parentheses: `feat(): ...` is rejected, and so is `feat(my ui): ...`.
+- The scope is free by default. A repository can restrict it to a fixed list with `commits.scopes`
+  in `mergeweasel.toml` ([configuration](configuration.md#scopes)).
+
+The commit check reads `mergeweasel.toml` from the pull request's head, not from `main`. Read from
+`main`, an invalid file would fail the check of every pull request - including the one that fixes
+the file, which could then only be merged by hand. Read from the head, the invalid file fails only
+the pull request that introduces it; that one is flagged `needs-fix`, and the file never reaches
+`main` through the queue. As a side effect, a pull request that changes the scope list is checked
+against the list it brings, which is what its reviewers see in the diff.
 - `!` marks a breaking change, which makes a release a major one.
 - `(#N)` must be an issue of the repository. `(PR #N)` is for a change without an issue and must be
   this pull request.

@@ -18,6 +18,25 @@ def test_accepts_any_scope():
         assert check_subject(f"fix({scope}): bind commits to issues (#99)") is None
 
 
+def test_configured_scopes_reject_any_other():
+    assert check_subject("feat(ui): add dark mode (#99)", ("domain", "ui")) is None
+    assert check_subject("feat(domian): add dark mode (#99)", ("domain", "ui")) == (
+        "unknown scope 'domian', expected one of: domain, ui")
+    assert check_subject("feat: add dark mode (#99)", ("domain", "ui")) is None
+
+
+def test_no_configured_scope_rejects_every_scope():
+    assert check_subject("feat(ui): add dark mode (#99)", ()) == "unknown scope 'ui', this repository allows no scope"
+    assert check_subject("feat: add dark mode (#99)", ()) is None
+
+
+def test_configured_scopes_reach_titles_and_commits():
+    message = squash_message("feat(domian): x (#99)", "", ISSUES, 1, ("domain",))
+    assert message.problems == ("PR title: unknown scope 'domian', expected one of: domain",)
+    commits = [Commit("a" * 40, "feat(domian): x (#99)", 1)]
+    assert commit_problems(commits, ISSUES, 1, ("domain",)) == ["aaaaaaa: unknown scope 'domian', expected one of: domain"]
+
+
 def test_accepts_a_breaking_marker_with_and_without_a_scope():
     assert check_subject("feat!: build multi-stage rockets (#75)") is None
     assert check_subject("feat(ui)!: introduce a dark theme (#206)") is None

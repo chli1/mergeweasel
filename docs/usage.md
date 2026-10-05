@@ -18,6 +18,11 @@ By default mergeweasel squashes the pull request into one commit. The pull reque
 becomes the commit's subject, and the **`## Commit` section** of its description becomes the
 commit's body. [Configuration](configuration.md#fixed-values) lists the exact rules.
 
+The scope - `api` in `fix(api): ...` - is optional. Unless the repository says otherwise, any scope
+is accepted. A repository can restrict the scopes to a fixed list in its `mergeweasel.toml`
+([configuration](configuration.md#scopes)); a title with any other scope is then rejected, and the
+message lists the scopes the repository allows.
+
 Valid titles:
 
 ```
@@ -35,6 +40,7 @@ Rejected titles:
 ```
 feat(): add dark mode (#12)        an empty scope - leave out the parentheses
 feat(my ui): add dark mode (#12)   a scope with whitespace
+feat(domian): add dark mode (#12)  a scope missing from commits.scopes, if the repository sets it
 add dark mode                      no type, no reference
 ```
 
@@ -81,6 +87,10 @@ earlier commit.
   conflict.
 - **Gitea refused the merge:** fix the cause Gitea names.
 - **What this pull request would land on main is invalid:** fix the title or the `## Commit`
-  section, or with `keep-commits` the commits.
+  section, or with `keep-commits` the commits. An unknown scope shows up here too: use one of the
+  scopes the message lists, or leave the scope out.
+- **`mergeweasel.toml` is invalid:** the pull request changes `mergeweasel.toml`, and the changed
+  file cannot be read - an unknown key, say, or a value of the wrong type. The comment names the
+  problem. Fix the file on the branch.
 
 Then remove `needs-fix`.

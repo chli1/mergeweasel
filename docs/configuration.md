@@ -32,8 +32,20 @@ when its release failed, after it has run the rest of the pass.
 
 ## The configuration file
 
-An optional file named `mergeweasel.toml` in the root of the repository. mergeweasel always reads
-the version on `main`, so a change takes effect once its pull request is merged.
+An optional file named `mergeweasel.toml` in the root of the repository.
+
+Which version of the file mergeweasel reads depends on what it is doing:
+
+- **The release** reads the version on `main`. A change to `release.tag` therefore takes effect with
+  the first release after its pull request is merged.
+- **The commit check** reads the version on the pull request's branch. This covers both
+  `check-commits` and the check the queue runs right before it merges. So a pull request that
+  changes the file is already checked against its own change: one that adds a scope to
+  `commits.scopes` may use that scope in its own title.
+
+Because the commit check reads the branch's version, a pull request that breaks the file - with a
+typo in a key, say - fails its own check, and the queue flags it `needs-fix` instead of merging it.
+An invalid file therefore stays on its branch and never holds up the other pull requests.
 
 Every key is optional; a missing key keeps its default. An unknown key or an invalid value is an
 error, and the message names the key.
@@ -41,6 +53,49 @@ error, and the message names the key.
 | Key | Default | Meaning |
 |---|---|---|
 | `release.tag` | `"v{major}.{minor}.{patch}"` | how versions look - see [the release tag](#the-release-tag) |
+| `commits.scopes` | any scope | the scopes a subject may use - see [scopes](#scopes) |
+
+### Scopes
+
+The scope is the optional part in parentheses after the commit type: `ui` in
+`feat(ui): add dark mode (#12)`. By default any scope is accepted, as long as it is not empty and
+contains no whitespace. That also means a typo goes through unnoticed: `feat(domian): ...` passes
+just like `feat(domain): ...`.
+
+A repository with a fixed set of scopes - its modules, for example - can list them in
+`commits.scopes`:
+
+```toml
+[commits]
+scopes = ["domain", "ui", "deps"]
+```
+
+With this list, a subject may only use one of these scopes. Any other scope fails `check-commits`,
+and the queue flags the pull request `needs-fix` instead of merging it. The message names the
+unknown scope and lists the allowed ones:
+
+```
+PR title: unknown scope 'domian', expected one of: domain, ui, deps
+```
+
+The list restricts only subjects that have a scope. A subject without one, like
+`feat: add dark mode (#12)`, is always accepted.
+
+There are three cases to tell apart:
+
+| `mergeweasel.toml` | Effect |
+|---|---|
+| no `commits.scopes` key | any scope is accepted - the default |
+| `scopes = ["domain", "ui"]` | only `domain` and `ui` are accepted |
+| `scopes = []` | no scope is accepted; every subject must do without one |
+
+Each entry must itself be a valid scope: a non-empty string without whitespace and without `)`.
+Otherwise the file is invalid, and the message names the entry.
+
+**Renovate.** Renovate writes its subjects with the scope `deps`, for example
+`fix(deps): update dependency pytest to v8.4.2`. A repository that uses Renovate and sets
+`commits.scopes` has to include `deps` in the list, or every Renovate pull request is flagged
+`needs-fix`.
 
 ### The release tag
 
@@ -141,7 +196,6 @@ Upcoming releases make some of these configurable.
 | Releasing types | `!` major; `feat` minor; `fix`, `perf`, `revert`, `Revert "..."` patch |
 | Commit types | `feat`, `fix`, `perf`, `refactor`, `style`, `docs`, `test`, `build`, `ci`, `chore`, `revert` (the list of `@commitlint/config-conventional`) |
 | Subject | `<type>[(<scope>)][!]: <description> (#<issue>)` or `... (PR #<pr>)` |
-| Scope | optional; if present, non-empty and without whitespace |
 | `## Commit` lines | at most 72 characters, except for lines without whitespace |
 | Workflows | `mergeweasel-queue.yml` (workflow `mergeweasel-queue`), `mergeweasel-commits.yml` (workflow `mergeweasel-commits`) |
 | Carry-over status | context `mergeweasel/approval`; description `approved at <old head>`, then one line `approved by <login>` per reviewer |
