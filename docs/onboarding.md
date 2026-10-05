@@ -21,12 +21,9 @@ approver must not open pull requests, because Gitea does not let anyone approve 
 request.
 
 1. Create the accounts. Any names work; mergeweasel reads them from the tokens.
-2. Give each account write access to the repository.
-3. Create a token for each account:
-   - the merger's token with the scopes `write:repository`, `write:issue` and `read:user`;
-   - an approver's token with the scopes `write:repository` and `read:user`.
-
-   Every pass reads each account's login at its start, which needs `read:user`.
+2. Give each account access to the repository, as listed in
+   [permissions](#permissions): as a collaborator with *Write*, or through a team.
+3. Create a token for each account with the scopes listed in [permissions](#permissions).
 4. Store the merger's token as the repository secret `MERGEWEASEL_MERGER_TOKEN`, and the approver
    tokens, one per line, as `MERGEWEASEL_APPROVER_TOKENS`. If one account fills both roles, its
    token goes into both secrets.
@@ -36,6 +33,29 @@ dismissed gets `needs-fix` and has to be approved again by hand.
 
 Why not the workflow's run token: Gitea starts no workflow for pushes by the Actions bot, so the
 checks would never run on a pull request the queue rebased.
+
+### Permissions
+
+A collaborator with *Write* has every repository permission below. A team grants them per unit:
+set each unit as listed. An account that fills both roles needs both columns.
+
+| Repository unit | Merger | Approver | What for |
+|---|---|---|---|
+| Code | write | read | the merger rebases pull requests and sets the carry-over status; both read commits |
+| Pull requests | write | write | the merger merges and sets labels and comments; the approvers approve |
+| Releases | write | - | the merger creates the release after a releasing merge |
+| Issues | read | - | the merger checks that `(#N)` in a title names an issue |
+| Actions | read | - | the merger reads the queue's workflow runs, to run one pass at a time |
+
+In a public repository everyone can read, so only the write permissions need granting. On `main`'s
+branch protection, the merger must be in the merge whitelist, and the approvers in the approvals
+whitelist if you use one ([branch protection](#branch-protection)).
+
+| Token scope | Merger | Approver | What for |
+|---|---|---|---|
+| `write:repository` | yes | yes | everything on code, pull requests, releases and actions |
+| `write:issue` | yes | - | labels and comments on pull requests |
+| `read:user` | yes | yes | every pass reads each account's login at its start |
 
 ## Labels
 
@@ -133,6 +153,9 @@ would do, and nothing changes.
   only one approval per account. Use a token of another account.
 - **"release failed: ...".** The pass ran, but the release did not; the message gives Gitea's
   reason. The next pass tries again, so nothing is lost.
+- **"release failed: user should have a permission to write to a repo".** The merger lacks write
+  permission on the Releases unit - typically through a team that grants permissions per unit. Grant
+  it as listed in [permissions](#permissions); the next pass releases.
 - **"release failed: mergeweasel.toml: ...".** The file on `main` is invalid, and the message names
   the key. Fix it in a pull request - the queue still lands it.
 - **"too few approver accounts to restore the approvals".** Add approver accounts to
