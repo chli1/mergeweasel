@@ -124,6 +124,14 @@ class Merge:
     keep_commits: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class Land:
+    """A Merge whose message and config were validated: what execute() merges."""
+    merge: Merge
+    # The squash message, None to fast-forward.
+    message: object
+
+
 def combine(states):
     """Gitea's CommitStatusStates.Combine."""
     if any(state in FAILED for state in states):
@@ -404,19 +412,33 @@ def merge_message(gitea, action):
     return message
 
 
-def merge(gitea, action, approvers, label_ids, settings):
-    # Before the approvals: a pull request that may not land is not approved either.
-    message = merge_message(gitea, action)
-    for approval in action.approvals:
-        approvers.client(approval.approver).approve(action.number, action.head_sha, approval.body(settings))
+def validated(gitea, action, settings):
+    """A Merge as a Land, or as a needs-fix hand-over if what it would land is invalid.
+
+    Reads only, so a dry run flags and hands over as a real pass does.
+    """
+    if not isinstance(action, Merge):
+        return action
     try:
-        gitea.merge(action.number, action.head_sha, message)
+        return Land(action, merge_message(gitea, action))
+    except config.ConfigError as error:
+        return FlagNeedsFix(action.number, invalid_config_comment(error, settings))
+    except MessageInvalid as invalid:
+        return FlagNeedsFix(action.number, invalid_message_comment(invalid.problems, invalid.keep_commits, settings))
+
+
+def merge(gitea, action, approvers, label_ids, settings):
+    pull = action.merge
+    for approval in pull.approvals:
+        approvers.client(approval.approver).approve(pull.number, pull.head_sha, approval.body(settings))
+    try:
+        gitea.merge(pull.number, pull.head_sha, action.message)
     except MergeDeferred as deferred:
         # Checks still settling or the head moved: the next pass sees the new state.
-        print(f"#{action.number}: merge deferred: {deferred.message}")
+        print(f"#{pull.number}: merge deferred: {deferred.message}")
         return
     # Only after the merge landed: a deferred or refused pull request stays queued.
-    gitea.remove_label(action.number, label_ids[action.number][settings.automerge])
+    gitea.remove_label(pull.number, label_ids[pull.number][settings.automerge])
 
 
 def relabel(pulls, number, add=None, remove=None):
@@ -433,23 +455,19 @@ def relabel(pulls, number, add=None, remove=None):
 
 
 def execute(gitea, action, approvers, label_ids, settings):
-    """Carry out a Rebase or Merge.
+    """Carry out a Rebase or Land.
 
-    A conflict, a refused merge, an invalid config or message becomes a needs-fix hand-over.
+    A conflict or a refused merge - found only by the write - becomes a needs-fix hand-over.
     """
     try:
         if isinstance(action, Rebase):
             rebase(gitea, action)
-        elif isinstance(action, Merge):
+        elif isinstance(action, Land):
             merge(gitea, action, approvers, label_ids, settings)
     except Conflict:
         return FlagNeedsFix(action.number, conflict_comment(settings))
     except MergeRefused as refusal:
-        return FlagNeedsFix(action.number, refused_comment(refusal.message, settings))
-    except config.ConfigError as error:
-        return FlagNeedsFix(action.number, invalid_config_comment(error, settings))
-    except MessageInvalid as invalid:
-        return FlagNeedsFix(action.number, invalid_message_comment(invalid.problems, invalid.keep_commits, settings))
+        return FlagNeedsFix(action.merge.number, refused_comment(refusal.message, settings))
     return action
 
 
@@ -466,7 +484,7 @@ def run_pass(gitea, server, dry_run, merger, approvers, settings):
         pulls = [dataclasses.replace(pull, statuses={}) if pull.number == retry.number else pull
                  for pull in relabel(pulls, retry.number, remove=settings.needs_fix)]
     while True:
-        action = decide(pulls, state.required, state.needed, approvers, settings)
+        action = validated(gitea, decide(pulls, state.required, state.needed, approvers, settings), settings)
         print(action)
         if not dry_run:
             executed = execute(gitea, action, approvers, state.label_ids, settings)

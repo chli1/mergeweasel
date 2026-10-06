@@ -110,7 +110,8 @@ approval wakes nothing: the label `automerge` comes after it. Before its step, a
 5. **Up to date and pending:** stop.
 6. **Up to date and green:**
    1. Validate what would land (see [What lands on main](#what-lands-on-main)). An invalid message,
-      or an invalid `mergeweasel.toml` on the branch, flags `needs-fix` and hands over.
+      or an invalid `mergeweasel.toml` on the branch, flags `needs-fix` and hands over. The
+      validation only reads, so a dry run runs it too and flags and hands over as a real pass does.
    2. Restore the missing approvals through the approver accounts (see below), or give a trusted
       Renovate pull request the approvals it is missing. Too few usable accounts flag `needs-fix`
       and hand over.

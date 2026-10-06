@@ -54,6 +54,10 @@ def merge_action(number, approvals=(), keep_commits=False):
     return queue.Merge(number, f"{number:040x}", approvals=approvals, keep_commits=keep_commits)
 
 
+def land(number, message, approvals=(), keep_commits=False):
+    return queue.Land(merge_action(number, approvals, keep_commits), message)
+
+
 def run_pass(gitea, server, dry_run, approvers=None):
     """A pass as the merger QUEUE; approvers maps logins to clients, none by default."""
     return queue.run_pass(gitea, server, dry_run, MERGER, Approvers({} if approvers is None else approvers), SETTINGS)
@@ -552,7 +556,7 @@ def test_transient_merge_refusal_ends_the_pass_quietly(monkeypatch, gitea, capsy
     gitea.merge.side_effect = MergeDeferred("Please try again later", 405)
     action = run_pass(gitea, "https://gitea", dry_run=False)
     assert writes(gitea) == [("merge", (6, f"{6:040x}", squash(6)))]
-    assert action == merge_action(6)
+    assert action == land(6, squash(6))
     assert "#6: merge deferred: Please try again later" in capsys.readouterr().out
 
 
@@ -595,9 +599,52 @@ def test_dry_run_writes_nothing(monkeypatch, gitea):
 
 def test_dry_run_with_dry_run_approvers_assumes_enough(monkeypatch, gitea):
     given(monkeypatch, [pull(6, approvers=(), carried=("chli1",))])
+    answer_pull(gitea, 6)
     action = queue.run_pass(gitea, "https://gitea", True, DryRunMerger(), DryRunApprovers(), SETTINGS)
     assert writes(gitea) == []
-    assert action == merge_action(6, approvals=(queue.Restored(DRY_RUN_APPROVER, "chli1"),))
+    assert action == land(6, squash(6), approvals=(queue.Restored(DRY_RUN_APPROVER, "chli1"),))
+
+
+def test_dry_run_flags_an_invalid_title_and_hands_over(monkeypatch, gitea, capsys):
+    given(monkeypatch, [pull(6), pull(7, behind=True)])
+    answer_pull(gitea, 6, title="land six")
+    action = run_pass(gitea, "https://gitea", dry_run=True)
+    assert writes(gitea) == []
+    assert "PR title: subject must read" in capsys.readouterr().out
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
+
+
+def test_dry_run_flags_an_invalid_config_and_hands_over(monkeypatch, gitea, capsys):
+    given(monkeypatch, [pull(6), pull(7, behind=True)])
+    answer_pull(gitea, 6, config="[comits]\n")
+    action = run_pass(gitea, "https://gitea", dry_run=True)
+    assert writes(gitea) == []
+    assert "mergeweasel.toml: unknown key comits" in capsys.readouterr().out
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
+
+
+def test_dry_run_flags_a_bad_kept_commit_and_hands_over(monkeypatch, gitea, capsys):
+    given(monkeypatch, [pull(6, labels=("automerge", "keep-commits")), pull(7, behind=True)])
+    answer_pull(gitea, 6)
+    gitea.pull_commits.return_value = [Commit("a" * 40, "wip", 1)]
+    action = run_pass(gitea, "https://gitea", dry_run=True)
+    assert writes(gitea) == []
+    assert "aaaaaaa: subject must read" in capsys.readouterr().out
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
+
+
+def test_only_a_merge_is_validated(gitea):
+    assert queue.validated(gitea, queue.Wait(3), SETTINGS) == queue.Wait(3)
+    assert gitea.mock_calls == []
+
+
+def test_execute_leaves_message_problems_to_validation(gitea):
+    # A Land is validated already: execute reads neither the message nor the config again.
+    answer_pull(gitea, 6, title="land six", config="[comits]\n")
+    executed = queue.execute(gitea, land(6, squash(6)), Approvers({}), {6: LABEL_IDS}, SETTINGS)
+    assert executed == land(6, squash(6))
+    gitea.pull.assert_not_called()
+    gitea.file.assert_not_called()
 
 
 def open_pull(number, labels=("automerge",), base="main", poster="author", head_ref="feature"):
