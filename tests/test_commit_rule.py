@@ -1,7 +1,8 @@
 import pytest
 
 from mergeweasel import commit_rule as commit_message
-from mergeweasel.commit_rule import Commit, check_reference, check_subject, commit_problems, commit_section, squash_message
+from mergeweasel.commit_rule import (Commit, check_reference, check_subject, commit_problems, commit_section,
+                                     referenced_issues, squash_message)
 
 ISSUES = {99, 209}
 
@@ -116,6 +117,12 @@ def test_reference_rejects_a_foreign_pr_number():
 
 def test_reference_reports_the_format_before_the_reference():
     assert check_reference("feature: x (#4711)", {99}, 101).startswith("unknown type")
+
+
+def test_referenced_issues_are_the_distinct_issue_references():
+    subjects = ["ci: one (#99)", "ci: two (#99)", "ci: three (PR #101)", "wip #5", 'Revert "ci: x (#7)"',
+                "fixup! ci: y (#8)", " fix: four (#209) "]
+    assert referenced_issues(subjects) == {99, 209}
 
 
 def test_reference_lets_exempt_subjects_pass():

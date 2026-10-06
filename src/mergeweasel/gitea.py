@@ -278,8 +278,12 @@ class Gitea:
         return [Commit(raw["sha"], raw["commit"]["message"].split("\n", 1)[0], len(raw.get("parents") or []))
                 for raw in self._pages(f"/pulls/{number}/commits?{COMMIT_QUERY}")]
 
-    def issue_numbers(self):
-        return {issue["number"] for issue in self._pages("/issues?state=all&type=issues")}
+    def is_issue(self, number):
+        """False for a pull request, which Gitea also serves as an issue, and for a missing number."""
+        try:
+            return self._json("GET", f"/issues/{number}").get("pull_request") is None
+        except NotFound:
+            return False
 
     def file(self, path, ref):
         """The file's content as of ref - a branch or a commit's SHA -, None if it does not exist there."""

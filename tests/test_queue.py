@@ -335,7 +335,7 @@ WRITES = ("rebase", "merge", "approve", "add_label", "remove_label", "comment", 
 @pytest.fixture
 def gitea():
     client = mock.create_autospec(Gitea, instance=True)
-    client.issue_numbers.return_value = {1}
+    client.is_issue.side_effect = lambda number: number == 1
     client.file.return_value = None
     return client
 
@@ -486,6 +486,7 @@ def test_keep_commits_fast_forwards_after_checking_every_commit(monkeypatch, git
     gitea.pull_commits.return_value = [Commit("a" * 40, "ci: move (#1)", 1), Commit("b" * 40, "ci: edit (#1)", 1)]
     run_pass(gitea, "https://gitea", dry_run=False)
     gitea.pull_commits.assert_called_once_with(6)
+    gitea.is_issue.assert_called_once_with(1)
     assert writes(gitea)[0] == ("merge", (6, f"{6:040x}", None))
 
 
@@ -503,6 +504,23 @@ def test_invalid_title_read_at_merge_time_flags_needs_fix_and_hands_over(monkeyp
     assert "PR title: subject must read" in done[1][1][1]
     assert "`## Commit` section" in done[1][1][1]
     assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
+
+
+def test_squash_looks_up_the_title_s_issue_at_merge_time(monkeypatch, gitea):
+    given(monkeypatch, [pull(6)])
+    answer_pull(gitea, 6, title=" ci: land 6 (#1) ", body="## Commit\nSee #4711.")
+    run_pass(gitea, "https://gitea", dry_run=False)
+    gitea.is_issue.assert_called_once_with(1)
+    assert writes(gitea)[0][0] == "merge"
+
+
+def test_title_referencing_no_issue_flags_needs_fix(monkeypatch, gitea):
+    given(monkeypatch, [pull(6)])
+    answer_pull(gitea, 6, title="ci: land 6 (#4711)")
+    run_pass(gitea, "https://gitea", dry_run=False)
+    done = writes(gitea)
+    assert done[0] == ("add_label", (6, "needs-fix"))
+    assert "PR title: #4711 is not an issue of this repository" in done[1][1][1]
 
 
 def test_keep_commits_with_a_bad_commit_flags_needs_fix(monkeypatch, gitea):

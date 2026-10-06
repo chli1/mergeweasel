@@ -399,12 +399,14 @@ def merge_message(gitea, action):
     """
     # The pull request's own version, as in check-commits: one that breaks the file does not land.
     scopes = config.load(gitea, action.head_sha).scopes
-    issues = gitea.issue_numbers()
     if action.keep_commits:
         message = None
-        problems = commit_rule.commit_problems(gitea.pull_commits(action.number), issues, action.number, scopes)
+        commits = gitea.pull_commits(action.number)
+        issues = commit_rule.known_issues([commit.subject for commit in commits], gitea.is_issue)
+        problems = commit_rule.commit_problems(commits, issues, action.number, scopes)
     else:
         pull_request = gitea.pull(action.number)
+        issues = commit_rule.known_issues([pull_request.title], gitea.is_issue)
         message = commit_rule.squash_message(pull_request.title, pull_request.body, issues, action.number, scopes)
         problems = list(message.problems)
     if problems:

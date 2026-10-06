@@ -236,14 +236,21 @@ def test_timeline_decodes_pushes_and_label_events(monkeypatch):
         gitea_module.TimelineEvent(4, gitea_module.OTHER, "chli1", None)]
 
 
-def test_pull_commits_and_issue_numbers(monkeypatch):
-    seen = serve(monkeypatch, [{"sha": "a" * 40, "commit": {"message": "feat: x (#1)\n\nbody"}, "parents": [{}]}],
-                 [{"number": 1}, {"number": 4}])
+def test_pull_commits(monkeypatch):
+    seen = serve(monkeypatch, [{"sha": "a" * 40, "commit": {"message": "feat: x (#1)\n\nbody"}, "parents": [{}]}])
     assert client().pull_commits(7) == [Commit("a" * 40, "feat: x (#1)", 1)]
-    assert client().issue_numbers() == {1, 4}
-    assert [url for _, url, _ in seen] == [
-        f"{API}/pulls/7/commits?stat=false&verification=false&files=false&limit=50&page=1",
-        f"{API}/issues?state=all&type=issues&limit=50&page=1"]
+    assert seen[0][1] == f"{API}/pulls/7/commits?stat=false&verification=false&files=false&limit=50&page=1"
+
+
+def test_is_issue_rejects_a_pull_request_and_a_missing_number(monkeypatch):
+    seen = serve(monkeypatch, {"number": 4, "pull_request": None}, {"number": 5, "pull_request": {"merged": False}},
+                 http_error(404), http_error(403, "Forbidden"))
+    assert client().is_issue(4) is True
+    assert client().is_issue(5) is False
+    assert client().is_issue(6) is False
+    with pytest.raises(gitea_module.ApiError, match="Forbidden"):
+        client().is_issue(7)
+    assert [url for _, url, _ in seen] == [f"{API}/issues/{number}" for number in (4, 5, 6, 7)]
 
 
 def test_file(monkeypatch):

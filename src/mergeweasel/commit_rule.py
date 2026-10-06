@@ -75,6 +75,20 @@ def parse_subject(subject):
     return Subject(match["type"], match["scope"], bool(match["breaking"]), match["description"], match["reference"])
 
 
+def referenced_issues(subjects):
+    """The distinct issue numbers the subjects reference - the ones check_reference needs to know.
+
+    Stripped as squash_message strips the title, so a title's reference is looked up as it is checked.
+    """
+    matches = (SUBJECT.match(subject.strip()) for subject in subjects)
+    return {int(match["issue"]) for match in matches if match and match["issue"] is not None}
+
+
+def known_issues(subjects, is_issue):
+    """The referenced numbers that are issues, each looked up once: a lookup costs a request."""
+    return {number for number in referenced_issues(subjects) if is_issue(number)}
+
+
 def check_reference(subject, known_issues, pr_number, scopes=None):
     problem = check_subject(subject, scopes)
     match = SUBJECT.match(subject)
@@ -82,7 +96,8 @@ def check_reference(subject, known_issues, pr_number, scopes=None):
         return problem
     issue, pull = match["issue"], match["pull"]
     if issue is not None and int(issue) not in known_issues:
-        return f"#{issue} is not an issue of this repository"
+        # Gitea answers 404 for an issue the token may not read, as for a missing one.
+        return f"#{issue} is not an issue of this repository, or the token cannot read its issues"
     if pull is not None and int(pull) != int(pr_number):
         return f"PR #{pull} is not this pull request (#{pr_number})"
     return None

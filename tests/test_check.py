@@ -20,7 +20,7 @@ def api(commits=(), issues=(99, 209), config=None, title="ci: squash by default 
     gitea.pull.return_value = PullRequest(213, "main", "feature", head, {name: 13 for name in labels}, False,
                                           "author", title, body, merged)
     gitea.file.return_value = None if config is None else config.encode()
-    gitea.issue_numbers.return_value = set(issues)
+    gitea.is_issue.side_effect = lambda number: number in issues
     gitea.pull_commits.return_value = list(commits)
     return gitea
 
@@ -63,6 +63,24 @@ def test_squash_fails_on_a_bad_title(tmp_path, capsys):
 def test_squash_fails_on_a_bad_section(tmp_path, capsys):
     assert run(api(body="## Commit\nCo-authored-by: X <x@y>"), event(tmp_path)) == 1
     assert "attribution line" in capsys.readouterr().out
+
+
+def test_squash_looks_up_only_the_titles_issue(tmp_path):
+    gitea = api(title=" ci: squash by default (#209) ", body="## Commit\nSee #99.")
+    assert run(gitea, event(tmp_path)) == 0
+    gitea.is_issue.assert_called_once_with(209)
+
+
+def test_squash_fails_on_a_reference_that_is_no_issue(tmp_path, capsys):
+    assert run(api(title="ci: squash by default (#4711)"), event(tmp_path)) == 1
+    assert ("PR title: #4711 is not an issue of this repository, or the token cannot read its issues"
+            in capsys.readouterr().out)
+
+
+def test_a_pull_request_reference_needs_no_lookup(tmp_path):
+    gitea = api(title="ci: squash by default (PR #213)")
+    assert run(gitea, event(tmp_path)) == 0
+    gitea.is_issue.assert_not_called()
 
 
 def test_a_re_run_judges_the_pull_request_as_it_is_now(tmp_path, capsys):
@@ -115,6 +133,13 @@ def test_keep_commits_checks_every_commit_through_the_api(tmp_path):
     gitea.pull_commits.assert_called_once_with(213)
 
 
+def test_keep_commits_looks_up_each_referenced_issue_once(tmp_path):
+    gitea = api(commits=[raw_commit("a" * 40, "ci: one (#99)"), raw_commit("b" * 40, "ci: two (#209)"),
+                         raw_commit("c" * 40, "ci: three (#99)")], labels=("keep-commits",))
+    assert run(gitea, event(tmp_path)) == 0
+    assert sorted(call.args for call in gitea.is_issue.call_args_list) == [(99,), (209,)]
+
+
 def test_keep_commits_fails_on_a_bad_commit(tmp_path, capsys):
     gitea = api(commits=[raw_commit("a" * 40, "wip")], labels=("keep-commits",))
     assert run(gitea, event(tmp_path)) == 1
@@ -137,22 +162,22 @@ def test_a_merged_pull_request_passes_without_a_check(tmp_path, capsys, labels):
     gitea = api(title="no longer valid", labels=labels, merged=True)
     assert run(gitea, event(tmp_path)) == 0
     assert "already landed" in capsys.readouterr().out
-    gitea.issue_numbers.assert_not_called()
+    gitea.is_issue.assert_not_called()
 
 
 # --- failures around the check ---
 
 def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
     gitea = api()
-    gitea.issue_numbers.side_effect = ApiError("Forbidden", 403, "https://git.example/api/v1/repos/org/repo/issues")
+    gitea.is_issue.side_effect = ApiError("Forbidden", 403, "https://git.example/api/v1/repos/org/repo/issues/209")
     assert run(gitea, event(tmp_path)) == 1
     err = capsys.readouterr().err
-    assert "HTTP 403 Forbidden (https://git.example/api/v1/repos/org/repo/issues)" in err and "GITHUB_TOKEN" in err
+    assert "HTTP 403 Forbidden (https://git.example/api/v1/repos/org/repo/issues/209)" in err and "GITHUB_TOKEN" in err
 
 
 def test_an_answer_without_a_status_names_no_status_and_no_token_hint(tmp_path, capsys):
     gitea = api()
-    gitea.issue_numbers.side_effect = ApiError("Gitea's answer is not JSON", None, "https://git.example/x")
+    gitea.is_issue.side_effect = ApiError("Gitea's answer is not JSON", None, "https://git.example/x")
     assert run(gitea, event(tmp_path)) == 1
     err = capsys.readouterr().err
     assert "could not read from the Gitea API: Gitea's answer is not JSON (https://git.example/x)" in err
