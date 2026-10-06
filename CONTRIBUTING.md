@@ -25,14 +25,17 @@ cannot reach container IP addresses; neither does a CI job on a network of its o
 
 - `src/mergeweasel/`:
   - `cli.py` - the commands and the environment;
-  - `gitea.py` - the API client, with paging and retries;
+  - `gitea.py` - the API client: one method per operation, typed values, domain exceptions,
+    paging and retries; the only module that knows the Gitea API;
   - `commit_rule.py` - what may land on `main`;
   - `queue.py` - the queue pass;
+  - `turn.py` - serializing the passes;
   - `check.py` - `check-commits`;
   - `release.py` - the release step;
   - `version_template.py` - the release tag template;
   - `config.py` - reading `mergeweasel.toml`.
-- `tests/`: pytest, one suite per module, on constructed state and a fake API client.
+- `tests/`: pytest, one suite per module, on constructed state and a client faked with
+  `mock.create_autospec`; only `test_gitea.py` fakes HTTP.
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
   `mergeweasel-commits.yml`), and `ci.yml`.
 - `e2e/`: the end-to-end test - `gitea.Dockerfile` (the pinned Gitea), `driver.py` (the people

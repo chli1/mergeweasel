@@ -2,10 +2,9 @@
 import argparse
 import os
 import sys
-import urllib.error
 
-from mergeweasel import check, queue, release, settings as instance
-from mergeweasel.gitea import Gitea, error_message
+from mergeweasel import check, queue, release, settings as instance, turn
+from mergeweasel.gitea import ApiError, Gitea
 
 MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
 APPROVER_TOKENS = "MERGEWEASEL_APPROVER_TOKENS"
@@ -32,15 +31,8 @@ def account_login(client, source):
     """The login behind a token; source names the token in an error, never its value."""
     try:
         login = client.own_login()
-    except (OSError, LookupError, ValueError) as error:
-        if isinstance(error, urllib.error.HTTPError):
-            reason = error_message(error)
-        elif isinstance(error, ValueError):
-            # http.client quotes an invalid header, the token included.
-            reason = "the token or Gitea's answer is malformed"
-        else:
-            reason = error
-        raise TokenProblem(f"cannot read the account of {source}: {reason} - check the token, "
+    except ApiError as error:
+        raise TokenProblem(f"cannot read the account of {source}: {error.message} - check the token, "
                            "e.g. missing scope read:user") from error
     # Without a login the pass could not tell the merger's carry-over or an approver's approval.
     if not login:
@@ -62,10 +54,6 @@ def approver_clients(server, repository, text):
     return clients
 
 
-def api_reason(error):
-    return error_message(error) if isinstance(error, urllib.error.HTTPError) else error
-
-
 def instance_settings(gitea):
     """The instance's names, printed; None after an error, which it prints."""
     try:
@@ -73,8 +61,8 @@ def instance_settings(gitea):
     except instance.SettingsError as error:
         print(error, file=sys.stderr)
         return None
-    except (OSError, LookupError) as error:
-        print(f"cannot read the repository: {api_reason(error)}", file=sys.stderr)
+    except ApiError as error:
+        print(f"cannot read the repository: {error.message}", file=sys.stderr)
         return None
     print(found.describe())
     return found
@@ -83,8 +71,8 @@ def instance_settings(gitea):
 def labels_exist(gitea, settings):
     try:
         missing = instance.missing_labels(gitea, instance.required_labels(settings, os.environ))
-    except (OSError, LookupError) as error:
-        print(f"cannot read the labels: {api_reason(error)}", file=sys.stderr)
+    except ApiError as error:
+        print(f"cannot read the labels: {error.message}", file=sys.stderr)
         return False
     if missing is None:
         print("cannot read the organization's labels - not checked whether the labels exist")
@@ -125,7 +113,7 @@ def queue_pass(server, repository, dry_run):
         return 1
     # Unset outside Actions: a local run has no other pass to wait for.
     own_id = os.environ.get("GITHUB_RUN_ID")
-    if own_id and not queue.wait_for_turn(gitea, int(own_id), os.environ.get("GITHUB_EVENT_NAME", "")):
+    if own_id and not turn.wait_for_turn(gitea, int(own_id), os.environ.get("GITHUB_EVENT_NAME", "")):
         return 0
     released = release.run(gitea, dry_run, settings.base_branch)
     queue.run_pass(gitea, server, dry_run, merger, approvers, settings)

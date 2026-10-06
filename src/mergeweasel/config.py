@@ -1,11 +1,10 @@
 """mergeweasel.toml: what a repository configures. Keys and defaults: docs/configuration.md."""
-import base64
 import dataclasses
 import re
 import tomllib
-import urllib.error
 
 from mergeweasel import version_template
+from mergeweasel.gitea import NotAFile
 
 CONFIG_FILE = "mergeweasel.toml"
 DEFAULT_TAG = "v{major}.{minor}.{patch}"
@@ -30,17 +29,15 @@ class Config:
 def load(gitea, ref):
     """The file as of ref: a branch, or a commit's SHA."""
     try:
-        answer = gitea.call("GET", f"/contents/{CONFIG_FILE}?ref={ref}")
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return parse("")
-        raise
-    if not isinstance(answer, dict) or answer.get("type") != "file":
-        raise ConfigError(f"{CONFIG_FILE}: not a file")
+        content = gitea.file(CONFIG_FILE, ref)
+    except NotAFile as error:
+        raise ConfigError(error.message) from None
+    if content is None:
+        return parse("")
     try:
         # utf-8-sig: tomllib refuses the byte order mark some editors write.
-        text = base64.b64decode(answer["content"]).decode("utf-8-sig")
-    except (TypeError, ValueError):
+        text = content.decode("utf-8-sig")
+    except ValueError:
         raise ConfigError(f"{CONFIG_FILE}: cannot read it as UTF-8 text") from None
     return parse(text)
 

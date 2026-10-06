@@ -1,38 +1,27 @@
-import urllib.error
 from unittest import mock
 
 import pytest
 
 from mergeweasel import settings
-from mergeweasel.gitea import Gitea
+from mergeweasel.gitea import ApiError, Gitea
 
 
 def gitea_with(default_branch="trunk", repo_labels=(), org_labels=()):
-    """org_labels: the organization's label names, or the HTTPError reading them raises."""
-    gitea = mock.Mock(spec=Gitea)
-    gitea.owner = "org"
-    gitea.call.side_effect = lambda method, path: {"default_branch": default_branch}
-
-    def paged(path, root=False):
-        if (path, root) == ("/labels", False):
-            return [{"name": name} for name in repo_labels]
-        assert (path, root) == ("/orgs/org/labels", True)
-        if isinstance(org_labels, Exception):
-            raise org_labels
-        return [{"name": name} for name in org_labels]
-
-    gitea.paged.side_effect = paged
+    """org_labels: the organization's label names, None if unreadable, or the error reading them raises."""
+    gitea = mock.create_autospec(Gitea, instance=True)
+    gitea.default_branch.return_value = default_branch
+    gitea.labels.return_value = list(repo_labels)
+    if isinstance(org_labels, Exception):
+        gitea.org_labels.side_effect = org_labels
+    else:
+        gitea.org_labels.return_value = None if org_labels is None else list(org_labels)
     return gitea
-
-
-def http_error(code):
-    return urllib.error.HTTPError("url", code, "error", hdrs=None, fp=None)
 
 
 def test_without_variables_the_defaults_hold_and_renovate_is_off():
     gitea = gitea_with()
     assert settings.read(gitea, {}) == settings.Settings("trunk", "automerge", "needs-fix", "keep-commits", None)
-    gitea.call.assert_called_once_with("GET", "")
+    gitea.default_branch.assert_called_once_with()
 
 
 def test_each_variable_sets_its_name():
@@ -76,7 +65,7 @@ def test_keep_commits_is_required_once_its_variable_names_it():
 def test_labels_of_the_repository_need_no_organization_read():
     gitea = gitea_with(repo_labels=ALL)
     assert settings.missing_labels(gitea, ALL) == []
-    gitea.paged.assert_called_once_with("/labels")
+    gitea.org_labels.assert_not_called()
 
 
 def test_labels_of_the_organization_count():
@@ -89,12 +78,11 @@ def test_a_label_nowhere_is_missing():
     assert settings.missing_labels(gitea, ALL) == ["needs-fix"]
 
 
-@pytest.mark.parametrize("code", [403, 404])
-def test_unreadable_organization_labels_leave_it_unknown(code):
-    gitea = gitea_with(org_labels=http_error(code))
+def test_unreadable_organization_labels_leave_it_unknown():
+    gitea = gitea_with(org_labels=None)
     assert settings.missing_labels(gitea, ALL) is None
 
 
 def test_another_error_reading_the_organization_is_raised():
-    with pytest.raises(urllib.error.HTTPError):
-        settings.missing_labels(gitea_with(org_labels=http_error(500)), ALL)
+    with pytest.raises(ApiError):
+        settings.missing_labels(gitea_with(org_labels=ApiError("boom", 500, "url")), ALL)

@@ -1,12 +1,11 @@
 import dataclasses
-import io
-import urllib.error
 from unittest import mock
 
 import pytest
 
 from mergeweasel import cli
-from mergeweasel.gitea import Gitea
+from mergeweasel import gitea as gitea_module
+from mergeweasel.gitea import ApiError, Gitea
 from mergeweasel.settings import VARIABLES, Settings
 
 ENVIRONMENT = ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "MERGEWEASEL_MERGER_TOKEN", "MERGEWEASEL_APPROVER_TOKENS",
@@ -50,7 +49,7 @@ def fake(monkeypatch):
     fake = Fake({}, {"pat": "weasel-bot", "a-1": "approver-1", "a-2": "approver-2"}, mock.Mock(), mock.Mock(return_value=True))
 
     def factory(server, repository, token):
-        client = mock.Mock(spec=Gitea)
+        client = mock.create_autospec(Gitea, instance=True)
         client.built = (server, repository, token)
 
         def own_login():
@@ -60,17 +59,9 @@ def fake(monkeypatch):
             return login
 
         client.own_login.side_effect = own_login
-        client.owner = "org"
-        client.call.side_effect = lambda method, path, body=None: {"default_branch": "trunk"} if path == "" else None
-
-        def paged(path, root=False):
-            if not root:
-                return [{"name": name} for name in fake.labels]
-            if fake.org_labels is None:
-                raise urllib.error.HTTPError(f"{SERVER}/api/v1{path}", 404, "Not Found", hdrs=None, fp=None)
-            return [{"name": name} for name in fake.org_labels]
-
-        client.paged.side_effect = paged
+        client.default_branch.return_value = "trunk"
+        client.labels.side_effect = lambda: list(fake.labels)
+        client.org_labels.side_effect = lambda: None if fake.org_labels is None else list(fake.org_labels)
         fake.clients[token] = client
         return client
 
@@ -81,8 +72,7 @@ def fake(monkeypatch):
 
 
 def unauthorized(message="token is expired"):
-    return urllib.error.HTTPError(f"{SERVER}/api/v1/user", 401, "Unauthorized", hdrs=None,
-                                  fp=io.BytesIO(f'{{"message": "{message}"}}'.encode()))
+    return ApiError(message, 401, f"{SERVER}/api/v1/user")
 
 
 @pytest.mark.parametrize("name", ["GITHUB_SERVER_URL", "GITHUB_REPOSITORY"])
@@ -158,7 +148,7 @@ def test_two_approver_tokens_of_one_account_fail_the_pass(env, fake, capsys):
 
 def test_pass_fails_when_the_merger_cannot_be_read(env, fake, capsys):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
-    fake.logins["pat"] = urllib.error.HTTPError(f"{SERVER}/api/v1/user", 403, "Forbidden", hdrs=None, fp=None)
+    fake.logins["pat"] = ApiError("Forbidden", 403, f"{SERVER}/api/v1/user")
     assert cli.main(["pass"]) == 1
     assert "read:user" in capsys.readouterr().err
     fake.run_pass.assert_not_called()
@@ -214,7 +204,7 @@ def test_a_superseded_pass_succeeds_without_running(env, fake, monkeypatch):
     env.setenv("GITHUB_RUN_ID", "7")
     env.setenv("GITHUB_EVENT_NAME", "pull_request_target")
     wait = mock.Mock(return_value=False)
-    monkeypatch.setattr(cli.queue, "wait_for_turn", wait)
+    monkeypatch.setattr(cli.turn, "wait_for_turn", wait)
     assert cli.main(["pass"]) == 0
     wait.assert_called_once_with(fake.clients["pat"], 7, "pull_request_target")
     fake.run_pass.assert_not_called()
@@ -223,7 +213,7 @@ def test_a_superseded_pass_succeeds_without_running(env, fake, monkeypatch):
 def test_without_a_run_id_the_pass_does_not_wait(env, fake, monkeypatch):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     wait = mock.Mock()
-    monkeypatch.setattr(cli.queue, "wait_for_turn", wait)
+    monkeypatch.setattr(cli.turn, "wait_for_turn", wait)
     assert cli.main(["pass"]) == 0
     wait.assert_not_called()
 
@@ -244,10 +234,10 @@ def test_the_merger_token_tolerates_a_trailing_newline(env, fake):
 
 def test_a_malformed_token_is_not_printed(env, fake, capsys):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
-    fake.logins["pat"] = ValueError("Invalid header value b'token secret-value\\n'")
+    fake.logins["pat"] = ApiError(gitea_module.MALFORMED)
     assert cli.main(["pass"]) == 1
     err = capsys.readouterr().err
-    assert "secret-value" not in err and "MERGEWEASEL_MERGER_TOKEN" in err
+    assert gitea_module.MALFORMED in err and "MERGEWEASEL_MERGER_TOKEN" in err
 
 
 def test_pass_releases_before_it_runs(env, fake):
@@ -270,7 +260,7 @@ def test_release_error_still_runs_the_pass_and_exits_1(env, fake):
 def test_superseded_pass_does_not_release(env, fake, monkeypatch):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     env.setenv("GITHUB_RUN_ID", "7")
-    monkeypatch.setattr(cli.queue, "wait_for_turn", lambda gitea, own_id, event: False)
+    monkeypatch.setattr(cli.turn, "wait_for_turn", lambda gitea, own_id, event: False)
     assert cli.main(["pass"]) == 0
     fake.release.assert_not_called()
 
@@ -319,7 +309,7 @@ def test_an_unreadable_repository_fails_the_check(env, fake, capsys, monkeypatch
 
     def failing(*arguments):
         client = factory(*arguments)
-        client.call.side_effect = unauthorized()
+        client.default_branch.side_effect = unauthorized()
         return client
 
     monkeypatch.setattr(cli, "Gitea", failing)

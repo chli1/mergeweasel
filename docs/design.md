@@ -225,9 +225,11 @@ is missing, so a failed or replaced pass loses nothing. Every API call has a 30-
 the job a 30-minute one, because a hung pass would hold up every later pass.
 
 One window remains: after the rebase is pushed, the carry-over must still be written. Reading the
-new head and posting the status are retried. A pass that still dies there leaves the pull request
-rebased and unapproved until it is approved again. A pass that dies between restoring the approvals
-and merging leaves them valid on that head, so the next pass only merges.
+new head and posting the status are retried after a network error or a server error (5xx); an
+answer that waiting does not change, like a branch deleted meanwhile, is not retried. A pass that
+still dies there leaves the pull request rebased and unapproved until it is approved again. A pass
+that dies between restoring the approvals and merging leaves them valid on that head, so the next
+pass only merges.
 
 ## What lands on main
 

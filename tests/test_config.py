@@ -1,43 +1,44 @@
-import base64
-import urllib.error
 from unittest import mock
 
 import pytest
 
 from mergeweasel import config
-from mergeweasel.gitea import Gitea
+from mergeweasel.gitea import ApiError, Gitea, NotAFile
 
 
 def gitea_with(answer):
-    gitea = mock.Mock(spec=Gitea)
-    gitea.call.side_effect = answer if isinstance(answer, Exception) else (lambda method, path: answer)
+    """answer: the file's bytes, None for no file, or the exception file() raises."""
+    gitea = mock.create_autospec(Gitea, instance=True)
+    if isinstance(answer, Exception):
+        gitea.file.side_effect = answer
+    else:
+        gitea.file.return_value = answer
     return gitea
 
 
 def contents(text, encoding="utf-8"):
-    return {"type": "file", "encoding": "base64", "content": base64.b64encode(text.encode(encoding)).decode()}
+    return text.encode(encoding)
 
 
 def test_the_file_is_read_from_a_branch():
     gitea = gitea_with(contents('[release]\ntag = "{YY}.{count}"\n'))
     assert config.load(gitea, "main").tag.text == "{YY}.{count}"
-    gitea.call.assert_called_once_with("GET", "/contents/mergeweasel.toml?ref=main")
+    gitea.file.assert_called_once_with("mergeweasel.toml", "main")
 
 
 def test_the_file_is_read_at_a_given_commit():
     gitea = gitea_with(contents(""))
     config.load(gitea, "a" * 40)
-    gitea.call.assert_called_once_with("GET", f"/contents/mergeweasel.toml?ref={'a' * 40}")
+    gitea.file.assert_called_once_with("mergeweasel.toml", "a" * 40)
 
 
 def test_without_the_file_everything_is_default():
-    missing = urllib.error.HTTPError("url", 404, "Not Found", hdrs=None, fp=None)
-    assert config.load(gitea_with(missing), "main").tag.text == config.DEFAULT_TAG
+    assert config.load(gitea_with(None), "main").tag.text == config.DEFAULT_TAG
 
 
 def test_another_api_error_is_raised():
-    boom = urllib.error.HTTPError("url", 500, "boom", hdrs=None, fp=None)
-    with pytest.raises(urllib.error.HTTPError):
+    boom = ApiError("boom", 500, "url")
+    with pytest.raises(ApiError):
         config.load(gitea_with(boom), "main")
 
 
@@ -85,12 +86,11 @@ def test_invalid_files_name_the_key(text, message):
     assert str(raised.value).startswith(message)
 
 
-@pytest.mark.parametrize("answer", [
-    {"type": "file", "encoding": "base64", "content": base64.b64encode(b"\xff\xfe[release]").decode()},
-    {"type": "file", "encoding": "base64", "content": None},
-    [{"type": "file", "name": "a.toml"}],
-    {"type": "symlink", "target": "elsewhere.toml", "content": None},
-])
-def test_an_unreadable_file_is_a_config_error(answer):
-    with pytest.raises(config.ConfigError, match="^mergeweasel.toml: "):
-        config.load(gitea_with(answer), "main")
+def test_something_else_than_a_file_is_a_config_error():
+    with pytest.raises(config.ConfigError, match="^mergeweasel.toml: not a file$"):
+        config.load(gitea_with(NotAFile("mergeweasel.toml: not a file")), "main")
+
+
+def test_a_file_that_is_not_utf8_is_a_config_error():
+    with pytest.raises(config.ConfigError, match="^mergeweasel.toml: cannot read it as UTF-8 text$"):
+        config.load(gitea_with(b"\xff\xfe[release]"), "main")

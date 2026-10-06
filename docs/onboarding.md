@@ -200,6 +200,9 @@ do. Nothing changes.
   it as listed in [permissions](#permissions); the next pass releases.
 - **"release failed: mergeweasel.toml: ...".** The file on `main` is invalid, and the message names
   the key. Fix it in a pull request - the queue still lands it.
+- **A traceback, then "release failed: SomeError(...)".** A bug in mergeweasel's release step, not
+  a problem of your setup. The pass still ran and landed what it could; report the bug with the
+  traceback.
 - **"too few approver accounts to restore the approvals".** Add approver accounts to
   `MERGEWEASEL_APPROVER_TOKENS` (and to the approvals whitelist, if you use one), or approve again
   by hand. Then remove `needs-fix`.

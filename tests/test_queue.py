@@ -1,15 +1,13 @@
-import base64
 import dataclasses
-import io
-import json
-import urllib.error
 from unittest import mock
 
 import pytest
 
-from mergeweasel import queue
+from mergeweasel import gitea as gitea_module, queue
+from mergeweasel.commit_rule import Commit, SquashMessage
+from mergeweasel.gitea import (LABEL_ADDED, LABEL_REMOVED, PUSH, ApiError, Branch, CommitStatus, Conflict, Gitea,
+                               MergeDeferred, MergeRefused, NotFound, PullRequest, Review, TimelineEvent, Unreachable)
 from mergeweasel.settings import Settings
-from mergeweasel.gitea import Gitea
 
 QUEUE = "weasel-bot"
 APPROVER = "approver-bot"
@@ -205,8 +203,7 @@ def test_without_a_carry_over_an_approver_account_is_a_reviewer():
 # --- parsers ---
 
 def review(state="APPROVED", login="chli1", official=True, dismissed=False, stale=False, commit_id="0" * 40):
-    return {"state": state, "user": {"login": login}, "official": official,
-            "dismissed": dismissed, "stale": stale, "commit_id": commit_id}
+    return Review(login, state, official, dismissed, stale, commit_id)
 
 
 def test_request_for_changes_counts_per_reviewers_latest_verdict():
@@ -238,8 +235,7 @@ def test_head_approvers_count_on_the_head_undismissed_official_or_not():
 
 def status_json(context="mergeweasel/approval", state="success", creator=QUEUE,
                 description="approved at 1234567\napproved by chli1"):
-    return {"context": context, "status": state, "creator": {"login": creator},
-            "description": description, "target_url": "/org/repo/actions/runs/1/jobs/2"}
+    return CommitStatus(context, state, "/org/repo/actions/runs/1/jobs/2", description, creator)
 
 
 def test_carry_over_names_its_reviewers():
@@ -287,10 +283,10 @@ def test_statuses_by_context_makes_links_absolute():
 # --- step 0 ---
 
 def event(kind, login, event_id, label="needs-fix", body="1"):
-    entry = {"id": event_id, "type": kind, "user": {"login": login}, "body": body}
-    if kind == "label":
-        entry["label"] = {"name": label}
-    return entry
+    """kind: Gitea's pull_push or label; body "1" for an added label."""
+    if kind == "pull_push":
+        return TimelineEvent(event_id, PUSH, login, None)
+    return TimelineEvent(event_id, LABEL_ADDED if body == "1" else LABEL_REMOVED, login, label)
 
 
 
@@ -314,75 +310,44 @@ def test_needs_fix_to_clear_takes_the_retried_flagged_pulls():
     assert queue.needs_fix_to_clear([retried, pull(8, labels=("automerge", "needs-fix")), pull(7)], SETTINGS) == [retried]
 
 
-def http_error(code, message):
-    return urllib.error.HTTPError("url", code, message, hdrs=None,
-                                  fp=io.BytesIO(json.dumps({"message": message}).encode()))
-
-
-def conflict():
-    return http_error(409, "rebase failed because of conflict")
-
-
-class FakeResponses:
-    """Routes Gitea.call(method, path, body) to canned answers; records every call."""
-
-    def __init__(self, answers):
-        self.answers = answers
-        self.calls = []
-
-    def __call__(self, method, path, body=None):
-        self.calls.append((method, path, body))
-        answer = self.answers.get((method, path))
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    def writes(self):
-        return [(method, path, body) for method, path, body in self.calls if method != "GET"]
-
-
-def pull_answer(number, title=None, body="", config=None):
-    """GET /pulls/{n} and mergeweasel.toml (None: no file) as the queue reads them right before merging."""
-    if config is None:
-        toml = http_error(404, "not found")
-    else:
-        toml = {"type": "file", "content": base64.b64encode(config.encode()).decode()}
-    return {("GET", f"/pulls/{number}"): {"title": title or f"ci: land {number} (#1)", "body": body},
-            ("GET", f"/contents/mergeweasel.toml?ref={number:040x}"): toml}
-
-
-def pages(issues=(1,), commits=None):
-    """Gitea.paged: the issue list, and the pull request's commits for keep-commits."""
-    def answer(path):
-        if path == "/issues?state=all&type=issues":
-            return [{"number": number} for number in issues]
-        if commits is not None and "/commits?" in path:
-            return commits
-        raise AssertionError(f"unexpected paged read {path}")
-    return answer
-
-
-def squash(number, body=""):
-    return {"Do": "squash", "MergeTitleField": f"ci: land {number} (#1)", "MergeMessageField": body,
-            "head_commit_id": f"{number:040x}"}
+WRITES = ("rebase", "merge", "approve", "add_label", "remove_label", "comment", "set_status")
 
 
 @pytest.fixture
 def gitea():
-    return mock.Mock(spec=Gitea)
+    client = mock.create_autospec(Gitea, instance=True)
+    client.issue_numbers.return_value = {1}
+    client.file.return_value = None
+    return client
+
+
+def writes(client):
+    """The client's writes in order, as (method, args)."""
+    return [(name, args) for name, args, _ in client.mock_calls if name in WRITES]
+
+
+def answer_pull(gitea, number, title=None, body="", config=None):
+    """The pull request and mergeweasel.toml (None: no file) as the queue reads them right before merging."""
+    gitea.pull.return_value = PullRequest(number, "main", f"branch-{number}", f"{number:040x}", {"automerge": 0},
+                                          False, "author", title or f"ci: land {number} (#1)", body)
+    gitea.file.return_value = None if config is None else config.encode()
+
+
+def squash(number, body=""):
+    return SquashMessage(f"ci: land {number} (#1)", body, ())
 
 
 def given(monkeypatch, pulls, needed=1):
     monkeypatch.setattr(queue, "read_state",
-                        lambda gitea, server, merger, settings: queue.State("f" * 40, REQUIRED, needed, pulls))
+                        lambda gitea, server, merger, settings: queue.State("f" * 40, tuple(REQUIRED), needed, pulls))
 
 
 def approver_clients(log, *logins):
-    """One mocked client per approver login; every call lands in log as (login, method, path, body)."""
+    """One client per approver login; every approval lands in log as (login, number, sha, body)."""
     clients = {}
     for login in logins:
-        client = mock.Mock(spec=Gitea)
-        client.call.side_effect = lambda method, path, body=None, login=login: log.append((login, method, path, body))
+        client = mock.create_autospec(Gitea, instance=True)
+        client.approve.side_effect = lambda number, sha, body, login=login: log.append((login, number, sha, body))
         clients[login] = client
     return clients
 
@@ -390,130 +355,96 @@ def approver_clients(log, *logins):
 def test_rebase_sets_the_carry_over_on_the_new_head(monkeypatch, gitea):
     given(monkeypatch, [pull(3, behind=True)])
     new_head = "a" * 40
-    gitea.call.side_effect = FakeResponses({
-        ("GET", "/git/refs/heads/branch-3"): [{"ref": "refs/heads/branch-3", "object": {"sha": new_head}}],
-    })
+    gitea.branch_head.return_value = new_head
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes() == [
-        ("POST", "/pulls/3/update?style=rebase", None),
-        ("POST", f"/statuses/{new_head}", {"state": "success", "context": "mergeweasel/approval",
-                                           "description": "approved at " + f"{3:040x}"[:7] + "\napproved by chli1"}),
+    gitea.branch_head.assert_called_once_with("branch-3")
+    assert writes(gitea) == [
+        ("rebase", (3,)),
+        ("set_status", (new_head, "mergeweasel/approval", "success",
+                        "approved at " + f"{3:040x}"[:7] + "\napproved by chli1")),
     ]
-
-
-def test_rebase_finds_the_exact_ref_among_prefix_matches(monkeypatch, gitea):
-    renovate_pull = dataclasses.replace(pull(4, behind=True, approvers=("approver-bot",)), head_ref="renovate/gradle")
-    given(monkeypatch, [renovate_pull])
-    gitea.call.side_effect = FakeResponses({
-        ("GET", "/git/refs/heads/renovate/gradle"): [
-            {"ref": "refs/heads/renovate/gradle-8.x", "object": {"sha": "b" * 40}},
-            {"ref": "refs/heads/renovate/gradle", "object": {"sha": "c" * 40}},
-        ],
-    })
-    run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes()[-1][1] == f"/statuses/{'c' * 40}"
 
 
 def test_conflict_flags_needs_fix_and_hands_over(monkeypatch, gitea):
     given(monkeypatch, [pull(1, behind=True), pull(2, behind=True)])
-    gitea.call.side_effect = FakeResponses({
-        ("POST", "/pulls/1/update?style=rebase"): conflict(),
-        ("GET", "/git/refs/heads/branch-2"): [{"ref": "refs/heads/branch-2", "object": {"sha": "d" * 40}}],
-    })
+    gitea.rebase.side_effect = [Conflict("rebase failed because of conflict", 409), None]
+    gitea.branch_head.return_value = "d" * 40
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[1] == ("POST", "/issues/1/labels", {"labels": ["needs-fix"]})
-    assert writes[2][1] == "/issues/1/comments" and "conflict" in writes[2][2]["body"]
-    assert writes[3] == ("POST", "/pulls/2/update?style=rebase", None)
+    done = writes(gitea)
+    assert done[1] == ("add_label", (1, "needs-fix"))
+    assert done[2][0] == "comment" and done[2][1][0] == 1 and "conflict" in done[2][1][1]
+    assert done[3] == ("rebase", (2,))
     assert action == queue.Rebase(2, "branch-2", f"{2:040x}", ("chli1",))
 
 
 def test_every_candidate_failing_ends_the_pass(monkeypatch, gitea):
     red = statuses(test="failure", smoke="success")
     given(monkeypatch, [pull(1, checks=red), pull(2, behind=True)])
-    gitea.call.side_effect = FakeResponses({("POST", "/pulls/2/update?style=rebase"): conflict()})
+    gitea.rebase.side_effect = Conflict("rebase failed because of conflict", 409)
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    flagged = [path for method, path, body in gitea.call.side_effect.writes() if path.endswith("/labels")]
-    assert flagged == ["/issues/1/labels", "/issues/2/labels"]
+    assert [args[0] for name, args in writes(gitea) if name == "add_label"] == [1, 2]
     assert action == queue.Idle()
 
 
 def test_carry_over_survives_a_transient_failure(monkeypatch, gitea):
-    monkeypatch.setattr(queue.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(gitea_module.time, "sleep", lambda seconds: None)
     given(monkeypatch, [pull(3, behind=True)])
-    refs = [{"ref": "refs/heads/branch-3", "object": {"sha": "a" * 40}}]
-    answers = iter([urllib.error.URLError("timed out"), refs])
-    responses = FakeResponses({})
-
-    def flaky(method, path, body=None):
-        if (method, path) == ("GET", "/git/refs/heads/branch-3"):
-            answer = next(answers)
-            if isinstance(answer, Exception):
-                raise answer
-            return answer
-        return responses(method, path, body)
-
-    gitea.call.side_effect = flaky
+    gitea.branch_head.side_effect = [Unreachable("timed out"), "a" * 40]
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert responses.writes()[-1][1] == f"/statuses/{'a' * 40}"
+    assert writes(gitea)[-1][0] == "set_status" and writes(gitea)[-1][1][0] == "a" * 40
+
+
+def test_carry_over_gives_up_at_once_on_a_missing_branch(monkeypatch, gitea):
+    sleeps = []
+    monkeypatch.setattr(gitea_module.time, "sleep", sleeps.append)
+    given(monkeypatch, [pull(3, behind=True)])
+    gitea.branch_head.side_effect = NotFound("refs/heads/branch-3 not found")
+    with pytest.raises(NotFound):
+        run_pass(gitea, "https://gitea", dry_run=False)
+    assert gitea.branch_head.call_count == 1 and sleeps == []
 
 
 def test_unexpected_api_error_fails_the_pass(monkeypatch, gitea):
     given(monkeypatch, [pull(1, behind=True)])
-    gitea.call.side_effect = FakeResponses({
-        ("POST", "/pulls/1/update?style=rebase"): urllib.error.HTTPError("url", 500, "boom", hdrs=None, fp=None)})
-    with pytest.raises(urllib.error.HTTPError):
+    gitea.rebase.side_effect = ApiError("boom", 500, "url")
+    with pytest.raises(ApiError):
         run_pass(gitea, "https://gitea", dry_run=False)
 
 
 def test_merge_restores_each_missing_approval_through_its_approver_then_squashes(monkeypatch, gitea):
     given(monkeypatch, [pull(6, approvers=(), carried=("alice", "bob"))], needed=2)
+    answer_pull(gitea, 6)
     log = []
-    responses = FakeResponses(pull_answer(6))
-
-    def merger(method, path, body=None):
-        log.append((QUEUE, method, path, body))
-        return responses(method, path, body)
-
-    gitea.call.side_effect = merger
-    gitea.paged.side_effect = pages()
+    gitea.merge.side_effect = lambda *args: log.append((QUEUE, "merge", *args))
     run_pass(gitea, "https://gitea", dry_run=False, approvers=approver_clients(log, "a1", "a2"))
-    writes = [entry for entry in log if entry[1] != "GET"]
     head = f"{6:040x}"
-    assert writes[:3] == [
-        ("a1", "POST", "/pulls/6/reviews", {"event": "APPROVED", "commit_id": head,
-                                            "body": "Approval of alice, carried over the merge queue's rebase."}),
-        ("a2", "POST", "/pulls/6/reviews", {"event": "APPROVED", "commit_id": head,
-                                            "body": "Approval of bob, carried over the merge queue's rebase."}),
-        (QUEUE, "POST", "/pulls/6/merge", squash(6)),
+    assert log == [
+        ("a1", 6, head, "Approval of alice, carried over the merge queue's rebase."),
+        ("a2", 6, head, "Approval of bob, carried over the merge queue's rebase."),
+        (QUEUE, "merge", 6, head, squash(6)),
     ]
 
 
 def test_rebase_without_standing_reviewers_writes_no_carry_over(monkeypatch, gitea):
     given(monkeypatch, [pull(3, behind=True, approvers=())], needed=0)
-    gitea.call.side_effect = FakeResponses({})
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes() == [("POST", "/pulls/3/update?style=rebase", None)]
+    assert writes(gitea) == [("rebase", (3,))]
 
 
 def test_shortfall_flags_needs_fix_without_approving(monkeypatch, gitea):
     given(monkeypatch, [pull(6, approvers=(), carried=("chli1",))])
-    gitea.call.side_effect = FakeResponses({})
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
-    assert "too few approver accounts" in writes[1][2]["body"]
+    done = writes(gitea)
+    assert done[0] == ("add_label", (6, "needs-fix"))
+    assert "too few approver accounts" in done[1][1][1]
     assert action == queue.Idle()
 
 
 def test_merge_removes_the_automerge_label(monkeypatch, gitea):
     given(monkeypatch, [dataclasses.replace(pull(6), labels={"automerge": 13})])
-    gitea.call.side_effect = FakeResponses(pull_answer(6))
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6)
     run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes == [("POST", "/pulls/6/merge", squash(6)),
-                      ("DELETE", "/issues/6/labels/13", None)]
+    assert writes(gitea) == [("merge", (6, f"{6:040x}", squash(6))), ("remove_label", (6, 13))]
 
 
 def test_keep_commits_label_reaches_the_merge_action():
@@ -522,121 +453,103 @@ def test_keep_commits_label_reaches_the_merge_action():
 
 def test_squash_body_is_the_commit_section(monkeypatch, gitea):
     given(monkeypatch, [pull(6)])
-    gitea.call.side_effect = FakeResponses(pull_answer(6, body="Closes #1\n\n## Commit\nWhy it is so.\n"))
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6, body="Closes #1\n\n## Commit\nWhy it is so.\n")
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes()[0] == ("POST", "/pulls/6/merge", squash(6, body="Why it is so."))
+    assert writes(gitea)[0] == ("merge", (6, f"{6:040x}", squash(6, body="Why it is so.")))
 
 
 def test_keep_commits_fast_forwards_after_checking_every_commit(monkeypatch, gitea):
     given(monkeypatch, [pull(6, labels=("automerge", "keep-commits"))])
-    gitea.call.side_effect = FakeResponses(pull_answer(6, title="no format needed"))
-    gitea.paged.side_effect = pages(commits=[
-        {"sha": "a" * 40, "commit": {"message": "ci: move (#1)\n\nbody"}, "parents": [{"sha": "f" * 40}]},
-        {"sha": "b" * 40, "commit": {"message": "ci: edit (#1)"}, "parents": [{"sha": "a" * 40}]},
-    ])
+    answer_pull(gitea, 6, title="no format needed")
+    gitea.pull_commits.return_value = [Commit("a" * 40, "ci: move (#1)", 1), Commit("b" * 40, "ci: edit (#1)", 1)]
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes()[0] == (
-        "POST", "/pulls/6/merge", {"Do": "fast-forward-only", "head_commit_id": f"{6:040x}"})
+    gitea.pull_commits.assert_called_once_with(6)
+    assert writes(gitea)[0] == ("merge", (6, f"{6:040x}", None))
 
 
 def test_invalid_title_read_at_merge_time_flags_needs_fix_and_hands_over(monkeypatch, gitea):
     # The CI check passed earlier; the title was edited afterwards. Only the queue's own read counts.
     given(monkeypatch, [pull(6, approvers=(), carried=("chli1",)), pull(7, behind=True)])
-    gitea.call.side_effect = FakeResponses({
-        **pull_answer(6, title="land six"),
-        ("GET", "/git/refs/heads/branch-7"): [{"ref": "refs/heads/branch-7", "object": {"sha": "e" * 40}}],
-    })
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6, title="land six")
+    gitea.branch_head.return_value = "e" * 40
     log = []
     action = run_pass(gitea, "https://gitea", dry_run=False, approvers=approver_clients(log, APPROVER))
-    writes = gitea.call.side_effect.writes()
+    done = writes(gitea)
     # Neither approved nor merged: the flag comes first.
     assert log == []
-    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
-    assert "PR title: subject must read" in writes[1][2]["body"]
-    assert "`## Commit` section" in writes[1][2]["body"]
+    assert done[0] == ("add_label", (6, "needs-fix"))
+    assert "PR title: subject must read" in done[1][1][1]
+    assert "`## Commit` section" in done[1][1][1]
     assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
 
 
 def test_keep_commits_with_a_bad_commit_flags_needs_fix(monkeypatch, gitea):
     given(monkeypatch, [pull(6, labels=("automerge", "keep-commits"))])
-    gitea.call.side_effect = FakeResponses(pull_answer(6))
-    gitea.paged.side_effect = pages(commits=[
-        {"sha": "a" * 40, "commit": {"message": "wip"}, "parents": [{"sha": "f" * 40}]}])
+    answer_pull(gitea, 6)
+    gitea.pull_commits.return_value = [Commit("a" * 40, "wip", 1)]
     run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
-    assert "aaaaaaa: subject must read" in writes[1][2]["body"]
-    assert "drop `keep-commits`" in writes[1][2]["body"]
+    done = writes(gitea)
+    assert done[0] == ("add_label", (6, "needs-fix"))
+    assert "aaaaaaa: subject must read" in done[1][1][1]
+    assert "drop `keep-commits`" in done[1][1][1]
 
 
 def test_unknown_scope_at_merge_time_flags_needs_fix(monkeypatch, gitea):
     given(monkeypatch, [pull(6)])
-    gitea.call.side_effect = FakeResponses(
-        pull_answer(6, title="feat(domian): x (#1)", config='[commits]\nscopes = ["domain", "ui"]\n'))
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6, title="feat(domian): x (#1)", config='[commits]\nscopes = ["domain", "ui"]\n')
     run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
-    assert "unknown scope 'domian', expected one of: domain, ui" in writes[1][2]["body"]
+    gitea.file.assert_called_once_with("mergeweasel.toml", f"{6:040x}")
+    done = writes(gitea)
+    assert done[0] == ("add_label", (6, "needs-fix"))
+    assert "unknown scope 'domian', expected one of: domain, ui" in done[1][1][1]
 
 
 def test_invalid_config_on_the_branch_flags_needs_fix_and_hands_over(monkeypatch, gitea):
     given(monkeypatch, [pull(6), pull(7, behind=True)])
-    gitea.call.side_effect = FakeResponses({
-        **pull_answer(6, config="[comits]\n"),
-        ("GET", "/git/refs/heads/branch-7"): [{"ref": "refs/heads/branch-7", "object": {"sha": "e" * 40}}],
-    })
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6, config="[comits]\n")
+    gitea.branch_head.return_value = "e" * 40
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[0] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
-    assert "mergeweasel.toml: unknown key comits" in writes[1][2]["body"]
-    assert "Fix `mergeweasel.toml` on the branch" in writes[1][2]["body"]
+    done = writes(gitea)
+    assert done[0] == ("add_label", (6, "needs-fix"))
+    assert "mergeweasel.toml: unknown key comits" in done[1][1][1]
+    assert "Fix `mergeweasel.toml` on the branch" in done[1][1][1]
     assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
 
 
 def test_refused_merge_flags_needs_fix_with_giteas_reason_and_hands_over(monkeypatch, gitea):
     given(monkeypatch, [pull(6), pull(7, behind=True)])
-    gitea.call.side_effect = FakeResponses({
-        **pull_answer(6),
-        ("POST", "/pulls/6/merge"): http_error(405, "Does not have enough approvals"),
-        ("GET", "/git/refs/heads/branch-7"): [{"ref": "refs/heads/branch-7", "object": {"sha": "e" * 40}}],
-    })
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6)
+    gitea.merge.side_effect = MergeRefused("Does not have enough approvals", 405)
+    gitea.branch_head.return_value = "e" * 40
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    writes = gitea.call.side_effect.writes()
-    assert writes[1] == ("POST", "/issues/6/labels", {"labels": ["needs-fix"]})
-    assert "Does not have enough approvals" in writes[2][2]["body"]
+    done = writes(gitea)
+    assert done[1] == ("add_label", (6, "needs-fix"))
+    assert "Does not have enough approvals" in done[2][1][1]
     assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
 
 
-@pytest.mark.parametrize("refusal", [http_error(405, "Please try again later"), http_error(409, "head out of date")])
-def test_transient_merge_refusal_ends_the_pass_quietly(monkeypatch, gitea, refusal):
+def test_transient_merge_refusal_ends_the_pass_quietly(monkeypatch, gitea, capsys):
     given(monkeypatch, [pull(6), pull(7, behind=True)])
-    gitea.call.side_effect = FakeResponses({**pull_answer(6), ("POST", "/pulls/6/merge"): refusal})
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6)
+    gitea.merge.side_effect = MergeDeferred("Please try again later", 405)
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes() == [("POST", "/pulls/6/merge", squash(6))]
+    assert writes(gitea) == [("merge", (6, f"{6:040x}", squash(6)))]
     assert action == merge_action(6)
+    assert "#6: merge deferred: Please try again later" in capsys.readouterr().out
 
 
 def test_renovate_push_clears_needs_fix_and_waits_for_the_rerun_checks(monkeypatch, gitea):
     given(monkeypatch, [pull(9, labels=("automerge", "needs-fix"), renovate_retried=True)])
-    gitea.call.side_effect = FakeResponses({})
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    assert gitea.call.side_effect.writes() == [("DELETE", "/issues/9/labels/1", None)]
+    assert writes(gitea) == [("remove_label", (9, 1))]
     assert action == queue.Wait(9)
 
 
 def test_cleared_pull_behind_main_is_rebased(monkeypatch, gitea):
     given(monkeypatch, [pull(9, labels=("automerge", "needs-fix"), behind=True, renovate_retried=True)])
-    gitea.call.side_effect = FakeResponses({
-        ("GET", "/git/refs/heads/branch-9"): [{"ref": "refs/heads/branch-9", "object": {"sha": "a" * 40}}],
-    })
+    gitea.branch_head.return_value = "a" * 40
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    assert ("POST", "/pulls/9/update?style=rebase", None) in gitea.call.side_effect.writes()
+    assert ("rebase", (9,)) in writes(gitea)
     assert isinstance(action, queue.Rebase)
 
 
@@ -644,9 +557,8 @@ def test_dry_run_writes_nothing(monkeypatch, gitea):
     red = statuses(test="failure", smoke="success")
     given(monkeypatch, [pull(1, checks=red), pull(2, behind=True),
                         pull(9, labels=("automerge", "needs-fix"), renovate_retried=True)])
-    gitea.call.side_effect = FakeResponses({})
     action = run_pass(gitea, "https://gitea", dry_run=True)
-    assert gitea.call.side_effect.writes() == []
+    assert writes(gitea) == []
     # 1 is flagged (in memory only), 9 had its needs-fix cleared and waits for its re-run checks
     # ahead of 2, which is behind.
     assert action == queue.Wait(9)
@@ -654,42 +566,32 @@ def test_dry_run_writes_nothing(monkeypatch, gitea):
 
 def test_dry_run_with_unknown_approvers_assumes_enough(monkeypatch, gitea):
     given(monkeypatch, [pull(6, approvers=(), carried=("chli1",))])
-    gitea.call.side_effect = FakeResponses({})
     action = queue.run_pass(gitea, "https://gitea", True, None, None, SETTINGS)
-    assert gitea.call.side_effect.writes() == []
+    assert writes(gitea) == []
     assert action == merge_action(6, approvals=((None, "chli1"),))
 
 
+def open_pull(number, labels=("automerge",), base="main", poster="author", head_ref="feature"):
+    return PullRequest(number, base, head_ref, str(number % 10) * 40,
+                       {name: 13 + index for index, name in enumerate(labels)}, False, poster, "t", "")
+
+
 def test_read_state_builds_queued_pulls_from_the_api():
-    raw_pull = {"number": 5, "labels": [{"name": "automerge", "id": 13}], "base": {"ref": "main"},
-                "head": {"ref": "feature", "sha": "5" * 40}, "draft": False,
-                "user": {"login": "author"}}
-    other_base = {**raw_pull, "number": 6, "base": {"ref": "release"}}
-    unlabelled = {**raw_pull, "number": 7, "labels": []}
-    flagged = {**raw_pull, "number": 8, "labels": [{"name": "automerge", "id": 13}, {"name": "needs-fix", "id": 14}],
-               "head": {"ref": "renovate/x", "sha": "8" * 40}}
-    by_renovate = {**raw_pull, "number": 9, "user": {"login": "renovate"}, "head": {"ref": "renovate/y", "sha": "9" * 40}}
-    gitea = mock.Mock(spec=Gitea)
-    gitea.call.side_effect = FakeResponses({
-        ("GET", "/branches/main"): {"commit": {"id": "f" * 40}, "status_check_contexts": REQUIRED,
-                                    "enable_status_check": True, "required_approvals": 2},
-        ("GET", f"/commits/{'5' * 40}/status?limit=50"): {"statuses": [status_json()]},
-        ("GET", f"/compare/{'5' * 40}...{'f' * 40}"): {"total_commits": 2},
-        ("GET", f"/commits/{'8' * 40}/status?limit=50"): {"statuses": []},
-        ("GET", f"/compare/{'8' * 40}...{'f' * 40}"): {"total_commits": 0},
-        ("GET", f"/commits/{'9' * 40}/status?limit=50"): {"statuses": []},
-        ("GET", f"/compare/{'9' * 40}...{'f' * 40}"): {"total_commits": 0},
-    })
-    gitea.paged.side_effect = lambda path: {
-        "/pulls?state=open": [raw_pull, other_base, unlabelled, flagged, by_renovate],
-        "/pulls/5/reviews": [review(), review(login=QUEUE, official=False, commit_id="5" * 40)],
-        "/pulls/8/reviews": [review(state="REQUEST_CHANGES")],
-        "/issues/8/timeline": [event("label", QUEUE, 10), event("pull_push", "renovate", 11)],
-        "/pulls/9/reviews": [],
-        "/issues/9/timeline": [event("label", "renovate", 20, label="automerge")],
-    }[path]
+    gitea = mock.create_autospec(Gitea, instance=True)
+    gitea.branch.return_value = Branch("f" * 40, tuple(REQUIRED), 2)
+    gitea.open_pulls.return_value = [
+        open_pull(5), open_pull(6, base="release"), open_pull(7, labels=()),
+        open_pull(8, labels=("automerge", "needs-fix"), head_ref="renovate/x"),
+        open_pull(9, poster="renovate", head_ref="renovate/y")]
+    gitea.statuses.side_effect = {"5" * 40: [status_json()], "8" * 40: [], "9" * 40: []}.__getitem__
+    gitea.is_behind.side_effect = lambda head, base: head == "5" * 40 and base == "f" * 40
+    gitea.reviews.side_effect = {5: [review(), review(login=QUEUE, official=False, commit_id="5" * 40)],
+                                 8: [review(state="REQUEST_CHANGES")], 9: []}.__getitem__
+    gitea.timeline.side_effect = {8: [event("label", QUEUE, 10), event("pull_push", "renovate", 11)],
+                                  9: [event("label", "renovate", 20, label="automerge")]}.__getitem__
     state = queue.read_state(gitea, "https://gitea", QUEUE, SETTINGS)
-    assert state.base_sha == "f" * 40 and state.required == REQUIRED and state.needed == 2
+    gitea.branch.assert_called_once_with("main")
+    assert state.base_sha == "f" * 40 and state.required == tuple(REQUIRED) and state.needed == 2
     assert [p.number for p in state.pulls] == [5, 8, 9]
     queued_pull, flagged_pull, renovate_pull = state.pulls
     assert renovate_pull.renovate_trusted and not queued_pull.renovate_trusted and not flagged_pull.renovate_trusted
@@ -699,80 +601,24 @@ def test_read_state_builds_queued_pulls_from_the_api():
     assert queued_pull.labels == {"automerge": 13}
     assert not queued_pull.rejected and not queued_pull.renovate_retried
     assert flagged_pull.rejected and flagged_pull.renovate_retried and not flagged_pull.behind
-    assert "/issues/5/timeline" not in [call.args[0] for call in gitea.paged.call_args_list]
-
-
-# --- turn ---
-
-def run(run_id, status="in_progress", event="workflow_run"):
-    return {"id": run_id, "status": status, "event": event}
-
-
-def test_alone_its_the_passes_turn():
-    assert queue.turn([run(7), run(6, "completed")], 7, "workflow_run") == queue.OwnTurn()
-
-
-def test_an_unfinished_older_pass_goes_first():
-    runs = [run(7), run(6, "queued"), run(5, "waiting")]
-    assert queue.turn(runs, 7, "push") == queue.AfterOlder(6)
-
-
-def test_a_newer_events_pass_supersedes():
-    runs = [run(9, "queued"), run(8), run(7), run(6)]
-    assert queue.turn(runs, 7, "pull_request_target") == queue.Superseded(9)
-
-
-def test_a_finished_newer_pass_supersedes_nothing():
-    assert queue.turn([run(8, "completed"), run(7)], 7, "workflow_run") == queue.OwnTurn()
-
-
-def test_a_dispatch_neither_supersedes_nor_is_superseded():
-    assert queue.turn([run(8, event="workflow_dispatch"), run(7)], 7, "workflow_run") == queue.OwnTurn()
-    runs = [run(9), run(8, event="workflow_dispatch"), run(7)]
-    assert queue.turn(runs, 8, "workflow_dispatch") == queue.AfterOlder(7)
-
-
-def runs_answers(*pages_of_runs):
-    """Successive answers to the queue's run list."""
-    return [{"workflow_runs": runs} for runs in pages_of_runs]
-
-
-def test_wait_for_turn_polls_until_the_older_pass_finished(monkeypatch, gitea):
-    sleeps = []
-    monkeypatch.setattr(queue.time, "sleep", sleeps.append)
-    gitea.call.side_effect = runs_answers([run(7), run(6)], [run(7), run(6, "completed")])
-    assert queue.wait_for_turn(gitea, 7, "workflow_run")
-    assert sleeps == [queue.TURN_POLL_SECONDS]
-    assert gitea.call.call_args.args == ("GET", "/actions/workflows/mergeweasel-queue.yml/runs?limit=50")
-
-
-def test_wait_for_turn_leaves_to_a_newer_pass_while_waiting(monkeypatch, gitea):
-    monkeypatch.setattr(queue.time, "sleep", lambda seconds: None)
-    gitea.call.side_effect = runs_answers([run(7), run(6)], [run(8, "queued"), run(7), run(6)])
-    assert not queue.wait_for_turn(gitea, 7, "workflow_run")
+    assert 5 not in [call.args[0] for call in gitea.timeline.call_args_list]
 
 
 CUSTOM = Settings("trunk", "merge-me", "broken", "no-squash", "deps-bot")
 
 
 def test_read_state_uses_the_instances_names():
-    raw_pull = {"number": 5, "labels": [{"name": "merge-me", "id": 13}], "base": {"ref": "trunk"},
-                "head": {"ref": "feature", "sha": "5" * 40}, "draft": False, "user": {"login": "deps-bot"}}
-    default_label = {**raw_pull, "number": 6, "labels": [{"name": "automerge", "id": 3}]}
-    on_main = {**raw_pull, "number": 7, "base": {"ref": "main"}}
-    gitea = mock.Mock(spec=Gitea)
-    gitea.call.side_effect = FakeResponses({
-        ("GET", "/branches/trunk"): {"commit": {"id": "f" * 40}, "status_check_contexts": [],
-                                     "enable_status_check": False, "required_approvals": 1},
-        ("GET", f"/commits/{'5' * 40}/status?limit=50"): {"statuses": []},
-        ("GET", f"/compare/{'5' * 40}...{'f' * 40}"): {"total_commits": 0},
-    })
-    gitea.paged.side_effect = lambda path: {
-        "/pulls?state=open": [raw_pull, default_label, on_main],
-        "/pulls/5/reviews": [],
-        "/issues/5/timeline": [event("label", "deps-bot", 20, label="merge-me")],
-    }[path]
+    gitea = mock.create_autospec(Gitea, instance=True)
+    gitea.branch.return_value = Branch("f" * 40, (), 1)
+    gitea.open_pulls.return_value = [open_pull(5, labels=("merge-me",), base="trunk", poster="deps-bot"),
+                                     open_pull(6, labels=("automerge",), base="trunk", poster="deps-bot"),
+                                     open_pull(7, labels=("merge-me",), poster="deps-bot")]
+    gitea.statuses.return_value = []
+    gitea.is_behind.return_value = False
+    gitea.reviews.return_value = []
+    gitea.timeline.return_value = [event("label", "deps-bot", 20, label="merge-me")]
     state = queue.read_state(gitea, "https://gitea", QUEUE, CUSTOM)
+    gitea.branch.assert_called_once_with("trunk")
     assert [p.number for p in state.pulls] == [5]
     assert state.pulls[0].renovate_trusted
 
@@ -859,11 +705,9 @@ def test_trusted_renovate_pull_with_too_few_approvers_flags_needs_fix():
 def test_merge_approves_a_trusted_renovate_pull_with_its_reason(monkeypatch, gitea):
     given(monkeypatch, [pull(6, approvers=(), poster="renovate", renovate_trusted=True)])
     log = []
-    gitea.call.side_effect = FakeResponses(pull_answer(6))
-    gitea.paged.side_effect = pages()
+    answer_pull(gitea, 6)
     run_pass(gitea, "https://gitea", dry_run=False, approvers=approver_clients(log, "a1"))
-    assert log == [("a1", "POST", "/pulls/6/reviews",
-                    {"event": "APPROVED", "commit_id": f"{6:040x}", "body": queue.text(queue.RENOVATE_APPROVAL, SETTINGS)})]
+    assert log == [("a1", 6, f"{6:040x}", queue.text(queue.RENOVATE_APPROVAL, SETTINGS))]
 
 
 def test_trusted_renovate_pull_without_approver_accounts_waits_for_a_human():

@@ -4,7 +4,6 @@ Never from the repository's files: its commits must work unchanged on another in
 labels, accounts and default branch.
 """
 import dataclasses
-import urllib.error
 
 # Settings field -> the environment variable the workflow fills from the Actions variable.
 VARIABLES = {
@@ -40,7 +39,7 @@ class Settings:
 def read(gitea, environ):
     """An empty or unset variable keeps its default."""
     values = {field: environ.get(variable, "").strip() for field, variable in VARIABLES.items()}
-    settings = Settings(gitea.call("GET", "")["default_branch"], **{field: value for field, value in values.items() if value})
+    settings = Settings(gitea.default_branch(), **{field: value for field, value in values.items() if value})
     if len(set(settings.labels())) < len(settings.labels()):
         raise SettingsError(f"the label variables must name three different labels, not {', '.join(settings.labels())}")
     return settings
@@ -61,14 +60,11 @@ def missing_labels(gitea, required):
 
     Unknown: the organization's labels are unreadable - a user's repository, or a token without access.
     """
-    names = {label["name"] for label in gitea.paged("/labels")}
+    names = set(gitea.labels())
     missing = [name for name in required if name not in names]
     if not missing:
         return []
-    try:
-        names |= {label["name"] for label in gitea.paged(f"/orgs/{gitea.owner}/labels", root=True)}
-    except urllib.error.HTTPError as error:
-        if error.code in (403, 404):
-            return None
-        raise
-    return [name for name in required if name not in names]
+    organization = gitea.org_labels()
+    if organization is None:
+        return None
+    return [name for name in required if name not in names | set(organization)]

@@ -6,10 +6,9 @@ lands as it is and is checked one by one. The rule lives in commit_rule, shared 
 """
 import json
 import sys
-import urllib.error
 
 from mergeweasel import commit_rule, config
-from mergeweasel.gitea import issue_numbers, pull_commits
+from mergeweasel.gitea import ApiError, Unreachable
 
 
 def run(gitea, event_path, settings):
@@ -29,16 +28,18 @@ def run(gitea, event_path, settings):
     try:
         # The pull request's own version: one that breaks the file fails here, not on the base branch.
         scopes = config.load(gitea, pull["head"]["sha"]).scopes
-        issues = issue_numbers(gitea)
-        commits = pull_commits(gitea, number) if keep_commits else []
-    except urllib.error.HTTPError as error:
-        print(f"could not read from the Gitea API: HTTP {error.code} {error.reason} ({error.url})",
-              file=sys.stderr)
-        print("hint: a private repository needs GITHUB_TOKEN (the run token) in the step's environment",
-              file=sys.stderr)
+        issues = gitea.issue_numbers()
+        commits = gitea.pull_commits(number) if keep_commits else []
+    except Unreachable as error:
+        print(f"could not reach the Gitea API: {error.message}", file=sys.stderr)
         return 1
-    except urllib.error.URLError as error:
-        print(f"could not reach the Gitea API: {error.reason}", file=sys.stderr)
+    except ApiError as error:
+        status = f"HTTP {error.status} " if error.status else ""
+        print(f"could not read from the Gitea API: {status}{error.message} ({error.url})", file=sys.stderr)
+        # Only Gitea's refusal can be a missing token; a malformed answer is none.
+        if error.status:
+            print("hint: a private repository needs GITHUB_TOKEN (the run token) in the step's environment",
+                  file=sys.stderr)
         return 1
     except config.ConfigError as error:
         print(error)

@@ -1,42 +1,23 @@
-import base64
 import json
-import urllib.error
 from unittest import mock
 
 import pytest
 
 from mergeweasel import check
 from mergeweasel.settings import Settings
-from mergeweasel.gitea import Gitea
-
-ISSUES_PATH = "/issues?state=all&type=issues"
-COMMITS_PATH = "/pulls/213/commits?stat=false&verification=false&files=false"
-
+from mergeweasel.commit_rule import Commit
+from mergeweasel.gitea import ApiError, Gitea, Unreachable
 
 def raw_commit(sha, subject, parents=1):
-    return {"sha": sha, "commit": {"message": f"{subject}\n\nbody"}, "parents": [{"sha": "p" * 40}] * parents}
+    return Commit(sha, subject, parents)
 
 
 def api(commits=(), issues=(99, 209), config=None):
     """config: mergeweasel.toml's text at the head, None without the file."""
-    gitea = mock.Mock(spec=Gitea)
-
-    def call(method, path):
-        assert (method, path) == ("GET", f"/contents/mergeweasel.toml?ref={'h' * 40}")
-        if config is None:
-            raise urllib.error.HTTPError("url", 404, "Not Found", hdrs=None, fp=None)
-        return {"type": "file", "content": base64.b64encode(config.encode()).decode()}
-
-    gitea.call.side_effect = call
-
-    def paged(path):
-        if path == ISSUES_PATH:
-            return [{"number": number} for number in issues]
-        if path == COMMITS_PATH:
-            return list(commits)
-        raise AssertionError(f"unexpected read {path}")
-
-    gitea.paged.side_effect = paged
+    gitea = mock.create_autospec(Gitea, instance=True)
+    gitea.file.return_value = None if config is None else config.encode()
+    gitea.issue_numbers.return_value = set(issues)
+    gitea.pull_commits.return_value = list(commits)
     return gitea
 
 
@@ -53,21 +34,19 @@ def run(gitea, event_path, settings=Settings("main")):
     return check.run(gitea, event_path, settings)
 
 
-def read_paths(gitea):
-    return [call.args[0] for call in gitea.paged.call_args_list]
-
-
 # --- squash (default) ---
 
 def test_squash_passes_with_a_valid_title_and_section(tmp_path, capsys):
-    assert run(api(), event(tmp_path, body="## Commit\nWhy.")) == 0
+    gitea = api()
+    assert run(gitea, event(tmp_path, body="## Commit\nWhy.")) == 0
+    gitea.file.assert_called_once_with("mergeweasel.toml", "h" * 40)
     assert "ci: squash by default (#209)\n\nWhy." in capsys.readouterr().out
 
 
 def test_squash_ignores_the_branch_commits(tmp_path):
     gitea = api(commits=[raw_commit("a" * 40, "wip")])
     assert run(gitea, event(tmp_path)) == 0
-    assert COMMITS_PATH not in read_paths(gitea)
+    gitea.pull_commits.assert_not_called()
 
 
 def test_squash_fails_on_a_bad_title(tmp_path, capsys):
@@ -122,7 +101,7 @@ def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
 def test_keep_commits_checks_every_commit_through_the_api(tmp_path):
     gitea = api(commits=[raw_commit("a" * 40, "ci: one (#99)"), raw_commit("c" * 40, "ci: two (#209)")])
     assert run(gitea, event(tmp_path, title="anything", labels=("keep-commits",))) == 0
-    assert COMMITS_PATH in read_paths(gitea)
+    gitea.pull_commits.assert_called_once_with(213)
 
 
 def test_keep_commits_fails_on_a_bad_commit(tmp_path, capsys):
@@ -146,18 +125,33 @@ def test_a_merged_pull_request_passes_without_a_check(tmp_path, capsys, labels):
     gitea = api()
     assert run(gitea, event(tmp_path, title="no longer valid", labels=labels, merged=True)) == 0
     assert "already landed" in capsys.readouterr().out
-    assert read_paths(gitea) == []
+    gitea.issue_numbers.assert_not_called()
 
 
 # --- failures around the check ---
 
 def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
     gitea = api()
-    gitea.paged.side_effect = urllib.error.HTTPError(
-        "https://git.example/api/v1/repos/org/repo/issues", 403, "Forbidden", hdrs=None, fp=None)
+    gitea.issue_numbers.side_effect = ApiError("Forbidden", 403, "https://git.example/api/v1/repos/org/repo/issues")
     assert run(gitea, event(tmp_path)) == 1
     err = capsys.readouterr().err
-    assert "HTTP 403" in err and "GITHUB_TOKEN" in err
+    assert "HTTP 403 Forbidden (https://git.example/api/v1/repos/org/repo/issues)" in err and "GITHUB_TOKEN" in err
+
+
+def test_an_answer_without_a_status_names_no_status_and_no_token_hint(tmp_path, capsys):
+    gitea = api()
+    gitea.issue_numbers.side_effect = ApiError("Gitea's answer is not JSON", None, "https://git.example/x")
+    assert run(gitea, event(tmp_path)) == 1
+    err = capsys.readouterr().err
+    assert "could not read from the Gitea API: Gitea's answer is not JSON (https://git.example/x)" in err
+    assert "None" not in err and "GITHUB_TOKEN" not in err
+
+
+def test_fails_clearly_when_gitea_is_unreachable(tmp_path, capsys):
+    gitea = api()
+    gitea.file.side_effect = Unreachable("connection refused", None, "https://git.example/x")
+    assert run(gitea, event(tmp_path)) == 1
+    assert "could not reach the Gitea API: connection refused" in capsys.readouterr().err
 
 
 def test_not_a_pull_request_event_fails_clearly(tmp_path, capsys):
