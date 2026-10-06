@@ -6,7 +6,7 @@ import pytest
 from mergeweasel import check
 from mergeweasel.settings import Settings
 from mergeweasel.commit_rule import Commit
-from mergeweasel.gitea import ApiError, Gitea, PullRequest, Unreachable
+from mergeweasel.gitea import ApiError, Gitea, NotFound, PullRequest, Unreachable
 
 def raw_commit(sha, subject, parents=1):
     return Commit(sha, subject, parents)
@@ -173,6 +173,14 @@ def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
     assert run(gitea, event(tmp_path)) == 1
     err = capsys.readouterr().err
     assert "HTTP 403 Forbidden (https://git.example/api/v1/repos/org/repo/issues/209)" in err and "GITHUB_TOKEN" in err
+
+
+def test_fails_loudly_when_the_pull_request_cannot_be_read(tmp_path, capsys):
+    gitea = api()
+    gitea.pull.side_effect = NotFound("Not Found", 404, "https://git.example/api/v1/repos/org/repo/pulls/213")
+    assert run(gitea, event(tmp_path)) == 1
+    assert "HTTP 404 Not Found (https://git.example/api/v1/repos/org/repo/pulls/213)" in capsys.readouterr().err
+    gitea.file.assert_not_called()
 
 
 def test_an_answer_without_a_status_names_no_status_and_no_token_hint(tmp_path, capsys):

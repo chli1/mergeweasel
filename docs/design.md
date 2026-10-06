@@ -275,8 +275,8 @@ status must not turn red.
 and reads the title, body, labels, head and merged state with `GET pulls/{n}` when it runs. A re-run
 of a job replays the event it started with, so a check that judged the payload would fail again
 after the title was fixed, and a slow run could report on an older title or label set than a run
-that started after it. Read when the job runs, a re-run judges the current text, and the run that
-finishes last judges the latest state.
+that started after it. Because the check reads the pull request when the job runs, a re-run judges
+the current text and the run that finishes last judges the latest state.
 
 ## Releases
 
