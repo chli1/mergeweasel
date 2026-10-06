@@ -27,6 +27,8 @@ class Settings:
     keep_commits: str = "keep-commits"
     # None: the Renovate rule is off - a trusted account is never a default.
     renovate: str | None = None
+    # True if the keep-commits variable names a label: then it has to exist.
+    keep_commits_required: bool = False
 
     def labels(self):
         return (self.automerge, self.needs_fix, self.keep_commits)
@@ -39,20 +41,20 @@ class Settings:
 def read(gitea, environ):
     """An empty or unset variable keeps its default."""
     values = {field: environ.get(variable, "").strip() for field, variable in VARIABLES.items()}
-    settings = Settings(gitea.default_branch(), **{field: value for field, value in values.items() if value})
+    settings = Settings(gitea.default_branch(), **{field: value for field, value in values.items() if value},
+                        keep_commits_required=bool(values["keep_commits"]))
     if len(set(settings.labels())) < len(settings.labels()):
         raise SettingsError(f"the label variables must name three different labels, not {', '.join(settings.labels())}")
     return settings
 
 
-def required_labels(settings, environ):
+def required_labels(settings):
     """The labels that must exist: the queue cannot work without automerge and needs-fix.
 
     keep-commits is optional - without it every pull request is squashed - unless its variable names
-    one, which then has to exist.
+    one, which then has to exist; naming the default `keep-commits` counts too.
     """
-    named = environ.get(VARIABLES["keep_commits"], "").strip()
-    return (settings.automerge, settings.needs_fix, *((settings.keep_commits,) if named else ()))
+    return (settings.automerge, settings.needs_fix, *((settings.keep_commits,) if settings.keep_commits_required else ()))
 
 
 def missing_labels(gitea, required):

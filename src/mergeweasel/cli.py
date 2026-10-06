@@ -3,7 +3,7 @@ import argparse
 import os
 import sys
 
-from mergeweasel import check, queue, release, settings as instance, turn
+from mergeweasel import accounts, check, queue, release, settings as instance, turn
 from mergeweasel.gitea import ApiError, Gitea
 
 MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
@@ -70,7 +70,7 @@ def instance_settings(gitea):
 
 def labels_exist(gitea, settings):
     try:
-        missing = instance.missing_labels(gitea, instance.required_labels(settings, os.environ))
+        missing = instance.missing_labels(gitea, instance.required_labels(settings))
     except ApiError as error:
         print(f"cannot read the labels: {error.message}", file=sys.stderr)
         return False
@@ -90,20 +90,20 @@ def queue_pass(server, repository, dry_run):
     try:
         if token:
             gitea = Gitea(server, repository, token)
-            merger = account_login(gitea, MERGER_TOKEN)
+            merger = accounts.Merger(account_login(gitea, MERGER_TOKEN))
         elif dry_run:
             # CI's dry run has only the run token, which belongs to no account.
             gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))
-            merger = None
+            merger = accounts.DryRunMerger()
             print(UNKNOWN_MERGER)
         else:
             print(f"{MERGER_TOKEN} is not set", file=sys.stderr)
             return 1
         if approver_tokens.strip() or not dry_run:
-            approvers = approver_clients(server, repository, approver_tokens)
-            print(f"approvers: {', '.join(approvers) or 'none'}")
+            approvers = accounts.Approvers(approver_clients(server, repository, approver_tokens))
+            print(f"approvers: {', '.join(approvers.logins()) or 'none'}")
         else:
-            approvers = None
+            approvers = accounts.DryRunApprovers()
             print(UNKNOWN_APPROVERS)
     except TokenProblem as problem:
         print(problem, file=sys.stderr)

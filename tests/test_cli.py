@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 
 from mergeweasel import cli
+from mergeweasel.accounts import Approvers, DryRunApprovers, DryRunMerger, Merger
 from mergeweasel import gitea as gitea_module
 from mergeweasel.gitea import ApiError, Gitea
 from mergeweasel.settings import VARIABLES, Settings
@@ -100,8 +101,8 @@ def test_pass_derives_the_merger_and_the_approvers(env, fake, capsys):
     env.setenv("MERGEWEASEL_APPROVER_TOKENS", "a-1\na-2\n")
     assert cli.main(["pass"]) == 0
     gitea, server, dry_run, merger, approvers = fake.args()
-    assert (gitea, server, dry_run, merger) == (fake.clients["pat"], SERVER, False, "weasel-bot")
-    assert list(approvers.items()) == [("approver-1", fake.clients["a-1"]), ("approver-2", fake.clients["a-2"])]
+    assert (gitea, server, dry_run, merger) == (fake.clients["pat"], SERVER, False, Merger("weasel-bot"))
+    assert list(approvers.clients.items()) == [("approver-1", fake.clients["a-1"]), ("approver-2", fake.clients["a-2"])]
     assert "approvers: approver-1, approver-2" in capsys.readouterr().out
 
 
@@ -109,20 +110,20 @@ def test_approver_tokens_tolerate_crlf_and_blank_lines(env, fake):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     env.setenv("MERGEWEASEL_APPROVER_TOKENS", "\r\n  a-2  \r\n\r\na-1\r\n")
     assert cli.main(["pass"]) == 0
-    assert list(fake.args()[4]) == ["approver-2", "approver-1"]
+    assert fake.args()[4].logins() == ("approver-2", "approver-1")
 
 
 def test_the_merger_token_can_be_an_approver_token(env, fake):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     env.setenv("MERGEWEASEL_APPROVER_TOKENS", "pat")
     assert cli.main(["pass"]) == 0
-    assert fake.args()[3] == "weasel-bot" and list(fake.args()[4]) == ["weasel-bot"]
+    assert fake.args()[3] == Merger("weasel-bot") and fake.args()[4].logins() == ("weasel-bot",)
 
 
 def test_a_pass_without_approver_tokens_has_none(env, fake, capsys):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     assert cli.main(["pass"]) == 0
-    assert fake.args()[4] == {}
+    assert fake.args()[4] == Approvers({})
     assert "approvers: none" in capsys.readouterr().out
 
 
@@ -174,15 +175,22 @@ def test_a_token_without_a_login_fails_the_pass(env, fake, capsys, login):
 def test_dry_run_without_approver_tokens_assumes_enough(env, fake, capsys):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     assert cli.main(["pass", "--dry-run"]) == 0
-    assert fake.args() == (fake.clients["pat"], SERVER, True, "weasel-bot", None)
+    assert fake.args() == (fake.clients["pat"], SERVER, True, Merger("weasel-bot"), DryRunApprovers())
     assert "approver accounts unknown, assuming enough" in capsys.readouterr().out
+
+
+def test_a_real_pass_never_gets_a_dry_run_account(env, fake):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    assert cli.main(["pass"]) == 0
+    merger, approvers = fake.args()[3:]
+    assert type(merger) is Merger and type(approvers) is Approvers
 
 
 def test_dry_run_with_approver_tokens_resolves_them(env, fake):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     env.setenv("MERGEWEASEL_APPROVER_TOKENS", "a-1")
     assert cli.main(["pass", "--dry-run"]) == 0
-    assert list(fake.args()[4]) == ["approver-1"]
+    assert fake.args()[4].logins() == ("approver-1",)
 
 
 def test_dry_run_without_the_merger_token_uses_the_run_token_and_no_merger(env, fake, capsys):
@@ -190,7 +198,7 @@ def test_dry_run_without_the_merger_token_uses_the_run_token_and_no_merger(env, 
     assert cli.main(["pass", "--dry-run"]) == 0
     client = fake.clients["run-token"]
     client.own_login.assert_not_called()
-    assert fake.args() == (client, SERVER, True, None, None)
+    assert fake.args() == (client, SERVER, True, DryRunMerger(), DryRunApprovers())
     assert "merger account unknown, carry-over assumed genuine" in capsys.readouterr().out
 
 
@@ -229,7 +237,7 @@ def test_check_commits_runs_the_check_with_the_run_token(env, fake, monkeypatch)
 def test_the_merger_token_tolerates_a_trailing_newline(env, fake):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat\n")
     assert cli.main(["pass"]) == 0
-    assert fake.args()[3] == "weasel-bot"
+    assert fake.args()[3] == Merger("weasel-bot")
 
 
 def test_a_malformed_token_is_not_printed(env, fake, capsys):

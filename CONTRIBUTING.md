@@ -29,6 +29,7 @@ cannot reach container IP addresses; neither does a CI job on a network of its o
     paging and retries; the only module that knows the Gitea API;
   - `commit_rule.py` - what may land on `main`;
   - `queue.py` - the queue pass;
+  - `accounts.py` - the merger and the approver accounts, and their dry-run stand-ins;
   - `turn.py` - serializing the passes;
   - `check.py` - `check-commits`;
   - `release.py` - the release step;

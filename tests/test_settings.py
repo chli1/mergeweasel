@@ -27,7 +27,8 @@ def test_without_variables_the_defaults_hold_and_renovate_is_off():
 def test_each_variable_sets_its_name():
     environ = {"MERGEWEASEL_AUTOMERGE_LABEL": "merge-me", "MERGEWEASEL_NEEDS_FIX_LABEL": "broken",
                "MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash", "MERGEWEASEL_RENOVATE_ACCOUNT": "deps-bot"}
-    assert settings.read(gitea_with(), environ) == settings.Settings("trunk", "merge-me", "broken", "no-squash", "deps-bot")
+    assert settings.read(gitea_with(), environ) == settings.Settings(
+        "trunk", "merge-me", "broken", "no-squash", "deps-bot", keep_commits_required=True)
 
 
 def test_an_empty_or_blank_variable_keeps_the_default():
@@ -51,15 +52,19 @@ ALL = ("automerge", "needs-fix", "keep-commits")
 
 
 def test_automerge_and_needs_fix_are_always_required():
-    assert settings.required_labels(settings.Settings("trunk"), {}) == ("automerge", "needs-fix")
+    assert settings.required_labels(settings.Settings("trunk")) == ("automerge", "needs-fix")
 
 
 def test_keep_commits_is_required_once_its_variable_names_it():
-    named = settings.Settings("trunk", keep_commits="no-squash")
-    environ = {"MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash"}
-    assert settings.required_labels(named, environ) == ("automerge", "needs-fix", "no-squash")
-    assert settings.required_labels(settings.Settings("trunk"), {"MERGEWEASEL_KEEP_COMMITS_LABEL": " "}) == (
-        "automerge", "needs-fix")
+    named = settings.read(gitea_with(), {"MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash"})
+    assert named.keep_commits_required
+    assert settings.required_labels(named) == ("automerge", "needs-fix", "no-squash")
+    # Naming the default on purpose makes it required too.
+    default = settings.read(gitea_with(), {"MERGEWEASEL_KEEP_COMMITS_LABEL": "keep-commits"})
+    assert settings.required_labels(default) == ("automerge", "needs-fix", "keep-commits")
+    blank = settings.read(gitea_with(), {"MERGEWEASEL_KEEP_COMMITS_LABEL": " "})
+    assert not blank.keep_commits_required
+    assert settings.required_labels(blank) == ("automerge", "needs-fix")
 
 
 def test_labels_of_the_repository_need_no_organization_read():
