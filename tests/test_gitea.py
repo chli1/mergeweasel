@@ -188,8 +188,9 @@ def test_branch_head_without_an_exact_ref_is_not_found(monkeypatch):
 
 RAW_PULL = {"number": 5, "base": {"ref": "main"}, "head": {"ref": "feature", "sha": "5" * 40},
             "labels": [{"name": "automerge", "id": 13}], "draft": True, "user": {"login": "author"},
-            "title": "feat: x (#1)", "body": None}
-PULL = gitea_module.PullRequest(5, "main", "feature", "5" * 40, {"automerge": 13}, True, "author", "feat: x (#1)", "")
+            "title": "feat: x (#1)", "body": None, "merged": False}
+PULL = gitea_module.PullRequest(5, "main", "feature", "5" * 40, {"automerge": 13}, True, "author", "feat: x (#1)", "",
+                                False)
 
 
 def test_open_pulls_and_pull(monkeypatch):

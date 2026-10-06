@@ -271,6 +271,13 @@ original commit's reference.
 merged pull request passes without a check: after a fast-forward its head is `main`'s head, whose
 status must not turn red.
 
+**The pull request as it is now**: the check takes only the pull request's number from the event
+and reads the title, body, labels, head and merged state with `GET pulls/{n}` when it runs. A re-run
+of a job replays the event it started with, so a check that judged the payload would fail again
+after the title was fixed, and a slow run could report on an older title or label set than a run
+that started after it. Read when the job runs, a re-run judges the current text, and the run that
+finishes last judges the latest state.
+
 ## Releases
 
 Every pass releases the repository it runs in, before its step. If `main` holds releasing commits

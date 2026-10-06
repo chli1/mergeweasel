@@ -93,6 +93,7 @@ class PullRequest:
     poster: str
     title: str
     body: str
+    merged: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -150,7 +151,8 @@ def pull_request(raw):
     return PullRequest(
         number=raw["number"], base_ref=raw["base"]["ref"], head_ref=raw["head"]["ref"], head_sha=raw["head"]["sha"],
         labels={label["name"]: label["id"] for label in raw["labels"]}, draft=raw.get("draft", False),
-        poster=raw["user"]["login"], title=raw["title"], body=raw.get("body") or "")
+        poster=raw["user"]["login"], title=raw["title"], body=raw.get("body") or "",
+        merged=raw["merged"])
 
 
 def timeline_event(raw):

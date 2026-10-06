@@ -348,7 +348,7 @@ def writes(client):
 def answer_pull(gitea, number, title=None, body="", config=None):
     """The pull request and mergeweasel.toml (None: no file) as the queue reads them right before merging."""
     gitea.pull.return_value = PullRequest(number, "main", f"branch-{number}", f"{number:040x}", {"automerge": 0},
-                                          False, "author", title or f"ci: land {number} (#1)", body)
+                                          False, "author", title or f"ci: land {number} (#1)", body, False)
     gitea.file.return_value = None if config is None else config.encode()
 
 
@@ -649,7 +649,7 @@ def test_execute_leaves_message_problems_to_validation(gitea):
 
 def open_pull(number, labels=("automerge",), base="main", poster="author", head_ref="feature"):
     return PullRequest(number, base, head_ref, str(number % 10) * 40,
-                       {name: 13 + index for index, name in enumerate(labels)}, False, poster, "t", "")
+                       {name: 13 + index for index, name in enumerate(labels)}, False, poster, "t", "", False)
 
 
 def test_read_state_builds_queued_pulls_from_the_api():

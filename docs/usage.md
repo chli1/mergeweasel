@@ -65,6 +65,10 @@ The section is optional. It must keep to the line limit in
 [configuration](configuration.md#fixed-values) and must not contain a `Co-authored-by:` or
 "Generated with" line.
 
+Editing the title, the description or the labels runs the commit check again by itself.
+Re-running a failed check job by hand works too: the check reads the pull request as it is when the
+job runs, not as it was when the job first started, so the re-run judges the fixed text.
+
 ## What releases
 
 After the merge, the queue releases if the repository is set up for it

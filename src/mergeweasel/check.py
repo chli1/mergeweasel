@@ -14,20 +14,22 @@ from mergeweasel.gitea import ApiError, Unreachable
 def run(gitea, event_path, settings):
     try:
         with open(event_path, encoding="utf-8") as handle:
-            pull = json.load(handle)["pull_request"]
+            number = json.load(handle)["pull_request"]["number"]
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f"{event_path} is not a pull_request event: {error!r}", file=sys.stderr)
         return 1
-    # The queue's label removal after a merge re-runs this check on a landed pull request; after a
-    # fast-forward its head is the base branch's head, which must not turn red.
-    if pull.get("merged"):
-        print("the pull request is merged - it has already landed")
-        return 0
-    number = pull["number"]
-    keep_commits = settings.keep_commits in {label["name"] for label in pull.get("labels") or []}
     try:
+        # Read now, not taken from the event: a re-run replays the event's payload, which holds the
+        # title, body and labels from before a fix.
+        pull = gitea.pull(number)
+        # The queue's label removal after a merge re-runs this check on a landed pull request; after a
+        # fast-forward its head is the base branch's head, which must not turn red.
+        if pull.merged:
+            print("the pull request is merged - it has already landed")
+            return 0
+        keep_commits = settings.keep_commits in pull.labels
         # The pull request's own version: one that breaks the file fails here, not on the base branch.
-        scopes = config.load(gitea, pull["head"]["sha"]).scopes
+        scopes = config.load(gitea, pull.head_sha).scopes
         issues = gitea.issue_numbers()
         commits = gitea.pull_commits(number) if keep_commits else []
     except Unreachable as error:
@@ -52,7 +54,7 @@ def run(gitea, event_path, settings):
         problems = commit_rule.commit_problems(commits, issues, number, scopes)
         print(f"{settings.keep_commits}: {len(commits)} commit(s) checked, {len(problems)} problem(s)")
     else:
-        message = commit_rule.squash_message(pull["title"], pull.get("body"), issues, number, scopes)
+        message = commit_rule.squash_message(pull.title, pull.body, issues, number, scopes)
         problems = list(message.problems)
         print("squash commit:\n")
         print(f"{message.subject}\n\n{message.body}" if message.body else message.subject)

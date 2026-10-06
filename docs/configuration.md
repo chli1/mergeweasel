@@ -24,7 +24,8 @@ mergeweasel check-commits --event <path>
 - `pass` runs one queue pass, which releases `main` first. With `--dry-run` it decides and reports,
   but changes nothing.
 - `check-commits` checks what a pull request would land on `main`. `<path>` is the `pull_request`
-  event payload (`$GITHUB_EVENT_PATH` in a workflow).
+  event payload (`$GITHUB_EVENT_PATH` in a workflow). Only the pull request's number is taken from
+  it; the title, body, labels and head are read from Gitea when the check runs.
 
 Both commands exit with 0 when they succeed and with 1 when they fail. `pass` also exits with 1
 when its release failed, after it has run the rest of the pass.
