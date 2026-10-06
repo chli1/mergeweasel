@@ -6,6 +6,7 @@ on:
     tags: ['v*']
 jobs:
   test:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -63,9 +64,9 @@ jobs:
         run: |
           docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" || true
           docker rmi -f "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" "$MERGEWEASEL_E2E_IMAGE" || true
+  # No tests here: main takes only up-to-date pull requests whose checks passed.
   release:
     if: github.event_name == 'push'
-    needs: test
     runs-on: ubuntu-latest
     env:
       IMAGE: mergeweasel:release-${{ github.run_id }}
