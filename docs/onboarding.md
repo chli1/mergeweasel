@@ -1,7 +1,8 @@
 # Onboarding a repository
 
 How to let mergeweasel land the pull requests of a Gitea repository. Every value named here is
-listed in [configuration](configuration.md).
+listed in [configuration](configuration.md). `main` stands for the repository's default branch:
+mergeweasel lands on whichever branch the repository's settings name as its default.
 
 ## Requirements
 
@@ -60,13 +61,39 @@ whitelist if you use one ([branch protection](#branch-protection)).
 ## Labels
 
 Create the labels `automerge`, `needs-fix` and `keep-commits`, at organization or repository
-level. [Usage](usage.md#the-labels) explains what they mean.
+level. [Usage](usage.md#the-labels) explains what they mean. `keep-commits` is optional: without
+it, every pull request is squashed.
+
+To use other names - because the organization already has labels for these roles, say - create
+those instead and set the Actions variables `MERGEWEASEL_AUTOMERGE_LABEL`,
+`MERGEWEASEL_NEEDS_FIX_LABEL` and `MERGEWEASEL_KEEP_COMMITS_LABEL` to their names
+([instance settings](configuration.md#instance-settings)). Set them at organization level to name
+the labels once for every repository. The pass fails with a message that names the label when
+`automerge` or `needs-fix` is missing, and when `keep-commits` is missing although its variable
+names it.
+
+## Renovate
+
+This step is only for repositories that Renovate updates. Set the Actions variable
+`MERGEWEASEL_RENOVATE_ACCOUNT` to the login of the account Renovate runs as, for example
+`renovate`. The queue then treats that account's pull requests specially:
+
+- **Approval:** its own update gets approved by the approver accounts, so no human has to. That
+  holds as long as only Renovate or the merger pushed to it, and Renovate added `automerge` last.
+  Once anyone else pushes, or a human sets `automerge`, the update needs a human approval like any
+  other pull request.
+- **Retry:** a push by Renovate to an update labelled `needs-fix`, for example its rebase, removes
+  the label, so a failed update is retried without anyone stepping in.
+
+Without the variable, Renovate's pull requests are ordinary pull requests. The variable has no
+default on purpose: whichever account it names gets its updates approved, so name only the account
+Renovate really runs as, and keep its token as safe as an approver token.
 
 ## Configuration
 
-This step is optional: mergeweasel works without any configuration. To change a default, add
-`mergeweasel.toml` to the root of the repository and merge it to `main`.
-[Configuration](configuration.md#the-configuration-file) lists the keys.
+This step is optional: mergeweasel works without any configuration. To change a rule for the
+repository's commits or releases, add `mergeweasel.toml` to the root of the repository and merge it
+to `main`. [Configuration](configuration.md#the-configuration-file) lists the keys.
 
 ## Releases
 
@@ -119,6 +146,12 @@ Copy `mergeweasel-queue.yml` and `mergeweasel-commits.yml` from this repository'
 Keep the file names and workflow names as they are: the pass finds its own runs and statuses by
 them.
 
+Nothing in the workflows names your Gitea's labels, accounts, runners or default branch: they read
+the [instance settings](configuration.md#instance-settings) from Actions variables. The jobs run on
+runners labelled `ubuntu-latest`; if yours carry another label, set the Actions variable
+`MERGEWEASEL_RUNNER_LABEL` to it. Pull requests against a branch other than the default branch skip
+both jobs, so stacked pull requests cost no runner time.
+
 ## Server setting
 
 By default Gitea appends a `Co-authored-by` trailer to every squash commit the queue makes.
@@ -132,8 +165,9 @@ ADD_CO_COMMITTER_TRAILERS = false
 
 ## Verify
 
-Run the workflow `mergeweasel-queue` by hand with `dry_run` checked. Its log shows what the queue
-would do, and nothing changes.
+Run the workflow `mergeweasel-queue` by hand with `dry_run` checked. Its log starts with the
+settings it found - base branch, labels and Renovate account - and then shows what the queue would
+do. Nothing changes.
 
 ## Troubleshooting
 
@@ -151,6 +185,14 @@ would do, and nothing changes.
   [the accounts](#the-accounts).
 - **"... belongs to ... again".** Two approver tokens belong to the same account, and Gitea counts
   only one approval per account. Use a token of another account.
+- **The jobs never start.** No runner carries the label the workflows ask for. Set
+  `MERGEWEASEL_RUNNER_LABEL` to a label your runners have.
+- **The queue ignores a pull request.** Check its base: only pull requests against the default
+  branch are queued. Check the label name against the `settings:` line of the log.
+- **"labels missing in the repository and its organization: ...".** A label the settings name does
+  not exist. Create it, or correct the variable.
+- **"the label variables must name three different labels".** Two of the three label variables name
+  the same label. Give each role a label of its own.
 - **"release failed: ...".** The pass ran, but the release did not; the message gives Gitea's
   reason. The next pass tries again, so nothing is lost.
 - **"release failed: user should have a permission to write to a repo".** The merger lacks write

@@ -10,7 +10,6 @@ import sys
 import urllib.error
 
 from mergeweasel import commit_rule, config
-from mergeweasel.config import BASE_BRANCH
 from mergeweasel.gitea import PAGE_SIZE, error_message
 
 BREAKING, FEATURE, FIX = "breaking", "feature", "fix"
@@ -84,13 +83,13 @@ def newest(template, names):
     return max(names, key=template.version) if template.semver else max(names)
 
 
-def run(gitea, dry_run, now=None):
-    """Release main if it holds releasing commits; False after an error, which it prints.
+def run(gitea, dry_run, base_branch, now=None):
+    """Release the base branch if it holds releasing commits; False after an error, which it prints.
 
     Never raises: a failed release must not hold up the queue, the job fails at its end.
     """
     try:
-        return _release(gitea, dry_run, now or datetime.datetime.now(datetime.timezone.utc))
+        return _release(gitea, dry_run, base_branch, now or datetime.datetime.now(datetime.timezone.utc))
     except Exception as error:
         reason = error_message(error) if isinstance(error, urllib.error.HTTPError) else error
         print(f"release failed: {reason}", file=sys.stderr)
@@ -118,17 +117,17 @@ def release_tags(gitea, template):
     return tags
 
 
-def history(gitea):
-    """main's commits, newest first, at most MAX_COMMITS of them."""
+def history(gitea, base_branch):
+    """The base branch's commits, newest first, at most MAX_COMMITS of them."""
     for page in range(1, MAX_COMMITS // PAGE_SIZE + 1):
-        batch = gitea.call("GET", f"/commits?sha={BASE_BRANCH}&{COMMIT_QUERY}&limit={PAGE_SIZE}&page={page}")
+        batch = gitea.call("GET", f"/commits?sha={base_branch}&{COMMIT_QUERY}&limit={PAGE_SIZE}&page={page}")
         yield from batch
         if len(batch) < PAGE_SIZE:
             return
 
 
-def _release(gitea, dry_run, now):
-    template = config.load(gitea).tag
+def _release(gitea, dry_run, base_branch, now):
+    template = config.load(gitea, base_branch).tag
     tags = release_tags(gitea, template)
     if not tags and template.semver:
         print(f"release: no tag matching {template.text} to bump from, nothing released")
@@ -140,7 +139,7 @@ def _release(gitea, dry_run, now):
             on_commit.setdefault(commit, []).append(name)
         # main is linear: the nearest tagged commit in its history is the previous release.
         walked = 0
-        for commit in history(gitea):
+        for commit in history(gitea, base_branch):
             walked += 1
             if commit["sha"] in on_commit:
                 base = newest(template, on_commit[commit["sha"]])
@@ -148,11 +147,11 @@ def _release(gitea, dry_run, now):
             since.append(commit)
         if base is None:
             where = f"within the last {MAX_COMMITS} commits of" if walked >= MAX_COMMITS else "on"
-            print(f"release failed: no tag matching {template.text} {where} {BASE_BRANCH}", file=sys.stderr)
+            print(f"release failed: no tag matching {template.text} {where} {base_branch}", file=sys.stderr)
             return False
     else:
         # Without SemVer fields the name needs no previous release: main's head alone decides the first one.
-        since = list(itertools.islice(history(gitea), 1))
+        since = list(itertools.islice(history(gitea, base_branch), 1))
     if not since:
         return True
     head = since[0]["sha"]

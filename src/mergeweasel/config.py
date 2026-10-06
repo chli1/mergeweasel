@@ -7,7 +7,6 @@ import urllib.error
 
 from mergeweasel import version_template
 
-BASE_BRANCH = "main"
 CONFIG_FILE = "mergeweasel.toml"
 DEFAULT_TAG = "v{major}.{minor}.{patch}"
 # Table -> key -> type.
@@ -28,7 +27,7 @@ class Config:
     scopes: tuple | None
 
 
-def load(gitea, ref=BASE_BRANCH):
+def load(gitea, ref):
     """The file as of ref: a branch, or a commit's SHA."""
     try:
         answer = gitea.call("GET", f"/contents/{CONFIG_FILE}?ref={ref}")

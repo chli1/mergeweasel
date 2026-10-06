@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 
 ADMIN = "root"
-# renovate is mergeweasel's fixed Renovate account; ci posts the required status; queue is the merger.
+# renovate is the Renovate account the passes are given; ci posts the required status; queue is the merger.
 ACCOUNTS = ("queue", "reviewer", "reviewer2", "approver1", "approver2", "author", "ci", "renovate")
 PASSWORD = "e2e-password-1"
 # The merger's scopes from docs/onboarding.md; the other accounts get the same.
@@ -61,37 +61,43 @@ def eventually(probe, timeout=TIMEOUT_SECONDS, interval=0.5):
         time.sleep(interval)
 
 
-def create_repo(clients, name, required_approvals=1):
-    """A repository set up as docs/onboarding.md describes, with issue #1 for the titles to refer to."""
+def create_repo(clients, name, required_approvals=1, branch="main", labels=LABELS):
+    """A repository set up as docs/onboarding.md describes, with issue #1 for the titles to refer to.
+
+    branch: its default branch; labels: the automerge, needs-fix and keep-commits labels' names.
+    """
     admin = clients[ADMIN]
-    admin.call("POST", f"/orgs/{ORGANIZATION}/repos", {"name": name, "auto_init": True, "default_branch": "main"})
+    admin.call("POST", f"/orgs/{ORGANIZATION}/repos", {"name": name, "auto_init": True, "default_branch": branch})
     full_name = f"{ORGANIZATION}/{name}"
     path = f"/repos/{full_name}"
     admin.call("PATCH", path, {"allow_squash_merge": True, "allow_fast_forward_only_merge": True})
     for account in ACCOUNTS:
         admin.call("PUT", f"{path}/collaborators/{account}", {"permission": "write"})
-    for label in LABELS:
+    for label in labels:
         admin.call("POST", f"{path}/labels", {"name": label, "color": "#888888"})
     clients["author"].call("POST", f"{path}/issues", {"title": "The issue every title refers to"})
     admin.call("POST", f"{path}/branch_protections", {
-        "rule_name": "main",
+        "rule_name": branch,
         "enable_status_check": True, "status_check_contexts": [REQUIRED_CONTEXT],
         "required_approvals": required_approvals, "enable_approvals_whitelist": True,
         # Singular: Gitea ignores approvals_whitelist_usernames.
         "approvals_whitelist_username": ["reviewer", "reviewer2", "queue", "approver1", "approver2"],
         "dismiss_stale_approvals": True, "block_on_outdated_branch": True,
         "enable_merge_whitelist": True, "merge_whitelist_usernames": ["queue"],
-        # The admin moves main in the scenarios; everyone else lands through the queue.
+        # The admin moves the branch in the scenarios; everyone else lands through the queue.
         "enable_push": True, "enable_push_whitelist": True, "push_whitelist_usernames": [ADMIN],
     })
-    return Repo(clients, full_name)
+    return Repo(clients, full_name, branch, labels[0])
 
 
 class Repo:
-    def __init__(self, clients, name):
+    def __init__(self, clients, name, branch="main", automerge="automerge"):
         self.clients = clients
         self.name = name
         self.path = f"/repos/{name}"
+        # The default branch, and the name of the label that queues a pull request.
+        self.branch = branch
+        self.automerge = automerge
 
     def call(self, account, method, path, body=None):
         return self.clients[account].call(method, f"{self.path}{path}", body)
@@ -119,12 +125,12 @@ class Repo:
         return sha
 
     def move_main(self, files, message):
-        return self.commit(ADMIN, "main", files, message)
+        return self.commit(ADMIN, self.branch, files, message)
 
     def open_pull(self, account, branch, title, body="", labels=()):
         """labels: set in the creating call itself, as Renovate does."""
         ids = [label["id"] for label in self.read("/labels") if label["name"] in labels]
-        return self.call(account, "POST", "/pulls", {"head": branch, "base": "main", "title": title, "body": body,
+        return self.call(account, "POST", "/pulls", {"head": branch, "base": self.branch, "title": title, "body": body,
                                                      "labels": ids})["number"]
 
     def post_status(self, sha, state, target_url=""):
@@ -140,11 +146,11 @@ class Repo:
         """CI reports on the head, the reviewer approves, the author queues it."""
         self.post_status(self.head(number), state, target_url)
         self.approve(number)
-        self.add_label(labeller, number, "automerge")
+        self.add_label(labeller, number, self.automerge)
 
     def tag(self, name):
-        """The tag a repository's owner sets by hand on main to enable releases."""
-        self.call(ADMIN, "POST", "/tags", {"tag_name": name, "target": "main"})
+        """The tag a repository's owner sets by hand on the default branch to enable releases."""
+        self.call(ADMIN, "POST", "/tags", {"tag_name": name, "target": self.branch})
 
     def open_renovate_pull(self, branch, files, title="fix(deps): update a (#1)", label_at_creation=False):
         """Renovate's update: its commit, its pull request, its automerge label - CI green on the head.
@@ -152,11 +158,11 @@ class Repo:
         label_at_creation: the label comes with the pull request, as Renovate's addLabels sets it;
         otherwise in a call of its own.
         """
-        self.commit("renovate", "main", files, title, new_branch=branch)
-        number = self.open_pull("renovate", branch, title, labels=("automerge",) if label_at_creation else ())
+        self.commit("renovate", self.branch, files, title, new_branch=branch)
+        number = self.open_pull("renovate", branch, title, labels=(self.automerge,) if label_at_creation else ())
         self.post_status(self.head(number), "success")
         if not label_at_creation:
-            self.add_label("renovate", number, "automerge")
+            self.add_label("renovate", number, self.automerge)
         return number
 
     # What the assertions read.
@@ -168,7 +174,7 @@ class Repo:
         return self.pull(number)["head"]["sha"]
 
     def main_sha(self):
-        return self.read("/branches/main")["commit"]["id"]
+        return self.read(f"/branches/{self.branch}")["commit"]["id"]
 
     def git_commit(self, sha):
         return self.read(f"/git/commits/{sha}")

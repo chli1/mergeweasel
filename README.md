@@ -37,7 +37,9 @@ The details, and the Gitea behaviour they rest on, are in [docs/design.md](docs/
 1. Create the merger and approver accounts and their tokens:
    [the accounts](docs/onboarding.md#the-accounts).
 2. Store the tokens as the repository secrets `MERGEWEASEL_MERGER_TOKEN` and
-   `MERGEWEASEL_APPROVER_TOKENS`, and create the labels: [labels](docs/onboarding.md#labels).
+   `MERGEWEASEL_APPROVER_TOKENS`, and create the labels: [labels](docs/onboarding.md#labels). Your
+   Gitea's own label names, runner label and Renovate account are Actions variables:
+   [instance settings](docs/configuration.md#instance-settings).
 3. Protect `main` with required checks and approvals, and allow only the merger to merge:
    [branch protection](docs/onboarding.md#branch-protection).
 4. Copy the two workflows: [the workflows](docs/onboarding.md#the-workflows).
@@ -46,7 +48,9 @@ The details, and the Gitea behaviour they rest on, are in [docs/design.md](docs/
 ## Works with Renovate
 
 mergeweasel lands [Renovate](https://docs.renovatebot.com/)'s pull requests like any other. Let
-Renovate label them `automerge` (its `addLabels` option) instead of merging them itself.
+Renovate label them `automerge` (its `addLabels` option) instead of merging them itself, and name
+Renovate's account in the Actions variable `MERGEWEASEL_RENOVATE_ACCOUNT`
+([Renovate](docs/onboarding.md#renovate)) for the two extras below.
 
 - **Approvals:** with approver accounts configured, mergeweasel approves Renovate's own updates, so
   no human has to. Without approver accounts, or once someone else has pushed to an update, the
@@ -60,8 +64,8 @@ Renovate label them `automerge` (its `addLabels` option) instead of merging them
 
 - [Onboarding](docs/onboarding.md): set up a repository.
 - [Usage](docs/usage.md): for pull request authors - labels and commit messages.
-- [Configuration](docs/configuration.md): the command, its environment, `mergeweasel.toml` and the
-  fixed values.
+- [Configuration](docs/configuration.md): the command, its environment, the instance settings,
+  `mergeweasel.toml` and the fixed values.
 - [Design](docs/design.md): how a pass works, the Gitea behaviour it relies on, and security.
 - [Contributing](CONTRIBUTING.md): development and releases.
 

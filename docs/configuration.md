@@ -1,8 +1,18 @@
 # Configuration
 
-Everything mergeweasel needs to reach Gitea comes from the Gitea Actions environment. A repository
-can adjust mergeweasel in [`mergeweasel.toml`](#the-configuration-file); the
-[fixed values](#fixed-values) are the same for every repository.
+Everything mergeweasel needs to reach Gitea comes from the Gitea Actions environment. Settings come
+from two places, split by one rule: a repository's commits must work unchanged on another Gitea.
+
+- [Instance settings](#instance-settings) belong to the Gitea installation - the label names, the
+  Renovate account, the runner label. They are Gitea Actions variables, set in the organization's or
+  the repository's settings, never in a file of the repository.
+- [`mergeweasel.toml`](#the-configuration-file) belongs to the repository's content - the rules for
+  its commits and releases. It travels with the commits.
+
+The [fixed values](#fixed-values) are the same everywhere.
+
+Throughout these documents, `main` stands for the repository's default branch, and the labels go by
+their default names.
 
 ## The command
 
@@ -29,6 +39,53 @@ when its release failed, after it has run the rest of the pass.
 | `MERGEWEASEL_APPROVER_TOKENS` | the workflow, from the secret | `pass`: optional, one token per line. The approver accounts restore the approvals a rebase dismissed. Without it, `--dry-run` assumes there are enough |
 | `GITHUB_TOKEN` | the workflow, from the run token | `check-commits`, and `pass --dry-run` without `MERGEWEASEL_MERGER_TOKEN`. The merger is then unknown, and any carry-over counts |
 | `GITHUB_RUN_ID`, `GITHUB_EVENT_NAME` | Gitea Actions | `pass`: to run one pass at a time. Without `GITHUB_RUN_ID` the pass does not wait for others |
+| `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL`, `MERGEWEASEL_RENOVATE_ACCOUNT` | the workflow, from the Actions variables | both commands: the [instance settings](#instance-settings) |
+
+## Instance settings
+
+Set these as Gitea Actions variables, under *Settings > Actions > Variables* of the organization or
+of the repository. A repository's variable overrides the organization's variable of the same name,
+so an organization can set its names once for all its repositories. The workflows pass the variables
+to mergeweasel unchanged; an unset or empty variable keeps its default.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MERGEWEASEL_AUTOMERGE_LABEL` | `automerge` | the label that queues a pull request |
+| `MERGEWEASEL_NEEDS_FIX_LABEL` | `needs-fix` | the label the queue sets on a pull request it cannot land |
+| `MERGEWEASEL_KEEP_COMMITS_LABEL` | `keep-commits` | the label that lands the commits as they are instead of squashing them |
+| `MERGEWEASEL_RENOVATE_ACCOUNT` | none: the Renovate rule is off | the account whose own updates the approver accounts approve, and whose push removes `needs-fix` - see [Renovate](onboarding.md#renovate) |
+| `MERGEWEASEL_RUNNER_LABEL` | `ubuntu-latest` | the runner label both workflows run on; only the workflows read it |
+
+The **base branch** is the repository's default branch, as set in its settings. The queue lands on
+it, releases it, and reads its branch protection; pull requests against any other branch are left
+alone, and the workflows skip them before a runner starts.
+
+For example, an organization whose labels are called `merge-me`, `broken` and `no-squash`, whose
+Renovate runs as `deps-bot` and whose runners carry the label `docker` sets these organization
+variables:
+
+| Variable | Value |
+|---|---|
+| `MERGEWEASEL_AUTOMERGE_LABEL` | `merge-me` |
+| `MERGEWEASEL_NEEDS_FIX_LABEL` | `broken` |
+| `MERGEWEASEL_KEEP_COMMITS_LABEL` | `no-squash` |
+| `MERGEWEASEL_RENOVATE_ACCOUNT` | `deps-bot` |
+| `MERGEWEASEL_RUNNER_LABEL` | `docker` |
+
+Every run of either command prints the settings it works with near the start of its log, for
+example:
+
+```
+settings: base branch main; labels merge-me, broken, no-squash; Renovate account deps-bot
+```
+
+Both commands fail when two label variables name the same label. The pass also fails, before the
+release, when a required label exists neither in the repository nor in its organization; the
+message names the missing labels. `automerge` and `needs-fix` are always required: without them the
+queue can neither find nor flag a pull request. `keep-commits` is optional - without it every pull
+request is squashed - unless `MERGEWEASEL_KEEP_COMMITS_LABEL` names a label, which then has to
+exist. When the pass cannot read the organization's labels - in a repository owned by a user, or in
+a dry run with the run token - it prints that it did not check, and goes on.
 
 ## The configuration file
 
@@ -186,13 +243,8 @@ merging.
 
 ## Fixed values
 
-Upcoming releases make some of these configurable.
-
 | What | Value |
 |---|---|
-| Labels | `automerge`, `needs-fix`, `keep-commits` |
-| Base branch | `main` |
-| Renovate account | `renovate`. Its push removes `needs-fix`. Its own updates get approved by the approver accounts, as long as only it or the merger pushed to them and it added `automerge` last |
 | Releasing types | `!` major; `feat` minor; `fix`, `perf`, `revert`, `Revert "..."` patch |
 | Commit types | `feat`, `fix`, `perf`, `refactor`, `style`, `docs`, `test`, `build`, `ci`, `chore`, `revert` (the list of `@commitlint/config-conventional`) |
 | Subject | `<type>[(<scope>)][!]: <description> (#<issue>)` or `... (PR #<pr>)` |

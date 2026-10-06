@@ -4,7 +4,7 @@ import os
 import sys
 import urllib.error
 
-from mergeweasel import check, queue, release
+from mergeweasel import check, queue, release, settings as instance
 from mergeweasel.gitea import Gitea, error_message
 
 MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
@@ -62,6 +62,40 @@ def approver_clients(server, repository, text):
     return clients
 
 
+def api_reason(error):
+    return error_message(error) if isinstance(error, urllib.error.HTTPError) else error
+
+
+def instance_settings(gitea):
+    """The instance's names, printed; None after an error, which it prints."""
+    try:
+        found = instance.read(gitea, os.environ)
+    except instance.SettingsError as error:
+        print(error, file=sys.stderr)
+        return None
+    except (OSError, LookupError) as error:
+        print(f"cannot read the repository: {api_reason(error)}", file=sys.stderr)
+        return None
+    print(found.describe())
+    return found
+
+
+def labels_exist(gitea, settings):
+    try:
+        missing = instance.missing_labels(gitea, instance.required_labels(settings, os.environ))
+    except (OSError, LookupError) as error:
+        print(f"cannot read the labels: {api_reason(error)}", file=sys.stderr)
+        return False
+    if missing is None:
+        print("cannot read the organization's labels - not checked whether the labels exist")
+        return True
+    if missing:
+        print(f"labels missing in the repository and its organization: {', '.join(missing)} - "
+              "create them, or set the label variables to existing ones", file=sys.stderr)
+        return False
+    return True
+
+
 def queue_pass(server, repository, dry_run):
     token = os.environ.get(MERGER_TOKEN, "").strip()
     approver_tokens = os.environ.get(APPROVER_TOKENS, "")
@@ -86,12 +120,15 @@ def queue_pass(server, repository, dry_run):
     except TokenProblem as problem:
         print(problem, file=sys.stderr)
         return 1
+    settings = instance_settings(gitea)
+    if settings is None or not labels_exist(gitea, settings):
+        return 1
     # Unset outside Actions: a local run has no other pass to wait for.
     own_id = os.environ.get("GITHUB_RUN_ID")
     if own_id and not queue.wait_for_turn(gitea, int(own_id), os.environ.get("GITHUB_EVENT_NAME", "")):
         return 0
-    released = release.run(gitea, dry_run)
-    queue.run_pass(gitea, server, dry_run, merger, approvers)
+    released = release.run(gitea, dry_run, settings.base_branch)
+    queue.run_pass(gitea, server, dry_run, merger, approvers, settings)
     return 0 if released else 1
 
 
@@ -100,7 +137,7 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     pass_parser = commands.add_parser("pass", help="run one queue pass")
     pass_parser.add_argument("--dry-run", action="store_true", help="decide and report, change nothing")
-    check_parser = commands.add_parser("check-commits", help="check what a pull request would land on main")
+    check_parser = commands.add_parser("check-commits", help="check what a pull request would land on the base branch")
     check_parser.add_argument("--event", required=True, help="the pull_request event payload ($GITHUB_EVENT_PATH)")
     arguments = parser.parse_args(argv)
     try:
@@ -111,4 +148,8 @@ def main(argv=None):
         return 1
     if arguments.command == "pass":
         return queue_pass(server, repository, arguments.dry_run)
-    return check.run(Gitea(server, repository, os.environ.get("GITHUB_TOKEN", "")), arguments.event)
+    gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))
+    settings = instance_settings(gitea)
+    if settings is None:
+        return 1
+    return check.run(gitea, arguments.event, settings)

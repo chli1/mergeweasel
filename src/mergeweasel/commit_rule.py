@@ -22,7 +22,7 @@ EXEMPT = re.compile(r'^(fixup!|squash!)\s+\S|^Revert ".*"$')
 REVERT = re.compile(r'^Revert "(?P<original>.*)"$')
 # main stays linear. Gitea's fast-forward-only merge would carry a merge commit
 # from the PR branch into main unchanged, so it is rejected whatever its subject.
-MERGE_REJECTED = "merge commits are not allowed - rebase onto main instead"
+MERGE_REJECTED = "merge commits are not allowed - rebase onto the base branch instead"
 
 SECTION_HEADING = re.compile(r"^## Commit[ \t]*$", re.MULTILINE)
 # A heading of level 1 or 2 ends the section; a level 3 heading stays inside it.

@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from mergeweasel import check
+from mergeweasel.settings import Settings
 from mergeweasel.gitea import Gitea
 
 ISSUES_PATH = "/issues?state=all&type=issues"
@@ -48,6 +49,10 @@ def event(tmp_path, title="ci: squash by default (#209)", body="", labels=(), he
     return str(path)
 
 
+def run(gitea, event_path, settings=Settings("main")):
+    return check.run(gitea, event_path, settings)
+
+
 def read_paths(gitea):
     return [call.args[0] for call in gitea.paged.call_args_list]
 
@@ -55,23 +60,23 @@ def read_paths(gitea):
 # --- squash (default) ---
 
 def test_squash_passes_with_a_valid_title_and_section(tmp_path, capsys):
-    assert check.run(api(), event(tmp_path, body="## Commit\nWhy.")) == 0
+    assert run(api(), event(tmp_path, body="## Commit\nWhy.")) == 0
     assert "ci: squash by default (#209)\n\nWhy." in capsys.readouterr().out
 
 
 def test_squash_ignores_the_branch_commits(tmp_path):
     gitea = api(commits=[raw_commit("a" * 40, "wip")])
-    assert check.run(gitea, event(tmp_path)) == 0
+    assert run(gitea, event(tmp_path)) == 0
     assert COMMITS_PATH not in read_paths(gitea)
 
 
 def test_squash_fails_on_a_bad_title(tmp_path, capsys):
-    assert check.run(api(), event(tmp_path, title="squash by default")) == 1
+    assert run(api(), event(tmp_path, title="squash by default")) == 1
     assert "PR title: subject must read" in capsys.readouterr().out
 
 
 def test_squash_fails_on_a_bad_section(tmp_path, capsys):
-    assert check.run(api(), event(tmp_path, body="## Commit\nCo-authored-by: X <x@y>")) == 1
+    assert run(api(), event(tmp_path, body="## Commit\nCo-authored-by: X <x@y>")) == 1
     assert "attribution line" in capsys.readouterr().out
 
 
@@ -80,7 +85,7 @@ def test_null_body_and_labels_are_a_subject_only_commit(tmp_path):
     path.write_text(json.dumps({"pull_request": {
         "number": 213, "title": "ci: x (#209)", "body": None, "labels": None,
         "base": {"sha": "b" * 40}, "head": {"sha": "h" * 40}}}))
-    assert check.run(api(), str(path)) == 0
+    assert run(api(), str(path)) == 0
 
 
 # --- configured scopes ---
@@ -89,26 +94,26 @@ SCOPES = '[commits]\nscopes = ["domain", "ui"]\n'
 
 
 def test_a_configured_scope_passes(tmp_path):
-    assert check.run(api(config=SCOPES), event(tmp_path, title="feat(ui): x (#209)")) == 0
+    assert run(api(config=SCOPES), event(tmp_path, title="feat(ui): x (#209)")) == 0
 
 
 def test_an_unknown_scope_fails_naming_the_allowed_ones(tmp_path, capsys):
-    assert check.run(api(config=SCOPES), event(tmp_path, title="feat(domian): x (#209)")) == 1
+    assert run(api(config=SCOPES), event(tmp_path, title="feat(domian): x (#209)")) == 1
     assert "unknown scope 'domian', expected one of: domain, ui" in capsys.readouterr().out
 
 
 def test_without_the_file_any_scope_passes(tmp_path):
-    assert check.run(api(), event(tmp_path, title="feat(domian): x (#209)")) == 0
+    assert run(api(), event(tmp_path, title="feat(domian): x (#209)")) == 0
 
 
 def test_an_unknown_scope_fails_a_kept_commit(tmp_path, capsys):
     gitea = api(commits=[raw_commit("a" * 40, "feat(domian): x (#99)")], config=SCOPES)
-    assert check.run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
+    assert run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
     assert "aaaaaaa: unknown scope 'domian'" in capsys.readouterr().out
 
 
 def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
-    assert check.run(api(config="[comits]\n"), event(tmp_path)) == 1
+    assert run(api(config="[comits]\n"), event(tmp_path)) == 1
     assert "mergeweasel.toml: unknown key comits" in capsys.readouterr().out
 
 
@@ -116,30 +121,30 @@ def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
 
 def test_keep_commits_checks_every_commit_through_the_api(tmp_path):
     gitea = api(commits=[raw_commit("a" * 40, "ci: one (#99)"), raw_commit("c" * 40, "ci: two (#209)")])
-    assert check.run(gitea, event(tmp_path, title="anything", labels=("keep-commits",))) == 0
+    assert run(gitea, event(tmp_path, title="anything", labels=("keep-commits",))) == 0
     assert COMMITS_PATH in read_paths(gitea)
 
 
 def test_keep_commits_fails_on_a_bad_commit(tmp_path, capsys):
     gitea = api(commits=[raw_commit("a" * 40, "wip")])
-    assert check.run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
+    assert run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
     assert "aaaaaaa: subject must read" in capsys.readouterr().out
 
 
 def test_keep_commits_rejects_a_merge_commit(tmp_path, capsys):
     gitea = api(commits=[raw_commit("abc1234" + "0" * 33, "ci: merge main (#99)", parents=2)])
-    assert check.run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
+    assert run(gitea, event(tmp_path, labels=("keep-commits",))) == 1
     assert "abc1234: merge commits are not allowed" in capsys.readouterr().out
 
 
 def test_keep_commits_refuses_no_commits(tmp_path):
-    assert check.run(api(commits=[]), event(tmp_path, labels=("keep-commits",))) == 1
+    assert run(api(commits=[]), event(tmp_path, labels=("keep-commits",))) == 1
 
 
 @pytest.mark.parametrize("labels", [(), ("keep-commits",)])
 def test_a_merged_pull_request_passes_without_a_check(tmp_path, capsys, labels):
     gitea = api()
-    assert check.run(gitea, event(tmp_path, title="no longer valid", labels=labels, merged=True)) == 0
+    assert run(gitea, event(tmp_path, title="no longer valid", labels=labels, merged=True)) == 0
     assert "already landed" in capsys.readouterr().out
     assert read_paths(gitea) == []
 
@@ -150,7 +155,7 @@ def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
     gitea = api()
     gitea.paged.side_effect = urllib.error.HTTPError(
         "https://git.example/api/v1/repos/org/repo/issues", 403, "Forbidden", hdrs=None, fp=None)
-    assert check.run(gitea, event(tmp_path)) == 1
+    assert run(gitea, event(tmp_path)) == 1
     err = capsys.readouterr().err
     assert "HTTP 403" in err and "GITHUB_TOKEN" in err
 
@@ -161,5 +166,13 @@ def test_not_a_pull_request_event_fails_clearly(tmp_path, capsys):
     empty = tmp_path / "empty.json"
     empty.write_text("")
     for path in (push, empty, tmp_path / "missing.json"):
-        assert check.run(api(), str(path)) == 1
+        assert run(api(), str(path)) == 1
         assert "is not a pull_request event" in capsys.readouterr().err
+
+
+def test_the_instances_keep_commits_label_checks_the_commits(tmp_path, capsys):
+    gitea = api(commits=[raw_commit("a" * 40, "feat: add a (#99)")])
+    no_squash = Settings("main", keep_commits="no-squash")
+    assert run(gitea, event(tmp_path, title="anything", labels=("no-squash",)), no_squash) == 0
+    assert "no-squash: 1 commit(s) checked" in capsys.readouterr().out
+    assert run(gitea, event(tmp_path, title="anything", labels=("keep-commits",)), no_squash) == 1

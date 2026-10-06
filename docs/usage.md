@@ -4,12 +4,15 @@ For pull request authors in a repository that runs mergeweasel.
 
 ## The labels
 
+The labels go by these names unless your Gitea setup renames them; the `settings:` line at the top
+of every mergeweasel log shows the names in use.
+
 - **`automerge`** queues the pull request. If the repository requires approvals, approve the pull
   request first and set the label afterwards: an approval alone does not wake the queue. The pull
   request lands once its checks pass. Removing the label withdraws it, even while its checks run.
 - **`needs-fix`** is set by mergeweasel, always together with a comment that says why. Fix the
-  cause, then remove the label to queue the pull request again. A push by Renovate removes the
-  label by itself.
+  cause, then remove the label to queue the pull request again. If the repository is set up for
+  Renovate, a push by Renovate removes the label by itself.
 - **`keep-commits`** lands the branch's commits as they are instead of squashing them into one.
 
 ## The commit message
@@ -83,8 +86,8 @@ earlier commit.
 ## What a `needs-fix` comment means
 
 - **Required checks failed:** re-run the failed jobs or push a fix.
-- **Rebasing onto `main` failed with a conflict:** rebase onto `main` yourself and resolve the
-  conflict.
+- **Rebasing onto `main` failed with a conflict:** rebase onto `main` (the default branch the
+  comment names) yourself and resolve the conflict.
 - **Gitea refused the merge:** fix the cause Gitea names.
 - **What this pull request would land on main is invalid:** fix the title or the `## Commit`
   section, or with `keep-commits` the commits. An unknown scope shows up here too: use one of the

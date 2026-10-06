@@ -1,0 +1,74 @@
+"""The names the Gitea instance gives things, from Gitea Actions variables. Variables: docs/configuration.md.
+
+Never from the repository's files: its commits must work unchanged on another instance, with other
+labels, accounts and default branch.
+"""
+import dataclasses
+import urllib.error
+
+# Settings field -> the environment variable the workflow fills from the Actions variable.
+VARIABLES = {
+    "automerge": "MERGEWEASEL_AUTOMERGE_LABEL",
+    "needs_fix": "MERGEWEASEL_NEEDS_FIX_LABEL",
+    "keep_commits": "MERGEWEASEL_KEEP_COMMITS_LABEL",
+    "renovate": "MERGEWEASEL_RENOVATE_ACCOUNT",
+}
+
+
+class SettingsError(Exception):
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class Settings:
+    # The repository's default branch: the queue lands on it and releases it.
+    base_branch: str
+    automerge: str = "automerge"
+    needs_fix: str = "needs-fix"
+    keep_commits: str = "keep-commits"
+    # None: the Renovate rule is off - a trusted account is never a default.
+    renovate: str | None = None
+
+    def labels(self):
+        return (self.automerge, self.needs_fix, self.keep_commits)
+
+    def describe(self):
+        renovate = f"Renovate account {self.renovate}" if self.renovate else "Renovate rule off"
+        return f"settings: base branch {self.base_branch}; labels {', '.join(self.labels())}; {renovate}"
+
+
+def read(gitea, environ):
+    """An empty or unset variable keeps its default."""
+    values = {field: environ.get(variable, "").strip() for field, variable in VARIABLES.items()}
+    settings = Settings(gitea.call("GET", "")["default_branch"], **{field: value for field, value in values.items() if value})
+    if len(set(settings.labels())) < len(settings.labels()):
+        raise SettingsError(f"the label variables must name three different labels, not {', '.join(settings.labels())}")
+    return settings
+
+
+def required_labels(settings, environ):
+    """The labels that must exist: the queue cannot work without automerge and needs-fix.
+
+    keep-commits is optional - without it every pull request is squashed - unless its variable names
+    one, which then has to exist.
+    """
+    named = environ.get(VARIABLES["keep_commits"], "").strip()
+    return (settings.automerge, settings.needs_fix, *((settings.keep_commits,) if named else ()))
+
+
+def missing_labels(gitea, required):
+    """The required labels neither the repository nor its organization has, None if that is unknown.
+
+    Unknown: the organization's labels are unreadable - a user's repository, or a token without access.
+    """
+    names = {label["name"] for label in gitea.paged("/labels")}
+    missing = [name for name in required if name not in names]
+    if not missing:
+        return []
+    try:
+        names |= {label["name"] for label in gitea.paged(f"/orgs/{gitea.owner}/labels", root=True)}
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 404):
+            return None
+        raise
+    return [name for name in required if name not in names]

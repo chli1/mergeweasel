@@ -38,8 +38,15 @@ Principles:
   on the server.
 - **Environment only.** The Gitea server and repository come from the Actions variables
   `GITHUB_SERVER_URL` and `GITHUB_REPOSITORY`. Without them the CLI exits with an error.
-- **Fixed values first.** Labels, commit types, the Renovate account and the subject format are
-  constants; `mergeweasel.toml` holds what a repository configures.
+- **The repository travels, the instance stays outside.** A repository's commits must work
+  unchanged on another Gitea, with other account names, other labels and another default branch.
+  What belongs to the repository's content - the commit and release rules - lives in
+  `mergeweasel.toml`. What belongs to the Gitea instance - the label names, the Renovate account,
+  the runner label - comes from Gitea Actions variables, and the base branch is the repository's
+  default branch ([instance settings](#instance-settings)). Everything else is a constant.
+
+Throughout this document, `main` stands for the repository's default branch, and the labels go by
+their default names.
 
 ## The queue pass
 
@@ -62,11 +69,12 @@ approval wakes nothing: the label `automerge` comes after it. Before its step, a
   current head; each login counts once. With 0 required approvals, `automerge` alone queues a pull
   request: setting the label is the equivalent of pressing merge. A pull request with too few
   approvals waits; it is not flagged.
-- **Trusted Renovate pull request**: posted by `renovate`, with every push in its timeline made by
-  `renovate` or the merger, and with the latest `automerge` label added by `renovate`. A push by
-  anyone else makes it an ordinary pull request. A human who labels it must approve it like any
-  other; otherwise labelling alone would bypass the review requirement. Without any approver account
-  configured, it is an ordinary pull request too.
+- **Trusted Renovate pull request**: posted by the Renovate account, with every push in its timeline
+  made by that account or the merger, and with the latest `automerge` label added by that account. A
+  push by anyone else makes it an ordinary pull request. A human who labels it must approve it like
+  any other; otherwise labelling alone would bypass the review requirement. Without any approver
+  account configured, it is an ordinary pull request too, and so is every pull request while no
+  Renovate account is configured.
 - **Up to date**: `GET compare/{head}...{main}` reports no commits. The pull request's `merge_base`
   is not used, because Gitea updates it asynchronously after a push.
 - **Green, red, pending**: Gitea's own rule, applied to the latest status per context and the
@@ -83,8 +91,9 @@ approval wakes nothing: the label `automerge` comes after it. Before its step, a
 
 ### Steps
 
-0. A `needs-fix` pull request loses the label when its timeline shows a push by `renovate` after the
-   latest `needs-fix` label. This way Renovate's rebase retries a failed update without a human.
+0. A `needs-fix` pull request loses the label when its timeline shows a push by the Renovate
+   account after the latest `needs-fix` label. This way Renovate's rebase retries a failed update
+   without a human.
    The removal re-runs `mergeweasel-commits`, so the pass disregards that pull request's statuses:
    it waits (or rebases, if the pull request is behind) until that run's completion wakes the queue
    again.
@@ -176,6 +185,37 @@ A dry run is the exception. Without the merger token - CI runs its dry run with 
 merger is unknown, and the dry run accepts any carry-over as genuine. Without approver tokens it
 assumes there are enough approver accounts. It says both in its output, since its decisions can then
 differ from a real pass.
+
+### Instance settings
+
+Every run of either command reads the instance settings first and prints them, so the log shows
+which names it worked with:
+
+- **The base branch** is the repository's `default_branch` (`GET repos/{owner}/{repo}`). The
+  queue lands on it, releases it and takes its branch protection; a pull request against another
+  branch is not a candidate.
+- **The label names and the Renovate account** come from the environment variables
+  `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL` and
+  `MERGEWEASEL_RENOVATE_ACCOUNT`. The workflows fill them from the Actions variables of the same
+  names. An empty value is an unset one: `${{ vars.X }}` of an unset variable is the empty
+  string. An unset label keeps its default name; an unset Renovate account turns the Renovate rule
+  off, because a trusted account must never be a default.
+
+Two roles on one label are an error, since the queue could no longer tell a verdict from an intent.
+The pass then checks that the required labels exist, in the repository or in its organization,
+because a misspelt name would otherwise leave the queue idle without a word. A missing one fails
+the pass before the release. `automerge` and `needs-fix` are always required. `keep-commits` is only
+when its variable names it: a repository without it squashes every pull request, but a name someone
+set on purpose has to be right. If the organization's labels cannot be read - a user's repository, or a dry run
+with the run token - the pass says so and goes on unchecked.
+
+The workflows cannot filter on the default branch in `on:`, which takes no expressions; a
+`branches` filter would have to name the branch literally. Instead each job carries an `if:` that
+compares the pull request's base with `github.event.repository.default_branch`. Gitea evaluates it
+before any runner takes the job, so a pull request against another branch costs no runner time and
+shows the job as skipped. The queue's `if:` applies only to `pull_request_target`: its other
+triggers carry no pull request. The runner label is `${{ vars.MERGEWEASEL_RUNNER_LABEL ||
+'ubuntu-latest' }}`.
 
 ### Errors
 
@@ -304,6 +344,14 @@ new major or minor Gitea version is a release whose notes say "support Gitea vX.
   account of its own.
 - **Triggers**: `workflow_run` supports `workflows` and `types` filters. On `pull_request_target`,
   `workflow_run` and `workflow_dispatch`, Gitea takes the workflow from `main`.
+- **Workflow expressions**: `on:` takes none, so `branches: ['${{ vars.X }}']` matches nothing.
+  `runs-on` evaluates `vars`, and `||` gives it a default when the variable is unset. A job-level
+  `if:` that is false skips the job without a runner ever taking it. The end-to-end test has no
+  runner, so these were checked on a Gitea v28 runner by hand.
+- **Default branch**: `GET repos/{owner}/{repo}` reports `default_branch` to any account that can
+  read the repository.
+- **Labels**: `GET labels` lists only the repository's own labels; an organization's labels come
+  from `GET orgs/{org}/labels`. Adding a label by name finds both.
 - **`concurrency`** replaces a waiting run with a newly arriving one and reports the replaced run as
   failed - hence the self-serialization above.
 - **Rebase**: `POST pulls/{n}/update?style=rebase` answers `409` on a conflict.
@@ -341,7 +389,10 @@ new major or minor Gitea version is a release whose notes say "support Gitea vX.
   narrow that.
 - **Releases**: whoever lands a releasing commit causes a release, and anyone who may push tags can
   publish one - both inside the write-access boundary.
-- **The `renovate` account** gets its own updates approved, so its token is as sensitive as an
-  approver token. The required checks remain the gate.
+- **The Renovate account** gets its own updates approved, so its token is as sensitive as an
+  approver token. The required checks remain the gate. It is never a default: on another instance an
+  account of the same name could belong to anyone. Its name comes from an Actions variable, which
+  only a repository or organization admin can set, so a pull request cannot make its own author
+  trusted.
 - **Carry-over**: trusted only from the merger. A forged status counts only in a dry run, which
   writes nothing.

@@ -2,6 +2,7 @@
 
 Each pass reads the current state, takes at most one step on one candidate and ends; a candidate
 flagged `needs-fix` hands over to the next one within the same pass. How and why: docs/design.md.
+The labels, the base branch and the Renovate account are the instance's names, from settings.
 """
 import dataclasses
 import fnmatch
@@ -11,7 +12,6 @@ import urllib.error
 import urllib.parse
 
 from mergeweasel import commit_rule, config
-from mergeweasel.config import BASE_BRANCH
 from mergeweasel.gitea import PAGE_SIZE, error_message, issue_numbers, pull_commits, retried
 
 # The workflow's name: Gitea prefixes its job statuses with it.
@@ -20,10 +20,6 @@ QUEUE_WORKFLOW_FILE = "mergeweasel-queue.yml"
 # A manual dispatch can be a dry run, which must neither replace an event's pass nor be replaced.
 DISPATCH_EVENT = "workflow_dispatch"
 TURN_POLL_SECONDS = 5
-RENOVATE_ACCOUNT = "renovate"
-AUTOMERGE = "automerge"
-NEEDS_FIX = "needs-fix"
-KEEP_COMMITS = "keep-commits"
 CARRY_OVER_CONTEXT = "mergeweasel/approval"
 
 FAILED = ("error", "failure", "warning")
@@ -31,17 +27,22 @@ PASSED = ("success", "skipped")
 # The carry-over's description: its first line, then one line per reviewer.
 CARRY_OVER_HEAD = re.compile(r"^approved at [0-9a-f]+$")
 CARRY_OVER_REVIEWER = re.compile(r"^approved by (\S+)$")
-RED_HINT = "Re-run the failed jobs or push a fix, then remove `needs-fix` to queue it again."
-CONFLICT_HINT = f"Rebase onto `{BASE_BRANCH}` and resolve the conflict, then remove `needs-fix` to queue it again."
-REFUSED_HINT = "Fix the cause, then remove `needs-fix` to queue it again."
-MESSAGE_HINT = "Fix the PR title or its `## Commit` section, then remove `needs-fix` to queue it again."
-CONFIG_HINT = f"Fix `{config.CONFIG_FILE}` on the branch, then remove `needs-fix` to queue it again."
-COMMITS_HINT = "Reword the commits, or drop `keep-commits` to squash them, then remove `needs-fix` to queue it again."
-SHORTFALL_HINT = "Approve it again, then remove `needs-fix` to queue it again."
-RENOVATE_APPROVAL = (f"Approves {RENOVATE_ACCOUNT}'s update: posted, pushed and labelled `{AUTOMERGE}` "
-                     f"by {RENOVATE_ACCOUNT}, rebased only by the merge queue.")
+# Templates over the settings' fields, filled by text().
+RED_HINT = "Re-run the failed jobs or push a fix, then remove `{needs_fix}` to queue it again."
+CONFLICT_HINT = "Rebase onto `{base_branch}` and resolve the conflict, then remove `{needs_fix}` to queue it again."
+REFUSED_HINT = "Fix the cause, then remove `{needs_fix}` to queue it again."
+MESSAGE_HINT = "Fix the PR title or its `## Commit` section, then remove `{needs_fix}` to queue it again."
+CONFIG_HINT = f"Fix `{config.CONFIG_FILE}` on the branch, then remove `{{needs_fix}}` to queue it again."
+COMMITS_HINT = "Reword the commits, or drop `{keep_commits}` to squash them, then remove `{needs_fix}` to queue it again."
+SHORTFALL_HINT = "Approve it again, then remove `{needs_fix}` to queue it again."
+RENOVATE_APPROVAL = ("Approves {renovate}'s update: posted, pushed and labelled `{automerge}` "
+                     "by {renovate}, rebased only by the merge queue.")
 # Gitea's 405 while its mergeable check still runs; the next pass retries.
 TRANSIENT_MERGE_REFUSAL = "Please try again later"
+
+
+def text(template, settings):
+    return template.format_map(dataclasses.asdict(settings))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,7 +59,7 @@ class Pull:
     head_sha: str
     labels: dict
     draft: bool
-    # True if main holds commits the head lacks.
+    # True if the base branch holds commits the head lacks.
     behind: bool
     poster: str
     # Distinct logins of the valid official approvals, in review order.
@@ -196,10 +197,10 @@ def standing(pull):
     return set(pull.approvers) | set(pull.carried)
 
 
-def queued(pull, needed, approvers):
+def queued(pull, needed, approvers, settings):
     """approvers: the approver logins, None if unknown; without any, Renovate's update is approved by hand."""
     renovate_approvable = pull.renovate_trusted and (approvers is None or bool(approvers))
-    return (AUTOMERGE in pull.labels and NEEDS_FIX not in pull.labels and not pull.draft
+    return (settings.automerge in pull.labels and settings.needs_fix not in pull.labels and not pull.draft
             and not pull.rejected and (renovate_approvable or len(standing(pull)) >= needed))
 
 
@@ -234,41 +235,41 @@ def restorations(pull, needed, approvers):
     return tuple(zip(usable, reviewers))
 
 
-def failure_comment(pull, required):
+def failure_comment(pull, required, settings):
     failed = [status for context, status in sorted(pull.statuses.items())
               if status.state in FAILED and (not required or is_required(context, required))]
     lines = [f"- `{status.context}`: {status.state} - {status.target_url}" for status in failed]
-    return "\n".join([f"mergeweasel: required checks failed on {pull.head_sha[:7]}:", *lines, "", RED_HINT])
+    return "\n".join([f"mergeweasel: required checks failed on {pull.head_sha[:7]}:", *lines, "", text(RED_HINT, settings)])
 
 
-def conflict_comment():
-    return f"mergeweasel: rebasing onto `{BASE_BRANCH}` failed with a conflict.\n\n{CONFLICT_HINT}"
+def conflict_comment(settings):
+    return f"mergeweasel: rebasing onto `{settings.base_branch}` failed with a conflict.\n\n{text(CONFLICT_HINT, settings)}"
 
 
-def refused_comment(message):
-    return f"mergeweasel: Gitea refused the merge: {message}\n\n{REFUSED_HINT}"
+def refused_comment(message, settings):
+    return f"mergeweasel: Gitea refused the merge: {message}\n\n{text(REFUSED_HINT, settings)}"
 
 
-def shortfall_comment():
-    return f"mergeweasel: too few approver accounts to restore the approvals.\n\n{SHORTFALL_HINT}"
+def shortfall_comment(settings):
+    return f"mergeweasel: too few approver accounts to restore the approvals.\n\n{text(SHORTFALL_HINT, settings)}"
 
 
-def invalid_message_comment(problems, keep_commits):
+def invalid_message_comment(problems, keep_commits, settings):
     lines = [f"- {problem}" for problem in problems]
-    return "\n".join(["mergeweasel: what this pull request would land on main is invalid:", *lines, "",
-                      COMMITS_HINT if keep_commits else MESSAGE_HINT])
+    return "\n".join([f"mergeweasel: what this pull request would land on `{settings.base_branch}` is invalid:",
+                      *lines, "", text(COMMITS_HINT if keep_commits else MESSAGE_HINT, settings)])
 
 
-def invalid_config_comment(error):
-    return f"mergeweasel: {error}\n\n{CONFIG_HINT}"
+def invalid_config_comment(error, settings):
+    return f"mergeweasel: {error}\n\n{text(CONFIG_HINT, settings)}"
 
 
 def carry_over_description(reviewers, head_sha):
     return "\n".join([f"approved at {head_sha[:7]}", *(f"approved by {login}" for login in reviewers)])
 
 
-def decide(pulls, required, needed, approvers):
-    candidates = sorted((pull for pull in pulls if queued(pull, needed, approvers)), key=lambda pull: (pull.behind, pull.number))
+def decide(pulls, required, needed, approvers, settings):
+    candidates = sorted((pull for pull in pulls if queued(pull, needed, approvers, settings)), key=lambda pull: (pull.behind, pull.number))
     if not candidates:
         return Idle()
     pull = candidates[0]
@@ -279,14 +280,14 @@ def decide(pulls, required, needed, approvers):
         return Wait(pull.number)
     state = verdict(pull.statuses, required)
     if state == "failure":
-        return FlagNeedsFix(pull.number, failure_comment(pull, required))
+        return FlagNeedsFix(pull.number, failure_comment(pull, required, settings))
     if state == "pending":
         return Wait(pull.number)
     approvals = restorations(pull, needed, approvers)
     if approvals is None:
-        return FlagNeedsFix(pull.number, shortfall_comment())
-    return Merge(pull.number, pull.head_sha, approvals=approvals, label_id=pull.labels[AUTOMERGE],
-                 keep_commits=KEEP_COMMITS in pull.labels)
+        return FlagNeedsFix(pull.number, shortfall_comment(settings))
+    return Merge(pull.number, pull.head_sha, approvals=approvals, label_id=pull.labels[settings.automerge],
+                 keep_commits=settings.keep_commits in pull.labels)
 
 
 def valid_approvers(reviews):
@@ -313,29 +314,31 @@ def head_approvers(reviews, head_sha):
                      if review["state"] == "APPROVED" and not review["dismissed"] and review["commit_id"] == head_sha)
 
 
-def renovate_pushed_since_needs_fix(timeline):
+def renovate_pushed_since_needs_fix(timeline, settings):
     """Timeline ids are chronological; a Renovate push after the latest flag retries the pull request."""
-    flags = [entry["id"] for entry in timeline
-             if entry["type"] == "label" and (entry.get("label") or {}).get("name") == NEEDS_FIX and entry.get("body") == "1"]
+    if not settings.renovate:
+        return False
+    flags = [entry["id"] for entry in timeline if entry["type"] == "label"
+             and (entry.get("label") or {}).get("name") == settings.needs_fix and entry.get("body") == "1"]
     if not flags:
         return False
-    return any(entry["type"] == "pull_push" and entry["user"]["login"] == RENOVATE_ACCOUNT and entry["id"] > max(flags)
+    return any(entry["type"] == "pull_push" and entry["user"]["login"] == settings.renovate and entry["id"] > max(flags)
                for entry in timeline)
 
 
-def renovate_trusted(poster, timeline, merger):
+def renovate_trusted(poster, timeline, merger, settings):
     """Renovate's own update: no one else pushed - the merger's rebases aside - and renovate set automerge last.
 
     Without a merger login (a dry run) any other pusher is taken for the merger, like the carry-over.
     """
-    if poster != RENOVATE_ACCOUNT:
+    if not settings.renovate or poster != settings.renovate:
         return False
     pushers = {entry["user"]["login"] for entry in timeline if entry["type"] == "pull_push"}
-    if merger is not None and not pushers <= {RENOVATE_ACCOUNT, merger}:
+    if merger is not None and not pushers <= {settings.renovate, merger}:
         return False
     added = [entry["user"]["login"] for entry in timeline if entry["type"] == "label"
-             and (entry.get("label") or {}).get("name") == AUTOMERGE and entry.get("body") == "1"]
-    return bool(added) and added[-1] == RENOVATE_ACCOUNT
+             and (entry.get("label") or {}).get("name") == settings.automerge and entry.get("body") == "1"]
+    return bool(added) and added[-1] == settings.renovate
 
 
 def parse_carry_over(description):
@@ -370,9 +373,9 @@ def absolute(server, url):
     return server + url if url.startswith("/") else url
 
 
-def needs_fix_to_clear(pulls):
+def needs_fix_to_clear(pulls, settings):
     """Step 0: Renovate pushing to a needs-fix pull request retries it."""
-    return [pull for pull in pulls if NEEDS_FIX in pull.labels and pull.renovate_retried]
+    return [pull for pull in pulls if settings.needs_fix in pull.labels and pull.renovate_retried]
 
 
 class Conflict(Exception):
@@ -394,41 +397,41 @@ class MessageInvalid(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class State:
-    main_sha: str
+    base_sha: str
     required: list
-    # required_approvals of main's branch protection.
+    # required_approvals of the base branch's protection.
     needed: int
     pulls: list
 
 
-def read_state(gitea, server, merger):
-    # branches/main, not branch_protections: the protection API needs repo admin.
-    branch = gitea.call("GET", f"/branches/{BASE_BRANCH}")
-    main_sha = branch["commit"]["id"]
+def read_state(gitea, server, merger, settings):
+    # branches/{name}, not branch_protections: the protection API needs repo admin.
+    branch = gitea.call("GET", f"/branches/{settings.base_branch}")
+    base_sha = branch["commit"]["id"]
     required = branch["status_check_contexts"] if branch["enable_status_check"] else []
     pulls = []
     for raw in gitea.paged("/pulls?state=open"):
         labels = {label["name"]: label["id"] for label in raw["labels"]}
-        if raw["base"]["ref"] != BASE_BRANCH or AUTOMERGE not in labels:
+        if raw["base"]["ref"] != settings.base_branch or settings.automerge not in labels:
             continue
         head_sha = raw["head"]["sha"]
         statuses = gitea.call("GET", f"/commits/{head_sha}/status?limit={PAGE_SIZE}")["statuses"] or []
         # compare, not merge_base: Gitea updates merge_base asynchronously after a push.
-        behind = gitea.call("GET", f"/compare/{head_sha}...{main_sha}")["total_commits"] > 0
+        behind = gitea.call("GET", f"/compare/{head_sha}...{base_sha}")["total_commits"] > 0
         reviews = gitea.paged(f"/pulls/{raw['number']}/reviews")
-        flagged = NEEDS_FIX in labels
+        flagged = settings.needs_fix in labels
         poster = raw["user"]["login"]
         timeline = (gitea.paged(f"/issues/{raw['number']}/timeline")
-                    if flagged or poster == RENOVATE_ACCOUNT else [])
+                    if flagged or (settings.renovate and poster == settings.renovate) else [])
         pulls.append(Pull(
             number=raw["number"], head_ref=raw["head"]["ref"], head_sha=head_sha, labels=labels,
             draft=raw.get("draft", False), behind=behind, poster=poster,
             approvers=valid_approvers(reviews), carried=carried_reviewers(statuses, merger),
             rejected=rejected(reviews), approved_head=head_approvers(reviews, head_sha),
-            renovate_retried=flagged and renovate_pushed_since_needs_fix(timeline),
-            renovate_trusted=renovate_trusted(poster, timeline, merger),
+            renovate_retried=flagged and renovate_pushed_since_needs_fix(timeline, settings),
+            renovate_trusted=renovate_trusted(poster, timeline, merger, settings),
             statuses=statuses_by_context(statuses, server)))
-    return State(main_sha, required, branch["required_approvals"], pulls)
+    return State(base_sha, required, branch["required_approvals"], pulls)
 
 
 def rebase(gitea, action):
@@ -485,11 +488,11 @@ def merge_request(gitea, action):
     return request
 
 
-def merge(gitea, action, approvers):
+def merge(gitea, action, approvers, settings):
     # Before the approvals: a pull request that may not land is not approved either.
     request = merge_request(gitea, action)
     for approver, reviewer in action.approvals:
-        body = RENOVATE_APPROVAL if reviewer is None else f"Approval of {reviewer}, carried over the merge queue's rebase."
+        body = text(RENOVATE_APPROVAL, settings) if reviewer is None else f"Approval of {reviewer}, carried over the merge queue's rebase."
         approvers[approver].call("POST", f"/pulls/{action.number}/reviews", {
             "event": "APPROVED", "commit_id": action.head_sha, "body": body})
     try:
@@ -520,7 +523,7 @@ def relabel(pulls, number, add=None, remove=None):
     return changed
 
 
-def execute(gitea, action, approvers):
+def execute(gitea, action, approvers, settings):
     """Carry out a Rebase or Merge.
 
     A conflict, a refused merge, an invalid config or message becomes a needs-fix hand-over.
@@ -529,43 +532,43 @@ def execute(gitea, action, approvers):
         if isinstance(action, Rebase):
             rebase(gitea, action)
         elif isinstance(action, Merge):
-            merge(gitea, action, approvers)
+            merge(gitea, action, approvers, settings)
     except Conflict:
-        return FlagNeedsFix(action.number, conflict_comment())
+        return FlagNeedsFix(action.number, conflict_comment(settings))
     except MergeRefused as refusal:
-        return FlagNeedsFix(action.number, refused_comment(refusal.message))
+        return FlagNeedsFix(action.number, refused_comment(refusal.message, settings))
     except config.ConfigError as error:
-        return FlagNeedsFix(action.number, invalid_config_comment(error))
+        return FlagNeedsFix(action.number, invalid_config_comment(error, settings))
     except MessageInvalid as invalid:
-        return FlagNeedsFix(action.number, invalid_message_comment(invalid.problems, invalid.keep_commits))
+        return FlagNeedsFix(action.number, invalid_message_comment(invalid.problems, invalid.keep_commits, settings))
     return action
 
 
-def run_pass(gitea, server, dry_run, merger, approvers):
+def run_pass(gitea, server, dry_run, merger, approvers, settings):
     """approvers: login -> client in secret order, or None if unknown (a dry run without approver tokens)."""
-    state = read_state(gitea, server, merger)
+    state = read_state(gitea, server, merger, settings)
     logins = None if approvers is None else list(approvers)
     pulls = state.pulls
-    for retry in needs_fix_to_clear(pulls):
-        print(f"#{retry.number}: {RENOVATE_ACCOUNT} pushed, removing {NEEDS_FIX}")
+    for retry in needs_fix_to_clear(pulls, settings):
+        print(f"#{retry.number}: {settings.renovate} pushed, removing {settings.needs_fix}")
         if not dry_run:
-            gitea.call("DELETE", f"/issues/{retry.number}/labels/{retry.labels[NEEDS_FIX]}")
+            gitea.call("DELETE", f"/issues/{retry.number}/labels/{retry.labels[settings.needs_fix]}")
         # The removal re-runs mergeweasel-commits, a required check: the statuses read above are
         # stale, so the pull request waits this pass out. That run's completion wakes the queue again.
         pulls = [dataclasses.replace(pull, statuses={}) if pull.number == retry.number else pull
-                 for pull in relabel(pulls, retry.number, remove=NEEDS_FIX)]
+                 for pull in relabel(pulls, retry.number, remove=settings.needs_fix)]
     while True:
-        action = decide(pulls, state.required, state.needed, logins)
+        action = decide(pulls, state.required, state.needed, logins, settings)
         print(action)
         if not dry_run:
-            executed = execute(gitea, action, approvers)
+            executed = execute(gitea, action, approvers, settings)
             if executed != action:
                 print(executed)
             action = executed
         if isinstance(action, FlagNeedsFix):
             if not dry_run:
-                gitea.call("POST", f"/issues/{action.number}/labels", {"labels": [NEEDS_FIX]})
+                gitea.call("POST", f"/issues/{action.number}/labels", {"labels": [settings.needs_fix]})
                 gitea.call("POST", f"/issues/{action.number}/comments", {"body": action.comment})
-            pulls = relabel(pulls, action.number, add=NEEDS_FIX)
+            pulls = relabel(pulls, action.number, add=settings.needs_fix)
             continue
         return action

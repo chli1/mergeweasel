@@ -1,8 +1,8 @@
 name: mergeweasel-queue
 on:
-  # pull_request_target: the workflow and the pinned image come from main.
+  # pull_request_target: the workflow and the pinned image come from the default branch. No
+  # branches filter: on: takes no expressions - the job's if: keeps to the default branch.
   pull_request_target:
-    branches: [main]
     # No synchronize: a push starts the checks, whose completion (workflow_run) wakes the queue. No
     # labeled or unlabeled: a label change re-runs mergeweasel-commits, whose completion wakes it.
     # closed: a merge moves the next pull request up.
@@ -22,11 +22,20 @@ on:
 # the runs such a group replaces as failed on their commit.
 jobs:
   pass:
-    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request_target'
+      || github.event.pull_request.base.ref == github.event.repository.default_branch
+    runs-on: ${{ vars.MERGEWEASEL_RUNNER_LABEL || 'ubuntu-latest' }}
     # A hung pass would otherwise hold every later pass, and every merge.
     timeout-minutes: 30
     container:
       image: docker.io/chli1ro/mergeweasel:1.0.0@sha256:c72956b96790e1f3fd9c56047c0f1ab3cc878a9e4b5dafee29b88e2b4eb74199
+    # The instance's names, from Actions variables; unset ones keep their defaults.
+    env:
+      MERGEWEASEL_AUTOMERGE_LABEL: ${{ vars.MERGEWEASEL_AUTOMERGE_LABEL }}
+      MERGEWEASEL_NEEDS_FIX_LABEL: ${{ vars.MERGEWEASEL_NEEDS_FIX_LABEL }}
+      MERGEWEASEL_KEEP_COMMITS_LABEL: ${{ vars.MERGEWEASEL_KEEP_COMMITS_LABEL }}
+      MERGEWEASEL_RENOVATE_ACCOUNT: ${{ vars.MERGEWEASEL_RENOVATE_ACCOUNT }}
     steps:
       - name: Run one queue pass
         if: ${{ !inputs.dry_run }}

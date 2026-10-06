@@ -18,9 +18,9 @@ def contents(text, encoding="utf-8"):
     return {"type": "file", "encoding": "base64", "content": base64.b64encode(text.encode(encoding)).decode()}
 
 
-def test_the_file_is_read_from_main():
+def test_the_file_is_read_from_a_branch():
     gitea = gitea_with(contents('[release]\ntag = "{YY}.{count}"\n'))
-    assert config.load(gitea).tag.text == "{YY}.{count}"
+    assert config.load(gitea, "main").tag.text == "{YY}.{count}"
     gitea.call.assert_called_once_with("GET", "/contents/mergeweasel.toml?ref=main")
 
 
@@ -32,17 +32,17 @@ def test_the_file_is_read_at_a_given_commit():
 
 def test_without_the_file_everything_is_default():
     missing = urllib.error.HTTPError("url", 404, "Not Found", hdrs=None, fp=None)
-    assert config.load(gitea_with(missing)).tag.text == config.DEFAULT_TAG
+    assert config.load(gitea_with(missing), "main").tag.text == config.DEFAULT_TAG
 
 
 def test_another_api_error_is_raised():
     boom = urllib.error.HTTPError("url", 500, "boom", hdrs=None, fp=None)
     with pytest.raises(urllib.error.HTTPError):
-        config.load(gitea_with(boom))
+        config.load(gitea_with(boom), "main")
 
 
 def test_a_byte_order_mark_is_ignored():
-    assert config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n', "utf-8-sig"))).tag.text == "{YY}.{count}"
+    assert config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n', "utf-8-sig")), "main").tag.text == "{YY}.{count}"
 
 
 @pytest.mark.parametrize("text", ["", "# only a comment\n", "[release]\n"])
@@ -93,4 +93,4 @@ def test_invalid_files_name_the_key(text, message):
 ])
 def test_an_unreadable_file_is_a_config_error(answer):
     with pytest.raises(config.ConfigError, match="^mergeweasel.toml: "):
-        config.load(gitea_with(answer))
+        config.load(gitea_with(answer), "main")

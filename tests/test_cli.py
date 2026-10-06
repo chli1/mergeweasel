@@ -7,9 +7,10 @@ import pytest
 
 from mergeweasel import cli
 from mergeweasel.gitea import Gitea
+from mergeweasel.settings import VARIABLES, Settings
 
 ENVIRONMENT = ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "MERGEWEASEL_MERGER_TOKEN", "MERGEWEASEL_APPROVER_TOKENS",
-               "GITHUB_TOKEN", "GITHUB_RUN_ID", "GITHUB_EVENT_NAME")
+               "GITHUB_TOKEN", "GITHUB_RUN_ID", "GITHUB_EVENT_NAME", *VARIABLES.values())
 SERVER = "https://git.example"
 
 
@@ -30,9 +31,17 @@ class Fake:
     logins: dict
     run_pass: mock.Mock
     release: mock.Mock
+    # The labels the repository has.
+    labels: list = dataclasses.field(default_factory=lambda: ["automerge", "needs-fix", "keep-commits"])
+    # The labels its organization has, None if they are unreadable.
+    org_labels: list | None = None
 
     def args(self):
-        return self.run_pass.call_args.args
+        """The pass's arguments but the settings."""
+        return self.run_pass.call_args.args[:-1]
+
+    def settings(self):
+        return self.run_pass.call_args.args[-1]
 
 
 @pytest.fixture
@@ -51,6 +60,17 @@ def fake(monkeypatch):
             return login
 
         client.own_login.side_effect = own_login
+        client.owner = "org"
+        client.call.side_effect = lambda method, path, body=None: {"default_branch": "trunk"} if path == "" else None
+
+        def paged(path, root=False):
+            if not root:
+                return [{"name": name} for name in fake.labels]
+            if fake.org_labels is None:
+                raise urllib.error.HTTPError(f"{SERVER}/api/v1{path}", 404, "Not Found", hdrs=None, fp=None)
+            return [{"name": name} for name in fake.org_labels]
+
+        client.paged.side_effect = paged
         fake.clients[token] = client
         return client
 
@@ -213,7 +233,7 @@ def test_check_commits_runs_the_check_with_the_run_token(env, fake, monkeypatch)
     check_run = mock.Mock(return_value=1)
     monkeypatch.setattr(cli.check, "run", check_run)
     assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
-    check_run.assert_called_once_with(fake.clients["run-token"], "/tmp/event.json")
+    check_run.assert_called_once_with(fake.clients["run-token"], "/tmp/event.json", Settings("trunk"))
 
 
 def test_the_merger_token_tolerates_a_trailing_newline(env, fake):
@@ -233,10 +253,10 @@ def test_a_malformed_token_is_not_printed(env, fake, capsys):
 def test_pass_releases_before_it_runs(env, fake):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     order = []
-    fake.release.side_effect = lambda gitea, dry_run: order.append(("release", dry_run)) or True
+    fake.release.side_effect = lambda gitea, dry_run, base_branch: order.append(("release", dry_run, base_branch)) or True
     fake.run_pass.side_effect = lambda *args: order.append(("pass",))
     assert cli.main(["pass"]) == 0
-    assert order == [("release", False), ("pass",)]
+    assert order == [("release", False, "trunk"), ("pass",)]
     assert fake.release.call_args.args[0] is fake.clients["pat"]
 
 
@@ -253,3 +273,74 @@ def test_superseded_pass_does_not_release(env, fake, monkeypatch):
     monkeypatch.setattr(cli.queue, "wait_for_turn", lambda gitea, own_id, event: False)
     assert cli.main(["pass"]) == 0
     fake.release.assert_not_called()
+
+
+def test_pass_prints_and_passes_the_instances_settings(env, fake, capsys):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    env.setenv("MERGEWEASEL_AUTOMERGE_LABEL", "merge-me")
+    env.setenv("MERGEWEASEL_RENOVATE_ACCOUNT", "deps-bot")
+    fake.labels = ["merge-me", "needs-fix", "keep-commits"]
+    assert cli.main(["pass"]) == 0
+    assert fake.settings() == Settings("trunk", automerge="merge-me", renovate="deps-bot")
+    assert "settings: base branch trunk; labels merge-me, needs-fix, keep-commits; Renovate account deps-bot" in capsys.readouterr().out
+
+
+def test_a_missing_label_fails_the_pass_before_the_release(env, fake, capsys):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    env.setenv("MERGEWEASEL_NEEDS_FIX_LABEL", "broken")
+    fake.labels = ["automerge"]
+    fake.org_labels = ["keep-commits"]
+    assert cli.main(["pass"]) == 1
+    assert "labels missing in the repository and its organization: broken" in capsys.readouterr().err
+    fake.release.assert_not_called()
+    fake.run_pass.assert_not_called()
+
+
+def test_unreadable_organization_labels_skip_the_check(env, fake, capsys):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    fake.labels = []
+    assert cli.main(["pass"]) == 0
+    assert "not checked whether the labels exist" in capsys.readouterr().out
+
+
+def test_one_label_for_two_roles_fails_both_commands(env, fake, capsys):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    env.setenv("MERGEWEASEL_KEEP_COMMITS_LABEL", "automerge")
+    assert cli.main(["pass"]) == 1
+    assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
+    assert capsys.readouterr().err.count("three different labels") == 2
+    fake.run_pass.assert_not_called()
+
+
+def test_an_unreadable_repository_fails_the_check(env, fake, capsys, monkeypatch):
+    check_run = mock.Mock()
+    monkeypatch.setattr(cli.check, "run", check_run)
+    factory = cli.Gitea
+
+    def failing(*arguments):
+        client = factory(*arguments)
+        client.call.side_effect = unauthorized()
+        return client
+
+    monkeypatch.setattr(cli, "Gitea", failing)
+    assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
+    assert "cannot read the repository: token is expired" in capsys.readouterr().err
+    check_run.assert_not_called()
+
+
+def test_an_unreadable_label_list_fails_the_pass(env, fake, capsys, monkeypatch):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    monkeypatch.setattr(cli.instance, "missing_labels", mock.Mock(side_effect=unauthorized()))
+    assert cli.main(["pass"]) == 1
+    assert "cannot read the labels: token is expired" in capsys.readouterr().err
+    fake.release.assert_not_called()
+
+
+def test_a_missing_keep_commits_label_is_fine_unless_named(env, fake, capsys):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    fake.labels = ["automerge", "needs-fix"]
+    fake.org_labels = []
+    assert cli.main(["pass"]) == 0
+    env.setenv("MERGEWEASEL_KEEP_COMMITS_LABEL", "no-squash")
+    assert cli.main(["pass"]) == 1
+    assert "labels missing in the repository and its organization: no-squash" in capsys.readouterr().err

@@ -63,6 +63,13 @@ def test_paged_reads_until_a_short_page(monkeypatch):
         "state=all&limit=50&page=1", "state=all&limit=50&page=2"]
 
 
+def test_paged_from_the_root_leaves_the_repository_out(monkeypatch):
+    seen = recording(monkeypatch, [[]])
+    client = gitea_module.Gitea("https://git.example", "org/repo", "")
+    assert client.paged(f"/orgs/{client.owner}/labels", root=True) == []
+    assert seen[0]["url"] == "https://git.example/api/v1/orgs/org/labels?limit=50&page=1"
+
+
 def test_issue_numbers_and_pull_commits_read_through_paged():
     gitea = mock.Mock(spec=gitea_module.Gitea)
     gitea.paged.side_effect = lambda path: {

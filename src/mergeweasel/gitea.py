@@ -34,6 +34,7 @@ class Gitea:
     def __init__(self, server, repository, token):
         self.root = f"{server}/api/v1"
         self.api = f"{self.root}/repos/{repository}"
+        self.owner = repository.split("/")[0]
         self.token = token
 
     def call(self, method, path, body=None):
@@ -43,11 +44,13 @@ class Gitea:
         """The login of the token's account; needs the token scope read:user."""
         return self._request("GET", f"{self.root}/user")["login"]
 
-    def paged(self, path):
+    def paged(self, path, root=False):
+        """root: path is relative to the API root, not to the repository."""
         separator = "&" if "?" in path else "?"
         items, page = [], 1
         while True:
-            batch = self.call("GET", f"{path}{separator}limit={PAGE_SIZE}&page={page}")
+            query = f"{path}{separator}limit={PAGE_SIZE}&page={page}"
+            batch = self._request("GET", f"{self.root}{query}") if root else self.call("GET", query)
             items.extend(batch)
             if len(batch) < PAGE_SIZE:
                 return items

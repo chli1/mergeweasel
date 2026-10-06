@@ -12,7 +12,7 @@ import urllib.request
 
 import pytest
 
-from driver import ACCOUNTS, ADMIN, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, create_repo, eventually
+from driver import ACCOUNTS, ADMIN, LABELS, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, create_repo, eventually
 
 GITEA_DOCKERFILE = pathlib.Path(__file__).with_name("gitea.Dockerfile")
 GITEA_START_SECONDS = 120
@@ -25,6 +25,8 @@ PASS_TIMEOUT_SECONDS = 300
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "required_approvals(n): the repository's required approvals, 1 by default")
+    config.addinivalue_line("markers", "instance(branch, labels): the default branch and the automerge, needs-fix "
+                                       "and keep-commits labels' names, set as the passes' variables")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -113,13 +115,22 @@ def accounts(url):
 
 
 @pytest.fixture
-def repo(gitea, request):
-    marker = request.node.get_closest_marker("required_approvals")
-    return create_repo(gitea.clients, request.node.name, required_approvals=marker.args[0] if marker else 1)
+def instance(request):
+    """The instance's names: (default branch, label names)."""
+    marker = request.node.get_closest_marker("instance")
+    return (marker.kwargs["branch"], marker.kwargs["labels"]) if marker else ("main", LABELS)
 
 
 @pytest.fixture
-def run_pass(gitea, image, repo):
+def repo(gitea, request, instance):
+    marker = request.node.get_closest_marker("required_approvals")
+    branch, labels = instance
+    return create_repo(gitea.clients, request.node.name, required_approvals=marker.args[0] if marker else 1,
+                       branch=branch, labels=labels)
+
+
+@pytest.fixture
+def run_pass(gitea, image, repo, instance):
     def run(mergeable=None, approvers=("queue",)):
         """One pass of the image under test, as mergeweasel-queue.yml runs it.
 
@@ -129,12 +140,18 @@ def run_pass(gitea, image, repo):
         """
         if mergeable is not None:
             eventually(lambda: repo.pull(mergeable)["mergeable"])
+        automerge, needs_fix, keep_commits = instance[1]
+        # The workflow's variables; the default branch is the repository's own.
+        variables = {"MERGEWEASEL_AUTOMERGE_LABEL": automerge, "MERGEWEASEL_NEEDS_FIX_LABEL": needs_fix,
+                     "MERGEWEASEL_KEEP_COMMITS_LABEL": keep_commits, "MERGEWEASEL_RENOVATE_ACCOUNT": "renovate"}
         environment = {**os.environ, "GITHUB_SERVER_URL": gitea.url, "GITHUB_REPOSITORY": repo.name,
                        "MERGEWEASEL_MERGER_TOKEN": gitea.tokens["queue"],
-                       "MERGEWEASEL_APPROVER_TOKENS": "\n".join(gitea.tokens[account] for account in approvers)}
+                       "MERGEWEASEL_APPROVER_TOKENS": "\n".join(gitea.tokens[account] for account in approvers),
+                       **variables}
+        passed = [option for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "MERGEWEASEL_MERGER_TOKEN",
+                                      "MERGEWEASEL_APPROVER_TOKENS", *variables) for option in ("--env", name)]
         result = subprocess.run(
-            ["docker", "run", "--rm", "--label", LABEL, "--env", "GITHUB_SERVER_URL", "--env", "GITHUB_REPOSITORY",
-             "--env", "MERGEWEASEL_MERGER_TOKEN", "--env", "MERGEWEASEL_APPROVER_TOKENS", image, "mergeweasel", "pass"],
+            ["docker", "run", "--rm", "--label", LABEL, *passed, image, "mergeweasel", "pass"],
             env=environment, capture_output=True, text=True, timeout=PASS_TIMEOUT_SECONDS)
         # pytest shows it with a failing test: what the pass decided.
         print(f"pass:\n{result.stdout}{result.stderr}")

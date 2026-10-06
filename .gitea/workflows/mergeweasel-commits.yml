@@ -1,19 +1,26 @@
 name: mergeweasel-commits
 # Its own workflow: editing a pull request's title or body re-runs only this check.
 on:
+  # No branches filter: on: takes no expressions - the job's if: keeps to the default branch.
   pull_request:
-    branches: [main]
     # edited: the title and the ## Commit section are the squash commit; labeled/unlabeled:
     # keep-commits switches what is checked, and every label change wakes the queue through this
     # run's completion - narrowing them leaves automerge and needs-fix changes unnoticed.
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 jobs:
   check:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.base.ref == github.event.repository.default_branch
+    runs-on: ${{ vars.MERGEWEASEL_RUNNER_LABEL || 'ubuntu-latest' }}
     container:
       image: docker.io/chli1ro/mergeweasel:1.0.0@sha256:c72956b96790e1f3fd9c56047c0f1ab3cc878a9e4b5dafee29b88e2b4eb74199
+    # The instance's names, from Actions variables; unset ones keep their defaults.
+    env:
+      MERGEWEASEL_AUTOMERGE_LABEL: ${{ vars.MERGEWEASEL_AUTOMERGE_LABEL }}
+      MERGEWEASEL_NEEDS_FIX_LABEL: ${{ vars.MERGEWEASEL_NEEDS_FIX_LABEL }}
+      MERGEWEASEL_KEEP_COMMITS_LABEL: ${{ vars.MERGEWEASEL_KEEP_COMMITS_LABEL }}
+      MERGEWEASEL_RENOVATE_ACCOUNT: ${{ vars.MERGEWEASEL_RENOVATE_ACCOUNT }}
     steps:
-      - name: Check what lands on main
+      - name: Check what lands on the default branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mergeweasel check-commits --event "$GITHUB_EVENT_PATH"
