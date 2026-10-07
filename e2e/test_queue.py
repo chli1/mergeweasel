@@ -20,7 +20,6 @@ def changed(line, text):
     return "".join(lines)
 
 
-@pytest.mark.both_images
 def test_squash_merge(repo, run_pass):
     repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
     repo.commit("author", "add-a", {"b.txt": "b\n"}, "wip")
@@ -40,7 +39,6 @@ def test_squash_merge(repo, run_pass):
     assert not [review for review in repo.reviews(number) if review["user"]["login"] == "queue"]
 
 
-@pytest.mark.both_images
 def test_keep_commits_fast_forwards(repo, run_pass):
     first = repo.commit("author", "main", {"a.txt": "a\n"}, "feat: add a (#1)", new_branch="add-a")
     second = repo.commit("author", "add-a", {"a.txt": "a\nb\n"}, "test: cover a (#1)")

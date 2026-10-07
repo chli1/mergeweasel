@@ -13,6 +13,7 @@ import urllib.request
 
 import pytest
 
+import history
 import workflow
 from driver import ACCOUNTS, ADMIN, LABELS, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, create_repo, eventually
 
@@ -29,12 +30,13 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "required_approvals(n): the repository's required approvals, 1 by default")
     config.addinivalue_line("markers", "instance(branch, labels): the default branch and the automerge, needs-fix "
                                        "and keep-commits labels' names, set as the passes' variables")
-    config.addinivalue_line("markers", "both_images: run with the built image and with the one "
-                                       "mergeweasel-queue.yml pins")
+    config.addinivalue_line("markers", "needs_this_commit: needs what the pinned image lacks - not run against it "
+                                       "until the pinned release contains the commit that added this marker")
 
 
 def pytest_generate_tests(metafunc):
-    if metafunc.definition.get_closest_marker("both_images"):
+    # Every scenario also runs against the pinned release: the workflow files must keep working with it.
+    if "image" in metafunc.fixturenames:
         metafunc.parametrize("image", ["built", "pinned"], indirect=True)
 
 
@@ -94,10 +96,22 @@ def pinned_image(queue_workflow):
     return queue_workflow.image
 
 
+@pytest.fixture(scope="session")
+def pinned_revision(pinned_image):
+    """The commit the pinned release was built from, or "" if its image does not say."""
+    return docker("image", "inspect", "--format", '{{index .Config.Labels "org.opencontainers.image.revision"}}',
+                  pinned_image)
+
+
 @pytest.fixture
 def image(request):
-    """The image run_pass starts: the built one, and for both_images tests the pinned one too."""
-    return request.getfixturevalue(f"{getattr(request, 'param', 'built')}_image")
+    """The image run_pass starts: the built one, and the pinned one in a test's [pinned] variant."""
+    if request.param == "pinned" and request.node.get_closest_marker("needs_this_commit"):
+        revision = request.getfixturevalue("pinned_revision")
+        reason = history.unreleased(request.function, revision) if revision else "the pinned image names no revision"
+        if reason:
+            pytest.skip(f"needs_this_commit: {reason}")
+    return request.getfixturevalue(f"{request.param}_image")
 
 
 @pytest.fixture(scope="session")

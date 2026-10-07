@@ -6,6 +6,7 @@ BODY = "Adds a.\n\n## Commit\n\n- adds a\n"
 RUN_URL = "https://ci.example.com/runs/1"
 
 
+@pytest.mark.needs_this_commit
 @pytest.mark.instance(branch="trunk", labels=("merge-me", "broken", "no-squash"))
 def test_the_queue_works_with_the_instances_names(repo, run_pass):
     red = repo.commit("author", "trunk", {"b.txt": "b\n"}, "add b", new_branch="add-b")

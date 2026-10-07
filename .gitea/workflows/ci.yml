@@ -50,20 +50,27 @@ jobs:
       MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        # needs_this_commit looks up its marker's commit in the pinned release's history.
+        with:
+          fetch-depth: 0
       - name: Build the image
         run: docker build -t "$MERGEWEASEL_E2E_IMAGE" .
-      # The test starts its own Gitea and runs passes of the built image against it.
+      # The test starts its own Gitea and runs passes of the built and the pinned image against it.
+      # -rs: the log names each skipped [pinned] variant and why.
       - name: End-to-end test
         run: |
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r requirements-test.txt
-          .venv/bin/python -m pytest e2e
+          .venv/bin/python -m pytest -rs e2e
       # pytest removes its Gitea itself; this covers a pytest that died before its cleanup.
       - name: Remove the containers and images
         if: always()
         run: |
           docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" || true
-          docker rmi -f "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" "$MERGEWEASEL_E2E_IMAGE" || true
+          if docker image inspect "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" > /dev/null 2>&1; then
+            docker rmi -f "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" || true
+          fi
+          docker rmi -f "$MERGEWEASEL_E2E_IMAGE" || true
       # The test pulls the release mergeweasel-queue.yml pins. Open pull requests pin different
       # releases, so the daemon keeps the newest `keep`; a pull request further behind pulls again.
       # Without -f: an image a concurrent run still uses stays.

@@ -25,11 +25,20 @@ cannot reach container IP addresses; neither does a CI job on a network of its o
 Each pass gets the environment and the command that `mergeweasel-queue.yml` gives it: the job's
 and the real pass step's `env`, with the test's values for each `${{ vars.X }}` and
 `${{ secrets.X }}`. An expression of any other shape, or a variable or secret the test does not
-supply, fails the test, so a change to the workflow cannot slip past it. Scenarios marked
-`both_images` run a second time against the release the workflow pins, which proves that the
-workflow files keep working with the previous release. The first run pulls that release from
-Docker Hub; the CI job keeps the five newest release images on the runners' Docker daemon, because
-open pull requests may pin different releases.
+supply, fails the test, so a change to the workflow cannot slip past it.
+
+Every scenario runs twice, as `[built]` against the built image and as `[pinned]` against the
+release the workflow pins, which proves that the workflow files keep working with the previous
+release. The first run pulls that release from Docker Hub; the CI job keeps the five newest release
+images on the runners' Docker daemon, because open pull requests may pin different releases.
+
+A scenario that needs something the pinned release does not have yet - a new option, a changed
+behaviour - carries `@pytest.mark.needs_this_commit`. Its `[pinned]` variant is skipped until the
+pinned release contains the commit that added the marker line, found with `git blame`; from then
+on it runs against both images by itself, so the marker never needs removing. Touching the marker
+line later moves that commit forward and only delays the `[pinned]` run. When the history cannot
+answer - an uncommitted marker, a shallow clone, a pinned image without a revision label - the
+`[pinned]` variant is skipped too, and the skip names the reason (`pytest -rs` shows it).
 
 ## Layout
 
@@ -51,6 +60,7 @@ open pull requests may pin different releases.
   `mergeweasel-commits.yml`), which each release also publishes as the template, and `ci.yml`.
 - `e2e/`: the end-to-end test - `gitea.Dockerfile` (the pinned Gitea), `driver.py` (the people
   and systems around the queue), `workflow.py` (what `mergeweasel-queue.yml` hands a pass),
+  `history.py` (when a `needs_this_commit` scenario may run against the pinned release),
   `test_queue.py`, `test_instance.py` and `test_release.py` (the scenarios).
 - `docs/`: [design](docs/design.md) explains how a pass works and why.
 
