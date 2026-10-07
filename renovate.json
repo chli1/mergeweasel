@@ -39,9 +39,10 @@
       "semanticCommitType": "ci"
     },
     {
-      "description": "This repository is mergeweasel's canary: its own image without release age, and the queue lands its majors too - the workflow files on main already fit them and work with the previous release.",
+      "description": "This repository always runs its own most recent version.",
       "matchPackageNames": ["docker.io/chli1ro/mergeweasel"],
       "minimumReleaseAge": null,
+      "separateMajorMinor": false,
       "addLabels": ["automerge"]
     },
     {
