@@ -34,6 +34,11 @@
       "commitMessageExtra": "v{{newMajor}}.{{newMinor}}"
     },
     {
+      "description": "Test compatibility with a new Gitea release as early as possible.",
+      "matchPackageNames": ["gitea/gitea"],
+      "minimumReleaseAge": "1 day"
+    },
+    {
       "description": "Workflows: the actions and the pinned mergeweasel image.",
       "matchFileNames": [".gitea/workflows/**"],
       "semanticCommitType": "ci"
