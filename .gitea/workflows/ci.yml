@@ -64,6 +64,21 @@ jobs:
         run: |
           docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" || true
           docker rmi -f "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" "$MERGEWEASEL_E2E_IMAGE" || true
+      # The test pulls the release mergeweasel-queue.yml pins. Open pull requests pin different
+      # releases, so the daemon keeps the newest `keep`; a pull request further behind pulls again.
+      # Without -f: an image a concurrent run still uses stays.
+      - name: Remove all but the newest release images
+        if: always()
+        run: |
+          keep=5
+          for id in $(docker image ls --all --quiet --filter label=org.opencontainers.image.title=mergeweasel \
+              --filter label=org.opencontainers.image.version | sort -u); do
+            docker image inspect --format \
+              '{{index .Config.Labels "org.opencontainers.image.version"}} {{.Id}} {{json .RepoTags}}{{json .RepoDigests}}' "$id"
+          done | grep '"chli1ro/mergeweasel[:@]' | sort -rV | tail -n "+$((keep + 1))" |
+            while read -r version id references; do
+              docker rmi "$id" || true
+            done
   # No tests here: main takes only up-to-date pull requests whose checks passed.
   release:
     if: github.event_name == 'push'

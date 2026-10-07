@@ -339,10 +339,12 @@ pin the previous release until Renovate's bump lands. A re-run replaces the asse
 A change that needs consumers to update their copies of `mergeweasel-*.yml` is breaking (`!`),
 because Renovate bumps only the image pin. Such a change keeps the workflow files working with the
 previous release, because this repository runs the new files on the old image until the pin bump
-lands. Consumers take files and pin together from the release. This repository's Renovate types
-its updates so that only an update of the image's base image releases (`fix(deps)`). The pin bump
-of mergeweasel's own image is `ci(deps)` and releases nothing, so a release and the pin bump it
-causes cannot loop; the queue lands it without a human, majors included.
+lands. The end-to-end test checks it: some scenarios run both the new image and the pinned one
+with what the workflow files pass. Consumers take files and pin together from the release. This
+repository's Renovate types its updates so that only an update of the image's base image releases
+(`fix(deps)`). The pin bump of mergeweasel's own image is `ci(deps)` and releases nothing, so a
+release and the pin bump it causes cannot loop; the queue lands it without a human, majors
+included.
 
 ## Gitea behaviour relied on
 

@@ -6,12 +6,14 @@ import dataclasses
 import datetime
 import os
 import pathlib
+import re
 import secrets
 import subprocess
 import urllib.request
 
 import pytest
 
+import workflow
 from driver import ACCOUNTS, ADMIN, LABELS, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, create_repo, eventually
 
 GITEA_DOCKERFILE = pathlib.Path(__file__).with_name("gitea.Dockerfile")
@@ -27,6 +29,13 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "required_approvals(n): the repository's required approvals, 1 by default")
     config.addinivalue_line("markers", "instance(branch, labels): the default branch and the automerge, needs-fix "
                                        "and keep-commits labels' names, set as the passes' variables")
+    config.addinivalue_line("markers", "both_images: run with the built image and with the one "
+                                       "mergeweasel-queue.yml pins")
+
+
+def pytest_generate_tests(metafunc):
+    if metafunc.definition.get_closest_marker("both_images"):
+        metafunc.parametrize("image", ["built", "pinned"], indirect=True)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -64,7 +73,7 @@ def healthy(url):
 
 
 @pytest.fixture(scope="session")
-def image():
+def built_image():
     name = os.environ.get("MERGEWEASEL_E2E_IMAGE")
     if not name:
         # Not a skip: CI must not turn green without testing anything.
@@ -73,7 +82,26 @@ def image():
 
 
 @pytest.fixture(scope="session")
-def gitea(image):
+def queue_workflow():
+    return workflow.read()
+
+
+@pytest.fixture(scope="session")
+def pinned_image(queue_workflow):
+    """The release the workflow pins: the files on main must keep working with it."""
+    if subprocess.run(["docker", "image", "inspect", queue_workflow.image], capture_output=True).returncode != 0:
+        docker("pull", "--quiet", queue_workflow.image)
+    return queue_workflow.image
+
+
+@pytest.fixture
+def image(request):
+    """The image run_pass starts: the built one, and for both_images tests the pinned one too."""
+    return request.getfixturevalue(f"{getattr(request, 'param', 'built')}_image")
+
+
+@pytest.fixture(scope="session")
+def gitea(built_image):
     # Docker names carry the run id: the daemon may serve other runs at the same time.
     run_id = os.environ.get("GITHUB_RUN_ID") or f"local-{secrets.token_hex(3)}"
     container, tag = f"mergeweasel-e2e-gitea-{run_id}", f"mergeweasel-e2e-gitea:{run_id}"
@@ -125,14 +153,16 @@ def instance(request):
 def repo(gitea, request, instance):
     marker = request.node.get_closest_marker("required_approvals")
     branch, labels = instance
-    return create_repo(gitea.clients, request.node.name, required_approvals=marker.args[0] if marker else 1,
+    # A parametrized test's name carries brackets, which a repository name may not.
+    name = re.sub(r"[^\w.-]+", "-", request.node.name).strip("-")
+    return create_repo(gitea.clients, name, required_approvals=marker.args[0] if marker else 1,
                        branch=branch, labels=labels)
 
 
 @pytest.fixture
-def run_pass(gitea, image, repo, instance):
+def run_pass(gitea, image, queue_workflow, repo, instance):
     def run(mergeable=None, approvers=("queue",)):
-        """One pass of the image under test, as mergeweasel-queue.yml runs it.
+        """One pass, with the environment and the command mergeweasel-queue.yml gives it.
 
         No GITHUB_RUN_ID: there is no other pass to wait for. `mergeable` names a pull request whose
         mergeable check must settle first - otherwise Gitea defers the merge to a later pass.
@@ -141,18 +171,20 @@ def run_pass(gitea, image, repo, instance):
         if mergeable is not None:
             eventually(lambda: repo.pull(mergeable)["mergeable"])
         automerge, needs_fix, keep_commits = instance[1]
-        # The workflow's variables; the default branch is the repository's own.
-        variables = {"MERGEWEASEL_AUTOMERGE_LABEL": automerge, "MERGEWEASEL_NEEDS_FIX_LABEL": needs_fix,
-                     "MERGEWEASEL_KEEP_COMMITS_LABEL": keep_commits, "MERGEWEASEL_RENOVATE_ACCOUNT": "renovate"}
-        environment = {**os.environ, "GITHUB_SERVER_URL": gitea.url, "GITHUB_REPOSITORY": repo.name,
-                       "MERGEWEASEL_MERGER_TOKEN": gitea.tokens["queue"],
-                       "MERGEWEASEL_APPROVER_TOKENS": "\n".join(gitea.tokens[account] for account in approvers),
-                       **variables}
-        passed = [option for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "MERGEWEASEL_MERGER_TOKEN",
-                                      "MERGEWEASEL_APPROVER_TOKENS", *variables) for option in ("--env", name)]
+        # The repository's Actions variables and secrets; the default branch is the repository's own.
+        contexts = {
+            "vars": {"MERGEWEASEL_AUTOMERGE_LABEL": automerge, "MERGEWEASEL_NEEDS_FIX_LABEL": needs_fix,
+                     "MERGEWEASEL_KEEP_COMMITS_LABEL": keep_commits, "MERGEWEASEL_RENOVATE_ACCOUNT": "renovate"},
+            "secrets": {"MERGEWEASEL_MERGER_TOKEN": gitea.tokens["queue"],
+                        "MERGEWEASEL_APPROVER_TOKENS": "\n".join(gitea.tokens[account] for account in approvers)},
+        }
+        # The runner's context, which the workflow does not spell out.
+        passed = {"GITHUB_SERVER_URL": gitea.url, "GITHUB_REPOSITORY": repo.name, **queue_workflow.resolve(contexts)}
+        # By name only: the tokens stay off the command line.
+        options = [option for name in passed for option in ("--env", name)]
         result = subprocess.run(
-            ["docker", "run", "--rm", "--label", LABEL, *passed, image, "mergeweasel", "pass"],
-            env=environment, capture_output=True, text=True, timeout=PASS_TIMEOUT_SECONDS)
+            ["docker", "run", "--rm", "--label", LABEL, *options, image, *queue_workflow.command],
+            env={**os.environ, **passed}, capture_output=True, text=True, timeout=PASS_TIMEOUT_SECONDS)
         # pytest shows it with a failing test: what the pass decided.
         print(f"pass:\n{result.stdout}{result.stderr}")
         assert result.returncode == 0, "the pass failed"

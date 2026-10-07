@@ -8,7 +8,8 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-The package uses the standard library only; pytest is the one test dependency.
+The package uses the standard library only. The tests need pytest, and the end-to-end test also
+needs PyYAML to read the workflow files.
 
 The end-to-end test runs passes of a built image against a throwaway Gitea in Docker:
 
@@ -20,6 +21,15 @@ MERGEWEASEL_E2E_IMAGE=mergeweasel:dev .venv/bin/python -m pytest e2e
 The test reaches that Gitea by its IP address on Docker's default bridge network. Run it on a Linux
 host, or in a container on the default bridge. Docker Desktop does not work, because its host
 cannot reach container IP addresses; neither does a CI job on a network of its own.
+
+Each pass gets the environment and the command that `mergeweasel-queue.yml` gives it: the job's
+and the real pass step's `env`, with the test's values for each `${{ vars.X }}` and
+`${{ secrets.X }}`. An expression of any other shape, or a variable or secret the test does not
+supply, fails the test, so a change to the workflow cannot slip past it. Scenarios marked
+`both_images` run a second time against the release the workflow pins, which proves that the
+workflow files keep working with the previous release. The first run pulls that release from
+Docker Hub; the CI job keeps the five newest release images on the runners' Docker daemon, because
+open pull requests may pin different releases.
 
 ## Layout
 
@@ -40,7 +50,8 @@ cannot reach container IP addresses; neither does a CI job on a network of its o
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
   `mergeweasel-commits.yml`), which each release also publishes as the template, and `ci.yml`.
 - `e2e/`: the end-to-end test - `gitea.Dockerfile` (the pinned Gitea), `driver.py` (the people
-  and systems around the queue), `test_queue.py` and `test_release.py` (the scenarios).
+  and systems around the queue), `workflow.py` (what `mergeweasel-queue.yml` hands a pass),
+  `test_queue.py`, `test_instance.py` and `test_release.py` (the scenarios).
 - `docs/`: [design](docs/design.md) explains how a pass works and why.
 
 ## Pull requests
