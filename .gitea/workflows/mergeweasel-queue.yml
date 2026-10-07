@@ -29,7 +29,7 @@ jobs:
     # A hung pass would otherwise hold every later pass, and every merge.
     timeout-minutes: 30
     container:
-      image: docker.io/chli1ro/mergeweasel:1.0.0@sha256:c72956b96790e1f3fd9c56047c0f1ab3cc878a9e4b5dafee29b88e2b4eb74199
+      image: docker.io/chli1ro/mergeweasel:1.2.0@sha256:7ec6300f7e7ba60700f5d699415ce2c9c6f58655a9e42f890486372396ab0c65
     # The instance's names, from Actions variables; unset ones keep their defaults.
     env:
       MERGEWEASEL_AUTOMERGE_LABEL: ${{ vars.MERGEWEASEL_AUTOMERGE_LABEL }}
