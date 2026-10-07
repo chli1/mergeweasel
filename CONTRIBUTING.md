@@ -38,7 +38,7 @@ cannot reach container IP addresses; neither does a CI job on a network of its o
 - `tests/`: pytest, one suite per module, on constructed state and a client faked with
   `mock.create_autospec`; only `test_gitea.py` fakes HTTP.
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
-  `mergeweasel-commits.yml`), and `ci.yml`.
+  `mergeweasel-commits.yml`), which each release also publishes as the template, and `ci.yml`.
 - `e2e/`: the end-to-end test - `gitea.Dockerfile` (the pinned Gitea), `driver.py` (the people
   and systems around the queue), `test_queue.py` and `test_release.py` (the scenarios).
 - `docs/`: [design](docs/design.md) explains how a pass works and why.

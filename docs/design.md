@@ -331,10 +331,18 @@ a push by the Actions bot would start none. For mergeweasel itself, the `release
 publishes the image to a public registry as `X.Y.Z` and `latest`. The version exists only as the
 tag and as the image label `org.opencontainers.image.version`. Consumers pin an exact version.
 
+The job then attaches `mergeweasel-commits.yml` and `mergeweasel-queue.yml` to the release, as
+they stand at the tag but pinned to the image it just pushed (`X.Y.Z@sha256:...`). These assets
+are the template consumers copy; the files on `main` are this repository's own installation and
+pin the previous release until Renovate's bump lands. A re-run replaces the assets.
+
 A change that needs consumers to update their copies of `mergeweasel-*.yml` is breaking (`!`),
-because Renovate bumps only the image pin. This repository's Renovate types its updates so that
-only an update of the image's base image releases (`fix(deps)`). The pin bump of mergeweasel's own
-image is `ci(deps)` and releases nothing, so a release and the pin bump it causes cannot loop.
+because Renovate bumps only the image pin. Such a change keeps the workflow files working with the
+previous release, because this repository runs the new files on the old image until the pin bump
+lands. Consumers take files and pin together from the release. This repository's Renovate types
+its updates so that only an update of the image's base image releases (`fix(deps)`). The pin bump
+of mergeweasel's own image is `ci(deps)` and releases nothing, so a release and the pin bump it
+causes cannot loop; the queue lands it without a human, majors included.
 
 ## Gitea behaviour relied on
 

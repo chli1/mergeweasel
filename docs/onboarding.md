@@ -135,13 +135,21 @@ Protect `main` with these settings:
 
 ## The workflows
 
-Copy `mergeweasel-queue.yml` and `mergeweasel-commits.yml` from this repository's
-[`.gitea/workflows/`](../.gitea/workflows/) into yours. Leave them unchanged except for:
+Every mergeweasel release carries the two workflows as assets: `mergeweasel-queue.yml` and
+`mergeweasel-commits.yml`, each already pinned to that release's image by version and digest. Take
+them from the release whose image you are going to run - not from this repository's `main`
+branch, whose files serve its own installation and can be ahead of the latest release. For
+release `vX.Y.Z`, in your repository:
 
-- the `workflow_run` list in `mergeweasel-queue.yml`: it names the workflows of your CI plus
-  `mergeweasel-commits`. When one of them completes, the queue wakes up - this is also how a label
-  change reaches the queue;
-- the image tag, which pins an exact version.
+```sh
+releases=<this repository's URL>/releases/download/vX.Y.Z
+curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue.yml"
+curl -fsSL -o .gitea/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
+```
+
+Leave them unchanged except for the `workflow_run` list in `mergeweasel-queue.yml`: it names the
+workflows of your CI plus `mergeweasel-commits`. When one of them completes, the queue wakes up -
+this is also how a label change reaches the queue.
 
 Keep the file names and workflow names as they are: the pass finds its own runs and statuses by
 them.
@@ -151,6 +159,12 @@ the [instance settings](configuration.md#instance-settings) from Actions variabl
 runners labelled `ubuntu-latest`; if yours carry another label, set the Actions variable
 `MERGEWEASEL_RUNNER_LABEL` to it. Pull requests against a branch other than the default branch skip
 both jobs, so stacked pull requests cost no runner time.
+
+To update, let Renovate bump the image pin; that is all a minor or patch release needs. A major
+release says in its notes which workflow change it requires, and its image may not work with the
+old files, so do not land Renovate's pin bump for it on its own. Take both files from the new
+release instead; they carry the new pin as well. Adapt the `workflow_run` list again and land
+them. Renovate then closes its pull request, because the pin is already current.
 
 ## Server setting
 

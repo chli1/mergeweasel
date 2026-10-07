@@ -98,12 +98,50 @@ jobs:
         run: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u chli1ro --password-stdin
       # A Docker daemon can serve several jobs at once, so the registry names are shared: each exists
       # only around its own push, and the cleanup removes nothing but this run's image.
+      # The digest pins the image in the templates. It is read through X.Y.Z, before that tag goes:
+      # a parallel release may already have moved `latest` to its own image.
       - name: Push X.Y.Z and latest
+        id: push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          for tag in ${{ steps.version.outputs.version }} latest; do
+          for tag in "$VERSION" latest; do
             docker tag "$IMAGE" "$REGISTRY_IMAGE:$tag"
             docker push "$REGISTRY_IMAGE:$tag"
+            if [ "$tag" = "$VERSION" ]; then
+              digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY_IMAGE:$tag")
+            fi
             docker rmi "$REGISTRY_IMAGE:$tag"
+          done
+          echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
+      # The release's templates: the workflow files as of this tag, pinned to the image just
+      # pushed. Only the image line changes; a file without exactly one fails the release.
+      - name: Render the workflow templates
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p templates
+          for file in mergeweasel-commits.yml mergeweasel-queue.yml; do
+            test -n "$DIGEST"
+            test "$(grep -c "^ *image: $REGISTRY_IMAGE:" ".gitea/workflows/$file")" = 1
+            sed "s|^\( *image: \)$REGISTRY_IMAGE:.*|\1$REGISTRY_IMAGE:$VERSION@$DIGEST|" \
+              ".gitea/workflows/$file" > "templates/$file"
+          done
+      # Gitea keeps a second asset of the same name, so a re-run deletes the old one first.
+      - name: Attach the templates to the release
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          api="$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY"
+          curl -fsS -H "Authorization: token $GITEA_TOKEN" "$api/releases/tags/$GITHUB_REF_NAME" > release.json
+          release=$(python3 -c 'import json; print(json.load(open("release.json"))["id"])')
+          for file in mergeweasel-commits.yml mergeweasel-queue.yml; do
+            for asset in $(python3 -c 'import json, sys; print(*[a["id"] for a in json.load(open("release.json"))["assets"] if a["name"] == sys.argv[1]])' "$file"); do
+              curl -fsS -X DELETE -H "Authorization: token $GITEA_TOKEN" "$api/releases/$release/assets/$asset"
+            done
+            curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -F "attachment=@templates/$file" \
+              "$api/releases/$release/assets?name=$file" > /dev/null
           done
       - name: Log out and remove the image
         if: always()

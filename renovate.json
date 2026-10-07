@@ -39,12 +39,13 @@
       "semanticCommitType": "ci"
     },
     {
-      "description": "This repository is mergeweasel's canary: its own image without release age.",
+      "description": "This repository is mergeweasel's canary: its own image without release age, and the queue lands its majors too - the workflow files on main already fit them and work with the previous release.",
       "matchPackageNames": ["docker.io/chli1ro/mergeweasel"],
-      "minimumReleaseAge": null
+      "minimumReleaseAge": null,
+      "addLabels": ["automerge"]
     },
     {
-      "description": "The merge queue lands non-major updates; a major update waits for a human.",
+      "description": "The merge queue lands non-major updates; a major update waits for a human - except mergeweasel's own, see above.",
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "addLabels": ["automerge"]
     }
