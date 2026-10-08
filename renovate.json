@@ -24,14 +24,15 @@
       "semanticCommitType": "test"
     },
     {
-      "description": "The Gitea the end-to-end test passes against is the one mergeweasel supports: a new major or minor releases, and the notes name it.",
+      "description": "The Gitea the end-to-end test passes against is the one mergeweasel supports: a new major releases, and the notes name it.",
       "matchFileNames": ["e2e/gitea.Dockerfile"],
-      "matchUpdateTypes": ["major", "minor"],
+      "matchUpdateTypes": ["major"],
       "semanticCommitType": "feat",
       "semanticCommitScope": "gitea",
       "commitMessageAction": "support",
       "commitMessageTopic": "Gitea",
-      "commitMessageExtra": "v{{newMajor}}.{{newMinor}}"
+      "commitMessageExtra": "v{{newMajor}}",
+      "commitMessageLowerCase": "never"
     },
     {
       "description": "Test compatibility with a new Gitea release as early as possible.",

@@ -350,8 +350,9 @@ included.
 
 Verified against the Gitea pinned in `e2e/gitea.Dockerfile`. The end-to-end test (`e2e/`)
 exercises stale approvals, the rebase, the squash, the refs and the refused self-approval against
-it, so a Gitea version that breaks one of them fails there first. Renovate bumps that pin, and a
-new major or minor Gitea version is a release whose notes say "support Gitea vX.Y".
+it, so a Gitea version that breaks one of them fails there first. Renovate bumps that pin for every
+Gitea release. A new major version is a release whose notes say "support Gitea vX"; a minor or patch
+version releases nothing, unless it needs a fix.
 
 - **Stale approvals**: with `dismiss_stale_approvals`, a push dismisses approvals only if the pull
   request's diff against the new merge base changed. So a rebase dismisses them exactly when a file
