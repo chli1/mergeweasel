@@ -28,7 +28,7 @@ next queued pull request and takes one step:
 4. **All checks green:** restore the approvals the rebase cost it, merge it, and remove
    `automerge`.
 5. **Merged:** the next pass tags `main` with the next version and publishes release notes, if the
-   merge contains a `feat`, `fix`, `perf` or `revert` commit or a breaking change.
+   merge contains a commit of a releasing type or a breaking change.
 
 The details, and the Gitea behaviour they rest on, are in [docs/design.md](docs/design.md).
 

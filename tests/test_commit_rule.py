@@ -44,6 +44,16 @@ def test_no_configured_scope_rejects_every_scope():
     assert check_subject("feat: add dark mode (#99)", rules(scopes=())) is None
 
 
+def test_configured_types_reject_any_other():
+    custom = rules(types=("feature", "fix"))
+    assert check_subject("feature: add dark mode (#99)", custom) is None
+    assert check_subject("feat: add dark mode (#99)", custom) == "unknown type 'feat', expected one of: feature, fix"
+
+
+def test_without_a_type_list_any_type_passes():
+    assert check_subject("yolo: add dark mode (#99)", rules(types=None)) is None
+
+
 def test_configured_scopes_reach_titles_and_commits():
     message = squash_message("feat(domian): x (#99)", "", ISSUES, 1, rules(scopes=("domain",)))
     assert message.problems == ("PR title: unknown scope 'domian', expected one of: domain",)
@@ -219,6 +229,21 @@ def test_a_line_over_72_characters_is_rejected():
 def test_a_long_line_without_whitespace_is_allowed():
     url = "https://git.example.com/org/repo/src/branch/main/" + "x" * 40
     assert commit_section(f"## Commit\nSee:\n{url}")[1] == []
+
+
+LINE_OF_84 = ("word " * 17).strip()
+
+
+def test_the_line_limit_is_a_parameter():
+    assert commit_section(f"## Commit\n{LINE_OF_84}", 100)[1] == []
+    assert commit_section(f"## Commit\n{LINE_OF_84}", 80)[1] == ["'## Commit' line 1 is 84 characters, wrap at 80"]
+
+
+def test_the_squash_message_holds_the_body_to_the_rules_line_limit():
+    body = f"## Commit\n{LINE_OF_84}"
+    assert squash_message("feat: add a (#99)", body, ISSUES, 1, rules(max_line=100)).problems == ()
+    assert squash_message("feat: add a (#99)", body, ISSUES, 1).problems == (
+        "'## Commit' line 1 is 84 characters, wrap at 72",)
 
 
 def test_attribution_lines_are_rejected():

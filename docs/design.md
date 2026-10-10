@@ -238,8 +238,9 @@ pass only merges.
 right before the merge, because the title, body and commits can change after the check ran.
 
 **Subject**: one of the forms in `commits.subject` - by default Conventional Commits with the issue
-as suffix. The forms, their placeholders and the types are in
-[configuration](configuration.md#the-subject), the scopes in
+as suffix. The forms and their placeholders are in
+[configuration](configuration.md#the-subject), the types in
+[configuration](configuration.md#types-and-releases), the scopes in
 [configuration](configuration.md#scopes). Each form compiles to an anchored regular expression; the
 first form a subject fits decides, so the order of the list is the order of precedence.
 
@@ -261,7 +262,7 @@ subject forms is checked against what it brings, which is what its reviewers see
 **Squash** (the default): the pull request's title becomes the subject, and the `## Commit` section
 of its body becomes the commit body - from that heading to the next heading of level 1 or 2. Line
 endings are normalised and HTML comments removed first. There may be at most one such section, it
-must keep to the line limit in [configuration](configuration.md#fixed-values), and it must not
+must keep to the line limit in [configuration](configuration.md#the-line-length), and it must not
 contain a `Co-authored-by:` or "Generated with" line. Without the section, the commit has only a
 subject. The branch's own commits never land and are not checked.
 
@@ -299,16 +300,20 @@ carries several, a SemVer template takes the highest version. Because `main` is 
 is its predecessor, whatever other branches tag: a maintenance branch cut once `main` moved past its
 version line never decides `main`'s next version. The pass reads every tag with one
 `GET git/refs/tags` and walks `main` back, 50 commits per call, up to the limit in
-[configuration](configuration.md#the-release-tag). The commit types decide the bump:
+[configuration](configuration.md#the-release-tag). The commit types decide the bump, by the lists in
+[configuration](configuration.md#types-and-releases):
 
 - `!` - major, in 0.x too;
-- `feat` - minor;
-- `fix`, `perf`, `revert` and git's `Revert "..."` - patch;
+- a type in `release.minor_types` - minor;
+- a type in `release.patch_types` - patch;
 - every other type releases nothing, and neither does a subject outside the rule.
 
+git's `Revert "..."` counts as the type `revert`.
+
 The release reads the subjects with `main`'s `commits.subject`, the same file it takes `release.tag`
-from. A commit outside these forms releases nothing; the release prints it, so a change of the forms
-that left unreleased commits behind shows in the log
+from. It reads the types it releases from the same file, and reads a commit's type even when
+`commits.types` no longer lists it. A commit outside these forms releases nothing; the release
+prints it, so a change of the forms that left unreleased commits behind shows in the log
 ([configuration](configuration.md#the-subject) describes the change in two steps).
 
 The notes list the releasing commits, oldest first, under "Breaking changes", "Features" and

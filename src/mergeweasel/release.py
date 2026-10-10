@@ -13,8 +13,6 @@ from mergeweasel import commit_rule, config
 from mergeweasel.gitea import ApiError, ReleaseExists
 
 BREAKING, FEATURE, FIX = "breaking", "feature", "fix"
-# semantic-release's default rules; every other type releases nothing.
-PATCH_TYPES = ("fix", "perf", "revert")
 SECTIONS = ((BREAKING, "Breaking changes"), (FEATURE, "Features"), (FIX, "Fixes"))
 # How far back main's history is searched for the previous release.
 MAX_COMMITS = 1000
@@ -29,10 +27,21 @@ class Change:
     body: str
 
 
-def change(message, rules=commit_rule.DEFAULT_COMMIT_RULES):
+def kind(commit_type, minor_types, patch_types):
+    if commit_type in minor_types:
+        return FEATURE
+    if commit_type in patch_types:
+        return FIX
+    return None
+
+
+def change(message, rules=commit_rule.DEFAULT_COMMIT_RULES, minor_types=config.DEFAULT_MINOR_TYPES,
+           patch_types=config.DEFAULT_PATCH_TYPES):
     subject, _, rest = message.partition("\n")
     if commit_rule.REVERT.match(subject):
-        return Change(FIX, subject, "")
+        # git's own revert subject counts as the type revert.
+        released = kind("revert", minor_types, patch_types)
+        return Change(released, subject, "") if released else None
     parts = commit_rule.parse_subject(subject, rules)
     if parts is None:
         return None
@@ -41,11 +50,8 @@ def change(message, rules=commit_rule.DEFAULT_COMMIT_RULES):
         # Gitea appends Co-authored-by trailers to squash commits; they are no note.
         body = "\n".join(text for text in rest.split("\n") if not commit_rule.ATTRIBUTION.match(text))
         return Change(BREAKING, line, body.strip())
-    if parts.type == "feat":
-        return Change(FEATURE, line, "")
-    if parts.type in PATCH_TYPES:
-        return Change(FIX, line, "")
-    return None
+    released = kind(parts.type, minor_types, patch_types)
+    return Change(released, line, "") if released else None
 
 
 def outside_the_rule(message, rules):
@@ -112,8 +118,10 @@ def release_tags(gitea, template):
 
 def _release(gitea, dry_run, base_branch, now):
     configuration = config.load(gitea, base_branch)
-    # The forms only: a scope or project the list no longer names still releases what it landed as.
-    template, rules = configuration.tag, dataclasses.replace(configuration.commits, scopes=None, projects=None)
+    # The forms only: a scope, project or type the lists no longer name is still read as it landed;
+    # the release lists decide whether it releases.
+    template, rules = configuration.tag, dataclasses.replace(configuration.commits, scopes=None, projects=None,
+                                                              types=None)
     tags = release_tags(gitea, template)
     if not tags and template.semver:
         print(f"release: no tag matching {template.text} to bump from, nothing released")
@@ -145,7 +153,8 @@ def _release(gitea, dry_run, base_branch, now):
         if outside_the_rule(commit.message, rules):
             subject = commit.message.partition("\n")[0]
             print(f"release: {commit.sha[:7]} is outside the subject rule and releases nothing: {subject!r}")
-    changes = [item for item in (change(commit.message, rules) for commit in reversed(since)) if item]
+    changes = [item for item in (change(commit.message, rules, configuration.minor_types, configuration.patch_types)
+                                 for commit in reversed(since)) if item]
     if not changes:
         print(f"release: nothing to release since {base}" if base
               else f"release: nothing to release on {head[:7]}, the first {template.text} release waits for a releasing commit")

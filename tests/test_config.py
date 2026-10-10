@@ -79,6 +79,37 @@ def test_the_subject_templates_are_read_in_order():
     assert commits.projects == ("PROJ", "OPS")
 
 
+def test_without_the_keys_types_line_limit_and_release_lists_are_the_defaults():
+    configuration = config.parse("")
+    assert configuration.commits.types == commit_rule.TYPES
+    assert configuration.commits.max_line == commit_rule.MAX_LINE
+    assert configuration.minor_types == config.DEFAULT_MINOR_TYPES
+    assert configuration.patch_types == config.DEFAULT_PATCH_TYPES
+
+
+def test_types_line_limit_and_release_lists_are_read():
+    configuration = config.parse('[commits]\ntypes = ["feature", "fix", "ci"]\nmax_line = 100\n'
+                                 '[release]\nminor_types = ["feature"]\npatch_types = ["fix"]\n')
+    assert configuration.commits.types == ("feature", "fix", "ci")
+    assert configuration.commits.max_line == 100
+    assert (configuration.minor_types, configuration.patch_types) == (("feature",), ("fix",))
+
+
+def test_an_empty_release_list_releases_nothing_of_its_kind():
+    assert config.parse("[release]\nminor_types = []\n").minor_types == ()
+
+
+@pytest.mark.parametrize("text, minor, patch", [
+    ('[commits]\ntypes = ["feat", "fix", "chore"]\n', ("feat",), ("fix",)),
+    ('[commits]\ntypes = ["fix", "chore"]\n', (), ("fix",)),
+    ('[release]\nminor_types = ["feat", "fix"]\n', ("feat", "fix"), ("perf", "revert")),
+    ('[release]\npatch_types = ["feat"]\n', (), ("feat",)),
+])
+def test_a_default_release_list_keeps_only_what_the_file_allows(text, minor, patch):
+    configuration = config.parse(text)
+    assert (configuration.minor_types, configuration.patch_types) == (minor, patch)
+
+
 def test_crlf_line_ends_parse():
     assert config.parse('[release]\r\ntag = "{YY}.{count}"\r\n').tag.text == "{YY}.{count}"
 
@@ -105,6 +136,24 @@ def test_crlf_line_ends_parse():
     ('[commits]\nsubject = ["{conventional} {key} {description}"]\nprojects = ["proj"]\n',
      "mergeweasel.toml: commits.projects: 'proj' is not a project"),
     ('[commits]\nprojects = ["PROJ"]\n', "mergeweasel.toml: commits.projects needs a commits.subject template with {key}"),
+    ('[commits]\ntypes = "feat"\n', "mergeweasel.toml: commits.types must be a list of strings"),
+    ("[commits]\ntypes = []\n", "mergeweasel.toml: commits.types must not be empty"),
+    ("[commits]\ntypes = [1]\n", "mergeweasel.toml: commits.types: 1 is not a type"),
+    ('[commits]\ntypes = ["Feat"]\n', "mergeweasel.toml: commits.types: 'Feat' is not a type"),
+    ('[commits]\ntypes = ["feat-x"]\n', "mergeweasel.toml: commits.types: 'feat-x' is not a type"),
+    ('[commits]\nmax_line = "72"\n', "mergeweasel.toml: commits.max_line must be an integer"),
+    ("[commits]\nmax_line = true\n", "mergeweasel.toml: commits.max_line must be an integer"),
+    ("[commits]\nmax_line = 7.5\n", "mergeweasel.toml: commits.max_line must be an integer"),
+    ("[commits]\nmax_line = 0\n", "mergeweasel.toml: commits.max_line must be at least 1"),
+    ("[commits]\nmax_line = -1\n", "mergeweasel.toml: commits.max_line must be at least 1"),
+    ('[release]\nminor_types = "feat"\n', "mergeweasel.toml: release.minor_types must be a list of strings"),
+    ('[release]\npatch_types = ["bugfix"]\n', "mergeweasel.toml: release.patch_types: 'bugfix' is not in commits.types"),
+    ("[release]\npatch_types = [1]\n", "mergeweasel.toml: release.patch_types: 1 is not a type"),
+    ('[release]\nminor_types = ["Feat"]\n', "mergeweasel.toml: release.minor_types: 'Feat' is not a type"),
+    ('[commits]\ntypes = ["feat", "fix"]\n[release]\npatch_types = ["perf"]\n',
+     "mergeweasel.toml: release.patch_types: 'perf' is not in commits.types"),
+    ('[release]\nminor_types = ["feat", "fix"]\npatch_types = ["fix"]\n',
+     "mergeweasel.toml: release.minor_types and release.patch_types both name fix"),
 ])
 def test_invalid_files_name_the_key(text, message):
     with pytest.raises(config.ConfigError) as raised:

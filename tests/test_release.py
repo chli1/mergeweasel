@@ -347,3 +347,47 @@ def test_the_release_reads_the_shape_only_not_the_scope_and_project_lists(capsys
     assert release.run(gitea, False, "main", NOW)
     assert posts(gitea) == [("v1.1.0", sha(2), "## Features\n\n- ui: add x (#1)\n")]
     assert "outside the subject rule" not in capsys.readouterr().out
+
+
+# --- the release lists ---
+
+CUSTOM = config.parse('[commits]\ntypes = ["feature", "fix", "build", "docs"]\n'
+                      '[release]\nminor_types = ["feature"]\npatch_types = ["fix", "build"]\n')
+
+
+def custom_change(message):
+    return release.change(message, CUSTOM.commits, CUSTOM.minor_types, CUSTOM.patch_types)
+
+
+@pytest.mark.parametrize("message, kind", [
+    ("feature: add a (#1)", release.FEATURE),
+    ("build: bump b (#2)", release.FIX),
+    ("docs!: rename c (#3)", release.BREAKING),
+])
+def test_the_release_lists_decide_the_kind(message, kind):
+    assert custom_change(message).kind == kind
+
+
+def test_a_type_in_no_release_list_releases_nothing():
+    assert custom_change("docs: explain (#1)") is None
+
+
+def test_git_revert_counts_as_the_type_revert():
+    message = 'Revert "feat: add a (#1)"'
+    assert release.change(message, minor_types=("feat", "revert"), patch_types=()).kind == release.FEATURE
+    assert release.change(message, patch_types=("fix",)) is None
+
+
+def test_the_release_reads_the_release_lists_on_main():
+    gitea = fake_gitea(config='[release]\npatch_types = ["fix", "build"]\n',
+                       history=(history_commit(2, "build: bump b (#2)"), history_commit(1, "feat: start (#1)")))
+    assert release.run(gitea, False, "main", NOW)
+    assert posts(gitea) == [("v1.0.1", sha(2), "## Fixes\n\n- bump b (#2)\n")]
+
+
+def test_a_type_no_longer_listed_releases_nothing_and_is_not_outside_the_rule(capsys):
+    gitea = fake_gitea(config='[commits]\ntypes = ["feat", "fix"]\n',
+                       history=(history_commit(2, "perf: speed up (#2)"), history_commit(1, "feat: start (#1)")))
+    assert release.run(gitea, False, "main", NOW)
+    assert posts(gitea) == []
+    assert "outside the subject rule" not in capsys.readouterr().out

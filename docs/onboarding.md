@@ -97,10 +97,10 @@ to `main`. [Configuration](configuration.md#the-configuration-file) lists the ke
 
 ## Releases
 
-After each merge, the queue checks whether the merged commits call for a release: a `feat`, `fix`,
-`perf` or `revert` commit, or a breaking change (`!`). If so, it creates a tag on `main` and a
-Gitea release with notes. `release.tag` sets the version format
-([configuration](configuration.md#the-release-tag)):
+After each merge, the queue checks whether the merged commits call for a release: a commit of a
+releasing type ([configuration](configuration.md#types-and-releases)), or a breaking change (`!`).
+If so, it creates a tag on `main` and a Gitea release with notes. `release.tag` sets the version
+format ([configuration](configuration.md#the-release-tag)):
 
 - **SemVer**, `vX.Y.Z`, the default: mergeweasel counts up from the previous `vX.Y.Z` tag on
   `main`. To start, tag a commit on `main` by hand, for example `v0.1.0`. Until that tag exists,

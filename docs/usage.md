@@ -67,7 +67,7 @@ Screenshots and the review discussion stay here.
 ```
 
 The section is optional. It must keep to the line limit in
-[configuration](configuration.md#fixed-values) and must not contain a `Co-authored-by:` or
+[configuration](configuration.md#the-line-length) and must not contain a `Co-authored-by:` or
 "Generated with" line.
 
 Editing the title, the description or the labels runs the commit check again by itself.
@@ -77,10 +77,12 @@ job runs, not as it was when the job first started, so the re-run judges the fix
 ## What releases
 
 After the merge, the queue releases if the repository is set up for it
-([onboarding](onboarding.md#releases)). The commit types decide whether a merge releases: `feat`,
-`fix`, `perf`, `revert` and breaking changes (`!`) do, the other types do not. With SemVer
-versions, the default, they also decide the increase: `!` raises the major version, `feat` the
-minor version, and the others the patch version.
+([onboarding](onboarding.md#releases)). The commit types decide whether a merge releases: breaking
+changes (`!`) and the releasing types do, the others do not;
+[configuration](configuration.md#types-and-releases) lists the releasing types and how a
+repository changes them. With SemVer versions, the default, they also decide the increase: `!`
+raises the major version, a type of `release.minor_types` the minor version, and a type of
+`release.patch_types` the patch version.
 
 The release notes list the description of each releasing commit. Under a breaking change they also
 show its `## Commit` section, so say there what users must change.

@@ -43,6 +43,10 @@ class CommitRules:
     scopes: tuple | None
     # None: any project passes.
     projects: tuple | None
+    # None: any type passes.
+    types: tuple | None = TYPES
+    # The longest `## Commit` line that contains whitespace.
+    max_line: int = MAX_LINE
 
 
 DEFAULT_COMMIT_RULES = CommitRules(tuple(subject_template.compile(text) for text in DEFAULT_SUBJECT), None, None)
@@ -68,8 +72,8 @@ def check_subject(subject, rules=DEFAULT_COMMIT_RULES):
     parts = first_match(subject, rules)
     if parts is None:
         return subject_problem(subject, rules)
-    if parts.type not in TYPES:
-        return f"unknown type {parts.type!r}, expected one of: {', '.join(TYPES)}"
+    if rules.types is not None and parts.type not in rules.types:
+        return f"unknown type {parts.type!r}, expected one of: {', '.join(rules.types)}"
     scope = parts.scope
     if scope is not None and (not scope or re.search(r"\s", scope)):
         return f"scope must be non-empty and without whitespace, got {scope!r}; leave out the parentheses for no scope"
@@ -135,7 +139,7 @@ def commit_problems(commits, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES
     return problems
 
 
-def commit_section(pr_body):
+def commit_section(pr_body, max_line=MAX_LINE):
     """The text of the PR body's `## Commit` section and its problems; "" without a section."""
     text = HTML_COMMENT.sub("", (pr_body or "").replace("\r\n", "\n"))
     if "<!--" in text:
@@ -163,14 +167,14 @@ def commit_section(pr_body):
     while section_lines and not section_lines[-1].strip():
         section_lines.pop()
     section = "\n".join(section_lines)
-    return section, line_problems(section)
+    return section, line_problems(section, max_line)
 
 
-def line_problems(section):
+def line_problems(section, max_line=MAX_LINE):
     problems = []
     for number, line in enumerate(section.split("\n"), start=1):
-        if len(line) > MAX_LINE and re.search(r"\s", line.strip()):
-            problems.append(f"'## Commit' line {number} is {len(line)} characters, wrap at {MAX_LINE}")
+        if len(line) > max_line and re.search(r"\s", line.strip()):
+            problems.append(f"'## Commit' line {number} is {len(line)} characters, wrap at {max_line}")
         if ATTRIBUTION.match(line):
             problems.append(f"'## Commit' line {number} is an attribution line: {line!r}")
     return problems
@@ -187,7 +191,7 @@ class SquashMessage:
 def squash_message(title, pr_body, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
     """The squash commit a pull request lands as: its title, then its `## Commit` section."""
     subject = (title or "").strip()
-    body, problems = commit_section(pr_body)
+    body, problems = commit_section(pr_body, rules.max_line)
     # No fixup!/squash!/Revert exemption: those inherit a branch commit's reference, a title has none.
     if EXEMPT.match(subject):
         title_problem = subject_problem(subject, rules)

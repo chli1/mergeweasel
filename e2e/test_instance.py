@@ -4,23 +4,29 @@ import pytest
 
 CONFIG = """[release]
 tag = "{YYYY}.{MM}.{DD}.{count}+{sha}"
+minor_types = ["feature"]
+patch_types = ["fix"]
 
 [commits]
 subject = ["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]
 projects = ["PROJ"]
 scopes = ["app"]
+types = ["feature", "fix", "ci"]
+max_line = 100
 """
-TITLE = "[PROJ-1] feat(app): add a"
-BODY = "Adds a.\n\n## Commit\n\n- adds a\n"
+TITLE = "[PROJ-1] feature(app): add a"
+# The second line is longer than the default limit and within max_line.
+BODY = ("Adds a.\n\n## Commit\n\n- adds a\n"
+        "- adds a, with a line longer than the default limit of 72 characters, kept by max_line\n")
 RUN_URL = "https://ci.example.com/runs/1"
 
 
-@pytest.mark.needs_this_commit  # commits.subject and commits.projects
+@pytest.mark.needs_this_commit  # commits.types, commits.max_line and the release types
 @pytest.mark.instance(branch="trunk", labels=("merge-me", "broken", "no-squash"))
 def test_the_queue_works_with_every_default_changed(repo, run_pass):
     repo.move_main({"mergeweasel.toml": CONFIG}, "[PROJ-1] ci(app): configure mergeweasel")
     repo.commit("author", "trunk", {"b.txt": "b\n"}, "add b", new_branch="add-b")
-    red_number = repo.open_pull("author", "add-b", "[PROJ-2] feat: add b", BODY)
+    red_number = repo.open_pull("author", "add-b", "[PROJ-2] feature: add b", BODY)
     repo.ready(red_number, state="failure", target_url=RUN_URL)
     kept = repo.commit("author", "trunk", {"a.txt": "a\n"}, TITLE, new_branch="add-a")
     number = repo.open_pull("author", "add-a", TITLE, BODY)

@@ -114,6 +114,10 @@ error, and the message names the key.
 | `commits.scopes` | any scope | the scopes a subject may use - see [scopes](#scopes) |
 | `commits.subject` | `(#<issue>)` or `(PR #<pr>)` at the end | the forms a subject may take - see [the subject](#the-subject) |
 | `commits.projects` | any project | the projects a `{key}` may name - see [the subject](#the-subject) |
+| `commits.types` | the types of `@commitlint/config-conventional` | the types a subject may use - see [types and releases](#types-and-releases) |
+| `commits.max_line` | `72` | the longest line of the `## Commit` section - see [the line length](#the-line-length) |
+| `release.minor_types` | `["feat"]` | the types that release a minor version - see [types and releases](#types-and-releases) |
+| `release.patch_types` | `["fix", "perf", "revert"]` | the types that release a patch version - see [types and releases](#types-and-releases) |
 
 ### Scopes
 
@@ -170,7 +174,7 @@ subject = ["{conventional} {description} (#{issue})", "{conventional} {descripti
 
 | Placeholder | Stands for | Checked |
 |---|---|---|
-| `{conventional}` | `<type>[(<scope>)][!]:` - the type, the optional scope and breaking marker, and the colon | the type is one of the [commit types](#fixed-values); the scope is not empty, has no whitespace, and is one of `commits.scopes` if the repository sets it |
+| `{conventional}` | `<type>[(<scope>)][!]:` - the type, the optional scope and breaking marker, and the colon | the type is one of [`commits.types`](#types-and-releases); the scope is not empty, has no whitespace, and is one of `commits.scopes` if the repository sets it |
 | `{description}` | the description: everything between its neighbours in the template, starting with a non-space character | - |
 | `{issue}` | a number | it is an issue of this repository |
 | `{pull}` | a number | it is this pull request's number |
@@ -250,6 +254,94 @@ commits of the old forms already. Two ways lose them: replacing the forms in a s
 and a release that fails between the two merges - then merge the second pull request after a
 release has succeeded, or add the old forms back until it has.
 
+### Types and releases
+
+The type is the word at the start of a subject: `feat` in `feat(ui): add dark mode (#12)`. Which
+types a subject may use, and which of them release, is set in the file. By default the types are
+those of `@commitlint/config-conventional`, the list release tools and changelog generators expect,
+and they release as semantic-release does:
+
+```toml
+[commits]
+types = ["feat", "fix", "perf", "refactor", "style", "docs", "test", "build", "ci", "chore", "revert"]
+
+[release]
+minor_types = ["feat"]
+patch_types = ["fix", "perf", "revert"]
+```
+
+**The accepted types.** `commits.types` lists the types a subject may use. Any other type fails
+`check-commits`, and the queue flags the pull request `needs-fix` instead of merging it. The message
+names the type and lists the accepted ones:
+
+```
+PR title: unknown type 'feature', expected one of: feat, fix, docs, chore
+```
+
+The list must not be empty, and each entry must consist of the lowercase letters `a` to `z` only:
+the subject's `{conventional}` part reads nothing else as the type.
+
+**What releases.** `release.minor_types` and `release.patch_types` decide which merged commits
+release, and with a SemVer template how far the version rises: a type in `minor_types` raises the
+minor version, a type in `patch_types` the patch version, and a type in neither list releases
+nothing. A breaking change, marked with `!`, always raises the major version, whatever its type.
+git's own revert subject, `Revert "..."`, counts as the type `revert`. With a CalVer template the
+lists decide only whether a merge releases. The release notes list a type of `minor_types` under
+"Features" and a type of `patch_types` under "Fixes", whatever its name: with `build` in
+`patch_types`, a dependency update shows under "Fixes".
+
+| `mergeweasel.toml` | Effect |
+|---|---|
+| `patch_types = ["fix", "perf", "revert", "build"]` | a `build` commit - a dependency update, say - releases a patch |
+| `minor_types = []` | no type releases a minor version; `feat` releases nothing unless it is breaking |
+| `minor_types = ["feat", "fix"]` | `fix` releases a minor version and leaves the default `patch_types` |
+| `types = ["feat", "fix", "docs", "chore"]` | only these four types are accepted; `perf` and `revert` leave the default `patch_types` |
+
+The rules for the two lists:
+
+- Each entry must be one of `commits.types`, and no type may be in both lists. Otherwise the file is
+  invalid, and the message names the entry.
+- A list may be empty: then no type releases that kind of version.
+- A list the file leaves out keeps its default, minus the types that are not in `commits.types` and
+  minus the types the other list names. So narrowing `commits.types`, or moving a type to the other
+  list, takes one key, as the last two rows of the table show.
+
+**Which version counts.** The commit check reads `commits.types` from the pull request's branch, so
+a pull request that adds a type may already use it in its own title. The release reads the lists on
+`main`. Each pass releases before it merges, so the release after the merge of a change to the
+lists already uses the changed lists - for the commit that changes them, too.
+
+**Removing a type.** A commit on `main` with a type that `commits.types` no longer lists is still
+read by the release, and releases nothing - the release lists can only name listed types. Every
+pass releases `main` before it merges, so commits merged before the change are released already;
+only a release that failed in between leaves them unreleased.
+
+**Renovate.** Renovate takes the type of its subjects from its own configuration - `chore(deps):`
+by default, other types through presets or `semanticCommitType`, for example
+`ci(deps): update docker.io/chli1ro/mergeweasel docker tag to v2.1.0`. A repository that uses
+Renovate and sets `commits.types` has to include every type its Renovate writes, or those pull
+requests are flagged `needs-fix`.
+
+### The line length
+
+The `## Commit` section of a pull request becomes the body of its squash commit. Each of its lines
+may be at most `commits.max_line` characters long, 72 by default - git's convention, which keeps
+`git log` readable in an 80-column terminal. A line without whitespace, a long URL for example, is
+exempt, since it cannot be wrapped. A longer line fails `check-commits`:
+
+```
+'## Commit' line 3 is 85 characters, wrap at 72
+```
+
+A repository with a different convention sets its own limit:
+
+```toml
+[commits]
+max_line = 100
+```
+
+The value must be a whole number of at least 1.
+
 ### The release tag
 
 `release.tag` is a template that decides how the version of each release looks. mergeweasel
@@ -272,7 +364,8 @@ tag = "{YY}.{MM}.{count}"
 
 A template that contains `{major}`, `{minor}` and `{patch}` is a **SemVer template**. mergeweasel
 increases the previous version according to the commit types: a breaking change (`!`) raises the
-major version, `feat` the minor version, and `fix`, `perf` and `revert` the patch version. A new
+major version, a type of `release.minor_types` the minor version, and a type of
+`release.patch_types` the patch version ([types and releases](#types-and-releases)). A new
 repository therefore needs a first tag, set by hand on a commit of `main`, for example `v0.1.0`.
 Until that tag exists, nothing is released.
 
@@ -341,9 +434,6 @@ merging.
 
 | What | Value |
 |---|---|
-| Releasing types | `!` major; `feat` minor; `fix`, `perf`, `revert`, `Revert "..."` patch |
-| Commit types | `feat`, `fix`, `perf`, `refactor`, `style`, `docs`, `test`, `build`, `ci`, `chore`, `revert` (the list of `@commitlint/config-conventional`) |
-| `## Commit` lines | at most 72 characters, except for lines without whitespace |
 | Workflows | `mergeweasel-queue.yml` (workflow `mergeweasel-queue`), `mergeweasel-commits.yml` (workflow `mergeweasel-commits`) |
 | Carry-over status | context `mergeweasel/approval`; description `approved at <old head>`, then one line `approved by <login>` per reviewer |
 | API calls | 30 s timeout; reading a rebased head and writing the carry-over are tried 3 times, 5 s apart |
