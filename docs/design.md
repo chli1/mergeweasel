@@ -333,18 +333,20 @@ tag and as the image label `org.opencontainers.image.version`. Consumers pin an 
 
 The job then attaches `mergeweasel-commits.yml` and `mergeweasel-queue.yml` to the release, as
 they stand at the tag but pinned to the image it just pushed (`X.Y.Z@sha256:...`). These assets
-are the template consumers copy; the files on `main` are this repository's own installation and
-pin the previous release until Renovate's bump lands. A re-run replaces the assets.
+are the template consumers copy. A re-run replaces the assets.
+
+The files on `main` are this repository's own installation and run the `latest` image, so this
+repository runs each release as soon as it is published and meets its errors before any consumer
+does. The runners pull a job's image on every run, so `latest` is never a stale local copy.
+Renovate leaves the image alone.
 
 A change that needs consumers to update their copies of `mergeweasel-*.yml` is breaking (`!`),
 because Renovate bumps only the image pin. Such a change keeps the workflow files working with the
-previous release, because this repository runs the new files on the old image until the pin bump
-lands. The end-to-end test checks it: every scenario runs against both the new image and the pinned
-one, with what the workflow files pass. Consumers take files and pin together from the release. This
-repository's Renovate types its updates so that only an update of the image's base image releases
-(`fix(deps)`). The pin bump of mergeweasel's own image is `ci(deps)` and releases nothing, so a
-release and the pin bump it causes cannot loop; the queue lands it without a human, majors
-included.
+previous release, because this repository runs the new files on the old image until the release
+is published. The end-to-end test checks it: every scenario runs against both the new image and
+the newest release, with what the workflow files pass. Consumers take files and pin together from
+the release. This repository's Renovate types its updates so that only an update of the image's
+base image releases (`fix(deps)`).
 
 ## Gitea behaviour relied on
 
@@ -396,7 +398,7 @@ version releases nothing, unless it needs a fix.
 ## Security model
 
 - **`MERGEWEASEL_MERGER_TOKEN`** has merge rights. It appears only in `mergeweasel-queue.yml`,
-  whose triggers all take the workflow - and with it the image pin - from `main`. The pass never
+  whose triggers all take the workflow - and with it the image - from `main`. The pass never
   checks out or executes pull request content, so a pull request cannot run code with the token
   through this path.
 - **`MERGEWEASEL_APPROVER_TOKENS`**: every approver token can satisfy the review requirement on its

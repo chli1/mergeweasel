@@ -27,7 +27,7 @@ jobs:
     return path
 
 
-def test_reads_the_pinned_image_and_the_real_pass(tmp_path):
+def test_reads_the_image_and_the_real_pass(tmp_path):
     queue = workflow.read(write(tmp_path, "{ A: '${{ vars.LABEL }}' }", "{ B: '${{ secrets.TOKEN }}' }"))
 
     assert queue.image == "docker.io/chli1ro/mergeweasel:1.0.0@sha256:abc"

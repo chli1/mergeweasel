@@ -1,4 +1,4 @@
-"""When a needs_this_commit test may run against the pinned image: once the pinned release contains the
+"""When a needs_this_commit test may run against the released image: once the newest release contains the
 commit that added its marker line, it contains the feature the test needs too.
 """
 import inspect
@@ -31,5 +31,5 @@ def unreleased(test, revision):
     if contained == 0:
         return None
     if contained == 1:
-        return f"the pinned release {revision[:12]} does not contain {commit[:12]}, which added its marker"
+        return f"the newest release {revision[:12]} does not contain {commit[:12]}, which added its marker"
     return f"{revision[:12]} or {commit[:12]} is not in this checkout's history"

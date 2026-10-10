@@ -1,4 +1,4 @@
-"""What mergeweasel-queue.yml hands a pass: the pinned image, the environment and the command."""
+"""What mergeweasel-queue.yml hands a pass: the image, the environment and the command."""
 import dataclasses
 import pathlib
 import re

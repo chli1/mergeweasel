@@ -1,6 +1,6 @@
 name: mergeweasel-queue
 on:
-  # pull_request_target: the workflow and the pinned image come from the default branch. No
+  # pull_request_target: the workflow and its image come from the default branch. No
   # branches filter: on: takes no expressions - the job's if: keeps to the default branch.
   pull_request_target:
     # No synchronize: a push starts the checks, whose completion (workflow_run) wakes the queue. No
@@ -29,7 +29,7 @@ jobs:
     # A hung pass would otherwise hold every later pass, and every merge.
     timeout-minutes: 30
     container:
-      image: docker.io/chli1ro/mergeweasel:2.1.0@sha256:28a4329c86beeed50881f511054585399ebdfab9f7f0a5d6e8d702c65b266617
+      image: docker.io/chli1ro/mergeweasel:latest
     # The instance's names, from Actions variables; unset ones keep their defaults.
     env:
       MERGEWEASEL_AUTOMERGE_LABEL: ${{ vars.MERGEWEASEL_AUTOMERGE_LABEL }}

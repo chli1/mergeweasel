@@ -27,18 +27,19 @@ and the real pass step's `env`, with the test's values for each `${{ vars.X }}` 
 `${{ secrets.X }}`. An expression of any other shape, or a variable or secret the test does not
 supply, fails the test, so a change to the workflow cannot slip past it.
 
-Every scenario runs twice, as `[built]` against the built image and as `[pinned]` against the
-release the workflow pins, which proves that the workflow files keep working with the previous
-release. The first run pulls that release from Docker Hub; the CI job keeps the five newest release
-images on the runners' Docker daemon, because open pull requests may pin different releases.
+Every scenario runs twice, as `[built]` against the built image and as `[released]` against the
+newest release, the `latest` image the workflow runs, which proves that the workflow files keep
+working with the previous release. Every run pulls that image from Docker Hub, because `latest`
+moves with each release; the CI job keeps the five newest release images on the runners' Docker
+daemon.
 
-A scenario that needs something the pinned release does not have yet - a new option, a changed
-behaviour - carries `@pytest.mark.needs_this_commit`. Its `[pinned]` variant is skipped until the
-pinned release contains the commit that added the marker line, found with `git blame`; from then
+A scenario that needs something the newest release does not have yet - a new option, a changed
+behaviour - carries `@pytest.mark.needs_this_commit`. Its `[released]` variant is skipped until the
+newest release contains the commit that added the marker line, found with `git blame`; from then
 on it runs against both images by itself, so the marker never needs removing. Touching the marker
-line later moves that commit forward and only delays the `[pinned]` run. When the history cannot
-answer - an uncommitted marker, a shallow clone, a pinned image without a revision label - the
-`[pinned]` variant is skipped too, and the skip names the reason (`pytest -rs` shows it).
+line later moves that commit forward and only delays the `[released]` run. When the history cannot
+answer - an uncommitted marker, a shallow clone, a released image without a revision label - the
+`[released]` variant is skipped too, and the skip names the reason (`pytest -rs` shows it).
 
 ## Layout
 
@@ -60,14 +61,14 @@ answer - an uncommitted marker, a shallow clone, a pinned image without a revisi
   `mergeweasel-commits.yml`), which each release also publishes as the template, and `ci.yml`.
 - `e2e/`: the end-to-end test - `gitea.Dockerfile` (the pinned Gitea), `driver.py` (the people
   and systems around the queue), `workflow.py` (what `mergeweasel-queue.yml` hands a pass),
-  `history.py` (when a `needs_this_commit` scenario may run against the pinned release),
+  `history.py` (when a `needs_this_commit` scenario may run against the newest release),
   `test_queue.py`, `test_instance.py` and `test_release.py` (the scenarios).
 - `docs/`: [design](docs/design.md) explains how a pass works and why.
 
 ## Pull requests
 
-This repository lands its pull requests through its own queue, with the image version pinned in
-its workflows. The pull request title and its `## Commit` section become the commit; the rules are
+This repository lands its pull requests through its own queue, running mergeweasel's `latest`
+image. The pull request title and its `## Commit` section become the commit; the rules are
 in [usage](docs/usage.md).
 
 CI (`ci.yml`) runs on every pull request:

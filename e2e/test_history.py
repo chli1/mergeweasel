@@ -1,4 +1,4 @@
-"""When a needs_this_commit test may run against the pinned image. No Gitea needed."""
+"""When a needs_this_commit test may run against the released image. No Gitea needed."""
 import importlib.util
 import subprocess
 

@@ -45,14 +45,12 @@
       "semanticCommitType": "ci"
     },
     {
-      "description": "This repository always runs its own most recent version.",
+      "description": "This repository runs mergeweasel's latest image: nothing to pin or bump.",
       "matchPackageNames": ["docker.io/chli1ro/mergeweasel"],
-      "minimumReleaseAge": null,
-      "separateMajorMinor": false,
-      "addLabels": ["automerge"]
+      "enabled": false
     },
     {
-      "description": "The merge queue lands non-major updates; a major update waits for a human - except mergeweasel's own, see above.",
+      "description": "The merge queue lands non-major updates; a major update waits for a human.",
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "addLabels": ["automerge"]
     }

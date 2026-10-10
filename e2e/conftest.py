@@ -30,14 +30,14 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "required_approvals(n): the repository's required approvals, 1 by default")
     config.addinivalue_line("markers", "instance(branch, labels): the default branch and the automerge, needs-fix "
                                        "and keep-commits labels' names, set as the passes' variables")
-    config.addinivalue_line("markers", "needs_this_commit: needs what the pinned image lacks - not run against it "
-                                       "until the pinned release contains the commit that added this marker")
+    config.addinivalue_line("markers", "needs_this_commit: needs what the released image lacks - not run against it "
+                                       "until the newest release contains the commit that added this marker")
 
 
 def pytest_generate_tests(metafunc):
-    # Every scenario also runs against the pinned release: the workflow files must keep working with it.
+    # Every scenario also runs against the newest release: the workflow files must keep working with it.
     if "image" in metafunc.fixturenames:
-        metafunc.parametrize("image", ["built", "pinned"], indirect=True)
+        metafunc.parametrize("image", ["built", "released"], indirect=True)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,26 +89,28 @@ def queue_workflow():
 
 
 @pytest.fixture(scope="session")
-def pinned_image(queue_workflow):
-    """The release the workflow pins: the files on main must keep working with it."""
-    if subprocess.run(["docker", "image", "inspect", queue_workflow.image], capture_output=True).returncode != 0:
-        docker("pull", "--quiet", queue_workflow.image)
+def released_image(queue_workflow):
+    """The newest release, which the workflow runs: the files on main must keep working with it.
+
+    Pulled on every run, because its tag moves with each release.
+    """
+    docker("pull", "--quiet", queue_workflow.image)
     return queue_workflow.image
 
 
 @pytest.fixture(scope="session")
-def pinned_revision(pinned_image):
-    """The commit the pinned release was built from, or "" if its image does not say."""
+def released_revision(released_image):
+    """The commit the newest release was built from, or "" if its image does not say."""
     return docker("image", "inspect", "--format", '{{index .Config.Labels "org.opencontainers.image.revision"}}',
-                  pinned_image)
+                  released_image)
 
 
 @pytest.fixture
 def image(request):
-    """The image run_pass starts: the built one, and the pinned one in a test's [pinned] variant."""
-    if request.param == "pinned" and request.node.get_closest_marker("needs_this_commit"):
-        revision = request.getfixturevalue("pinned_revision")
-        reason = history.unreleased(request.function, revision) if revision else "the pinned image names no revision"
+    """The image run_pass starts: the built one, and the newest release in a test's [released] variant."""
+    if request.param == "released" and request.node.get_closest_marker("needs_this_commit"):
+        revision = request.getfixturevalue("released_revision")
+        reason = history.unreleased(request.function, revision) if revision else "the released image names no revision"
         if reason:
             pytest.skip(f"needs_this_commit: {reason}")
     return request.getfixturevalue(f"{request.param}_image")
