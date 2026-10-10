@@ -45,7 +45,7 @@ set each unit as listed. An account that fills both roles needs both columns.
 | Code | write | read | the merger rebases pull requests and sets the carry-over status; both read commits |
 | Pull requests | write | write | the merger merges and sets labels and comments; the approvers approve |
 | Releases | write | - | the merger creates the release after a releasing merge |
-| Issues | read | - | the merger checks that `(#N)` in a title names an issue |
+| Issues | read | - | the merger checks that an `{issue}` reference in a title - `(#N)` by default - names an issue |
 | Actions | read | - | the merger reads the queue's workflow runs, to run one pass at a time |
 
 In a public repository everyone can read, so only the write permissions need granting. On `main`'s

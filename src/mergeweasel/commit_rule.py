@@ -6,13 +6,12 @@ docs/design.md, "What lands on main".
 import dataclasses
 import re
 
+from mergeweasel import subject_template
+
 # @commitlint/config-conventional's types, so release tools read them with their defaults.
 TYPES = ("feat", "fix", "perf", "refactor", "style", "docs", "test", "build", "ci", "chore", "revert")
-FORMAT = "<type>[(<scope>)][!]: <description> (#<issue>)"
-# The shape only: the type is matched loosely and checked against its list afterwards, so that an
-# unknown one is named instead of failing the whole pattern.
-SUBJECT = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!)?: (?P<description>\S.*?) "
-                     r"\((?P<reference>#(?P<issue>\d+)|PR #(?P<pull>\d+))\)$")
+# The default of mergeweasel.toml's commits.subject.
+DEFAULT_SUBJECT = ("{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})")
 # `git commit --fixup`/`--autosquash` prepend "fixup!"/"squash!" to the
 # original subject, and `git revert` produces `Revert "<original subject>"`.
 # None of the three can carry a reference of their own - they inherit the
@@ -35,71 +34,84 @@ MAX_LINE = 72
 ATTRIBUTION = re.compile(r"^co-authored-by:|^\W*generated with\b", re.IGNORECASE)
 
 
-def subject_problem(subject):
-    return f"subject must read '{FORMAT}', or end in '(PR #<pr>)' without an issue, got: {subject!r}"
+@dataclasses.dataclass(frozen=True)
+class CommitRules:
+    """The rule every subject is held to: the forms it may take and what its parts may name."""
+    # The subject templates, in the configured order: the first that matches decides.
+    templates: tuple
+    # None: any scope passes; empty: none does.
+    scopes: tuple | None
+    # None: any project passes.
+    projects: tuple | None
 
 
-def check_subject(subject, scopes=None):
-    """scopes: the allowed ones, None for any (mergeweasel.toml's commits.scopes)."""
-    if EXEMPT.match(subject):
-        return None
-    match = SUBJECT.match(subject)
-    if not match:
-        return subject_problem(subject)
-    if match["type"] not in TYPES:
-        return f"unknown type {match['type']!r}, expected one of: {', '.join(TYPES)}"
-    scope = match["scope"]
-    if scope is not None and (not scope or re.search(r"\s", scope)):
-        return f"scope must be non-empty and without whitespace, got {scope!r}; leave out the parentheses for no scope"
-    if scope is not None and scopes is not None and scope not in scopes:
-        allowed = f"expected one of: {', '.join(scopes)}" if scopes else "this repository allows no scope"
-        return f"unknown scope {scope!r}, {allowed}"
+DEFAULT_COMMIT_RULES = CommitRules(tuple(subject_template.compile(text) for text in DEFAULT_SUBJECT), None, None)
+
+
+def subject_problem(subject, rules):
+    forms = " or ".join(f"'{template.describe()}'" for template in rules.templates)
+    return f"subject must read {forms}, got: {subject!r}"
+
+
+def first_match(subject, rules=DEFAULT_COMMIT_RULES):
+    """The subject's parts by the first template it takes the form of; None for none."""
+    for template in rules.templates:
+        parts = template.match(subject)
+        if parts is not None:
+            return parts
     return None
 
 
-@dataclasses.dataclass(frozen=True)
-class Subject:
-    type: str
-    scope: str | None
-    breaking: bool
-    description: str
-    # "#N" or "PR #N", as written.
-    reference: str
-
-
-def parse_subject(subject):
-    """The parts of a subject the rule accepts; None for any other, the exempt ones included."""
-    if EXEMPT.match(subject) or check_subject(subject):
+def check_subject(subject, rules=DEFAULT_COMMIT_RULES):
+    if EXEMPT.match(subject):
         return None
-    match = SUBJECT.match(subject)
-    return Subject(match["type"], match["scope"], bool(match["breaking"]), match["description"], match["reference"])
+    parts = first_match(subject, rules)
+    if parts is None:
+        return subject_problem(subject, rules)
+    if parts.type not in TYPES:
+        return f"unknown type {parts.type!r}, expected one of: {', '.join(TYPES)}"
+    scope = parts.scope
+    if scope is not None and (not scope or re.search(r"\s", scope)):
+        return f"scope must be non-empty and without whitespace, got {scope!r}; leave out the parentheses for no scope"
+    if scope is not None and rules.scopes is not None and scope not in rules.scopes:
+        allowed = f"expected one of: {', '.join(rules.scopes)}" if rules.scopes else "this repository allows no scope"
+        return f"unknown scope {scope!r}, {allowed}"
+    if parts.key is not None and rules.projects is not None and parts.project not in rules.projects:
+        return f"unknown project {parts.project!r} in {parts.key}, expected one of: {', '.join(rules.projects)}"
+    return None
 
 
-def referenced_issues(subjects):
+def parse_subject(subject, rules=DEFAULT_COMMIT_RULES):
+    """The parts of a subject the rule accepts; None for any other, the exempt ones included."""
+    if EXEMPT.match(subject) or check_subject(subject, rules):
+        return None
+    return first_match(subject, rules)
+
+
+def referenced_issues(subjects, rules=DEFAULT_COMMIT_RULES):
     """The distinct issue numbers the subjects reference - the ones check_reference needs to know.
 
     Stripped as squash_message strips the title, so a title's reference is looked up as it is checked.
     """
-    matches = (SUBJECT.match(subject.strip()) for subject in subjects)
-    return {int(match["issue"]) for match in matches if match and match["issue"] is not None}
+    found = (first_match(subject.strip(), rules) for subject in subjects if not EXEMPT.match(subject.strip()))
+    return {int(parts.issue) for parts in found if parts and parts.issue is not None}
 
 
-def known_issues(subjects, is_issue):
+def known_issues(subjects, is_issue, rules=DEFAULT_COMMIT_RULES):
     """The referenced numbers that are issues, each looked up once: a lookup costs a request."""
-    return {number for number in referenced_issues(subjects) if is_issue(number)}
+    return {number for number in referenced_issues(subjects, rules) if is_issue(number)}
 
 
-def check_reference(subject, known_issues, pr_number, scopes=None):
-    problem = check_subject(subject, scopes)
-    match = SUBJECT.match(subject)
-    if problem or not match:
+def check_reference(subject, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
+    problem = check_subject(subject, rules)
+    if problem or EXEMPT.match(subject):
         return problem
-    issue, pull = match["issue"], match["pull"]
-    if issue is not None and int(issue) not in known_issues:
+    parts = first_match(subject, rules)
+    if parts.issue is not None and int(parts.issue) not in known_issues:
         # Gitea answers 404 for an issue the token may not read, as for a missing one.
-        return f"#{issue} is not an issue of this repository, or the token cannot read its issues"
-    if pull is not None and int(pull) != int(pr_number):
-        return f"PR #{pull} is not this pull request (#{pr_number})"
+        return f"#{parts.issue} is not an issue of this repository, or the token cannot read its issues"
+    if parts.pull is not None and int(parts.pull) != int(pr_number):
+        return f"PR #{parts.pull} is not this pull request (#{pr_number})"
     return None
 
 
@@ -110,14 +122,14 @@ class Commit:
     parent_count: int
 
 
-def commit_problems(commits, known_issues, pr_number, scopes=None):
+def commit_problems(commits, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
     """A keep-commits pull request: every commit lands as it is, so every commit is checked."""
     problems = []
     for commit in commits:
         if commit.parent_count > 1:
             problems.append(f"{commit.sha[:7]}: {MERGE_REJECTED}")
             continue
-        problem = check_reference(commit.subject, known_issues, pr_number, scopes)
+        problem = check_reference(commit.subject, known_issues, pr_number, rules)
         if problem:
             problems.append(f"{commit.sha[:7]}: {problem}")
     return problems
@@ -172,15 +184,15 @@ class SquashMessage:
     problems: tuple
 
 
-def squash_message(title, pr_body, known_issues, pr_number, scopes=None):
+def squash_message(title, pr_body, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
     """The squash commit a pull request lands as: its title, then its `## Commit` section."""
     subject = (title or "").strip()
     body, problems = commit_section(pr_body)
     # No fixup!/squash!/Revert exemption: those inherit a branch commit's reference, a title has none.
     if EXEMPT.match(subject):
-        title_problem = subject_problem(subject)
+        title_problem = subject_problem(subject, rules)
     else:
-        title_problem = check_reference(subject, known_issues, pr_number, scopes)
+        title_problem = check_reference(subject, known_issues, pr_number, rules)
     if title_problem:
         problems = [f"PR title: {title_problem}", *problems]
     return SquashMessage(subject, body, tuple(problems))

@@ -2,7 +2,7 @@ from unittest import mock
 
 import pytest
 
-from mergeweasel import config
+from mergeweasel import commit_rule, config
 from mergeweasel.gitea import ApiError, Gitea, NotAFile
 
 
@@ -52,7 +52,7 @@ def test_missing_keys_take_their_default(text):
 
 
 def test_without_scopes_any_scope_passes():
-    assert config.parse("").scopes is None
+    assert config.parse("").commits.scopes is None
 
 
 @pytest.mark.parametrize("text, scopes", [
@@ -60,7 +60,23 @@ def test_without_scopes_any_scope_passes():
     ("[commits]\nscopes = []\n", ()),
 ])
 def test_scopes_are_read(text, scopes):
-    assert config.parse(text).scopes == scopes
+    assert config.parse(text).commits.scopes == scopes
+
+
+def test_without_the_keys_the_subject_is_the_default():
+    commits = config.parse("").commits
+    assert tuple(template.text for template in commits.templates) == commit_rule.DEFAULT_SUBJECT
+    assert commits.projects is None
+    assert config.parse("") == config.Config(config.parse("").tag, commit_rule.DEFAULT_COMMIT_RULES)
+
+
+def test_the_subject_templates_are_read_in_order():
+    text = ('[commits]\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description}"]\n'
+            'projects = ["PROJ", "OPS"]\n')
+    commits = config.parse(text).commits
+    assert [template.text for template in commits.templates] == ["[{key}] {conventional} {description}",
+                                                                 "{conventional} {description}"]
+    assert commits.projects == ("PROJ", "OPS")
 
 
 def test_crlf_line_ends_parse():
@@ -79,6 +95,16 @@ def test_crlf_line_ends_parse():
     ('[commits]\nscopes = [""]\n', "mergeweasel.toml: commits.scopes: '' is not a scope"),
     ('[commits]\nscopes = ["my ui"]\n', "mergeweasel.toml: commits.scopes: 'my ui' is not a scope"),
     ('[commits]\nscopes = ["u)i"]\n', "mergeweasel.toml: commits.scopes: 'u)i' is not a scope"),
+    ('[commits]\nsubject = "{conventional} {description}"\n', "mergeweasel.toml: commits.subject must be a list of strings"),
+    ("[commits]\nsubject = []\n", "mergeweasel.toml: commits.subject must not be empty"),
+    ("[commits]\nsubject = [1]\n", "mergeweasel.toml: commits.subject: 1 is not a template"),
+    ('[commits]\nsubject = ["{conventional}{description}"]\n',
+     "mergeweasel.toml: commits.subject: '{conventional}{description}': {conventional} must be followed by a space"),
+    ('[commits]\nsubject = ["{conventional} {key} {description}"]\nprojects = []\n',
+     "mergeweasel.toml: commits.projects must not be empty"),
+    ('[commits]\nsubject = ["{conventional} {key} {description}"]\nprojects = ["proj"]\n',
+     "mergeweasel.toml: commits.projects: 'proj' is not a project"),
+    ('[commits]\nprojects = ["PROJ"]\n', "mergeweasel.toml: commits.projects needs a commits.subject template with {key}"),
 ])
 def test_invalid_files_name_the_key(text, message):
     with pytest.raises(config.ConfigError) as raised:

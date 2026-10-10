@@ -237,9 +237,11 @@ pass only merges.
 `check-commits` and the queue share one rule, so they cannot disagree. The queue validates again
 right before the merge, because the title, body and commits can change after the check ran.
 
-**Subject**: Conventional Commits with the issue as suffix. The format and the types are in
-[configuration](configuration.md#fixed-values), the scopes in
-[configuration](configuration.md#scopes).
+**Subject**: one of the forms in `commits.subject` - by default Conventional Commits with the issue
+as suffix. The forms, their placeholders and the types are in
+[configuration](configuration.md#the-subject), the scopes in
+[configuration](configuration.md#scopes). Each form compiles to an anchored regular expression; the
+first form a subject fits decides, so the order of the list is the order of precedence.
 
 - No scope means no parentheses: `feat(): ...` is rejected, and so is `feat(my ui): ...`.
 - The scope is free by default. A repository can restrict it to a fixed list with `commits.scopes`
@@ -249,11 +251,12 @@ The commit check reads `mergeweasel.toml` from the pull request's head, not from
 `main`, an invalid file would fail the check of every pull request - including the one that fixes
 the file, which could then only be merged by hand. Read from the head, the invalid file fails only
 the pull request that introduces it; that one is flagged `needs-fix`, and the file never reaches
-`main` through the queue. As a side effect, a pull request that changes the scope list is checked
-against the list it brings, which is what its reviewers see in the diff.
+`main` through the queue. As a side effect, a pull request that changes the scope list or the
+subject forms is checked against what it brings, which is what its reviewers see in the diff.
 - `!` marks a breaking change, which makes a release a major one.
-- `(#N)` must be an issue of the repository. `(PR #N)` is for a change without an issue and must be
-  this pull request.
+- `{issue}` must be an issue of the repository; `{pull}` must be this pull request. `{key}` names
+  another tracker's issue, which mergeweasel cannot look up; only its project is checked, against
+  `commits.projects`.
 
 **Squash** (the default): the pull request's title becomes the subject, and the `## Commit` section
 of its body becomes the commit body - from that heading to the next heading of level 1 or 2. Line
@@ -302,6 +305,11 @@ version line never decides `main`'s next version. The pass reads every tag with 
 - `feat` - minor;
 - `fix`, `perf`, `revert` and git's `Revert "..."` - patch;
 - every other type releases nothing, and neither does a subject outside the rule.
+
+The release reads the subjects with `main`'s `commits.subject`, the same file it takes `release.tag`
+from. A commit outside these forms releases nothing; the release prints it, so a change of the forms
+that left unreleased commits behind shows in the log
+([configuration](configuration.md#the-subject) describes the change in two steps).
 
 The notes list the releasing commits, oldest first, under "Breaking changes", "Features" and
 "Fixes". A breaking change also shows its commit body.

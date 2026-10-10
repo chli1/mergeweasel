@@ -3,7 +3,7 @@ from unittest import mock
 
 import pytest
 
-from mergeweasel import release
+from mergeweasel import config, release
 from mergeweasel.gitea import ApiError, Gitea, HistoryCommit, ReleaseExists, TagRef
 
 
@@ -311,3 +311,39 @@ def test_without_a_given_time_the_date_is_utc():
     after = datetime.datetime.now(datetime.timezone.utc)
     dates = {f"{moment.year}.{moment.month}.{moment.day}.5" for moment in (before, after)}
     assert posts(gitea)[0][0] in dates
+
+
+# --- subject templates ---
+
+KEYS = '[commits]\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]\n'
+
+
+def test_change_renders_the_line_through_the_subjects_template():
+    rules = config.parse(KEYS).commits
+    assert release.change("feat(ui): add a (#1)", rules) is None
+    assert release.change("[PROJ-1] feat(ui): add a", rules) == release.Change(release.FEATURE, "[PROJ-1] ui: add a", "")
+    assert release.change("fix: repair b (PR #3)", rules) == release.Change(release.FIX, "repair b (PR #3)", "")
+
+
+def test_the_release_reads_the_templates_on_main():
+    gitea = fake_gitea(config=KEYS, history=(history_commit(2, "[PROJ-1] feat: add a"), history_commit(1, "feat: start (#1)")))
+    assert release.run(gitea, False, "main", NOW)
+    assert posts(gitea) == [("v1.1.0", sha(2), "## Features\n\n- [PROJ-1] add a\n")]
+
+
+def test_a_commit_outside_the_rule_is_printed_and_releases_nothing(capsys):
+    gitea = fake_gitea(config=KEYS, history=(history_commit(3, "fix: repair (#2)"), history_commit(2, "fixup! [PROJ-1] feat: a"),
+                                             history_commit(1, "feat: start (#1)")))
+    assert release.run(gitea, False, "main", NOW)
+    out = capsys.readouterr().out
+    assert f"release: {sha(3)[:7]} is outside the subject rule and releases nothing: 'fix: repair (#2)'" in out
+    assert "fixup!" not in out
+    assert posts(gitea) == []
+
+
+def test_the_release_reads_the_shape_only_not_the_scope_and_project_lists(capsys):
+    gitea = fake_gitea(config='[commits]\nscopes = ["api"]\n',
+                       history=(history_commit(2, "feat(ui): add x (#1)"), history_commit(1, "feat: start (#1)")))
+    assert release.run(gitea, False, "main", NOW)
+    assert posts(gitea) == [("v1.1.0", sha(2), "## Features\n\n- ui: add x (#1)\n")]
+    assert "outside the subject rule" not in capsys.readouterr().out

@@ -54,6 +54,7 @@ answer - an uncommitted marker, a shallow clone, a released image without a revi
   - `check.py` - `check-commits`;
   - `release.py` - the release step;
   - `version_template.py` - the release tag template;
+  - `subject_template.py` - the subject templates;
   - `config.py` - reading `mergeweasel.toml`.
 - `tests/`: pytest, one suite per module, on constructed state and a client faked with
   `mock.create_autospec`; only `test_gitea.py` fakes HTTP.

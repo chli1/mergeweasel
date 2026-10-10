@@ -112,6 +112,8 @@ error, and the message names the key.
 |---|---|---|
 | `release.tag` | `"v{major}.{minor}.{patch}"` | how versions look - see [the release tag](#the-release-tag) |
 | `commits.scopes` | any scope | the scopes a subject may use - see [scopes](#scopes) |
+| `commits.subject` | `(#<issue>)` or `(PR #<pr>)` at the end | the forms a subject may take - see [the subject](#the-subject) |
+| `commits.projects` | any project | the projects a `{key}` may name - see [the subject](#the-subject) |
 
 ### Scopes
 
@@ -154,6 +156,99 @@ Otherwise the file is invalid, and the message names the entry.
 `fix(deps): update dependency pytest to v8.4.2`. A repository that uses Renovate and sets
 `commits.scopes` has to include `deps` in the list, or every Renovate pull request is flagged
 `needs-fix`.
+
+### The subject
+
+Every subject - a pull request's title, and with `keep-commits` every commit - must take one of the
+forms in `commits.subject`. A form is a template: literal text with placeholders. By default a
+subject ends in a reference to an issue, or to the pull request itself:
+
+```toml
+[commits]
+subject = ["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]
+```
+
+| Placeholder | Stands for | Checked |
+|---|---|---|
+| `{conventional}` | `<type>[(<scope>)][!]:` - the type, the optional scope and breaking marker, and the colon | the type is one of the [commit types](#fixed-values); the scope is not empty, has no whitespace, and is one of `commits.scopes` if the repository sets it |
+| `{description}` | the description: everything between its neighbours in the template, starting with a non-space character | - |
+| `{issue}` | a number | it is an issue of this repository |
+| `{pull}` | a number | it is this pull request's number |
+| `{key}` | an issue key of another tracker, such as Jira, Linear or YouTrack: an uppercase letter, then uppercase letters, digits and `_`, a dash and a number - `PROJ-123` | its project - the part before the dash - is one of `commits.projects`, if the repository sets it. mergeweasel cannot look the key up |
+
+Some forms and the subjects they accept:
+
+| `commits.subject` | Accepts |
+|---|---|
+| the default | `feat(ui): add dark mode (#12)`, `chore: tidy the README (PR #31)` |
+| `["{conventional} {description}"]` | `feat(ui): add dark mode` - no reference at all |
+| `["{conventional} {description} (#{issue})", "{conventional} {description}"]` | both of the above: the reference is optional |
+| `["{conventional} {key} {description}"]` | `feat(ui): PROJ-12 add dark mode` |
+| `["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]` | `[PROJ-12] feat: add dark mode`, `chore: tidy the README (PR #31)` |
+
+**The first form that fits decides.** mergeweasel tries the forms in the order of the list. The
+first one the subject fits is the one it is checked against; a later one is not tried, even when a
+check fails. A repository that makes the reference optional therefore lists the form without a reference
+last: `feat: add dark mode (#4711)` then fits the first form, and #4711 must be an issue. Listed
+first, the form without a reference would take `(#4711)` as part of the description, unchecked.
+
+**Projects.** With `{key}`, any project passes by default, and so does a typo in it. A repository
+lists its projects to catch that:
+
+```toml
+[commits]
+subject = ["{conventional} {key} {description}"]
+projects = ["PROJ", "OPS"]
+```
+
+```
+PR title: unknown project 'PORJ' in PORJ-12, expected one of: PROJ, OPS
+```
+
+**A form is valid when**
+
+- it contains `{conventional}` and `{description}` once each, `{conventional}` first;
+- it contains at most one of `{issue}`, `{pull}` and `{key}`;
+- text separates every two placeholders - in `{description}{key}` the description's end is
+  guesswork;
+- a space follows `{conventional}`, as Conventional Commits requires;
+- it neither starts nor ends with whitespace - mergeweasel strips a title before it checks it;
+- every `{...}` is one of the placeholders above. There is no way to write a literal brace.
+
+`commits.subject` must not be empty. `commits.projects`, if set, must not be empty either, its
+entries must be projects (`PROJ`, `OPS_2`), and some form must contain `{key}`. An invalid form
+makes the file invalid, and the message names the form and the broken rule.
+
+A subject that fits no form fails, and the message lists the forms:
+
+```
+PR title: subject must read '[<key>] <type>[(<scope>)][!]: <description>' or '<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'feat: add dark mode (#12)'
+```
+
+**Text before the type.** mergeweasel reads any form, also one with text before `{conventional}`
+such as `[{key}] {conventional} {description}`. Other tools that read Conventional Commits -
+commitlint, changelog generators, Renovate's detection of semantic commits - expect the type at the
+start, and find none in `[PROJ-12] feat: add dark mode`. Repositories that use such tools put the
+reference after the colon or at the end.
+
+**The release notes.** A release lists each releasing commit as its subject without the type and the
+breaking marker, in the commit's own form: `feat(ui): add dark mode (#12)` becomes
+`ui: add dark mode (#12)`, `[PROJ-12] feat: add dark mode` becomes `[PROJ-12] add dark mode`.
+
+**Changing the forms.** The commit check reads `commits.subject` from the pull request's branch, the
+release from `main`. A commit on `main` that fits none of `main`'s forms releases nothing, and the
+release prints it:
+
+```
+release: 3f2a91c is outside the subject rule and releases nothing: 'feat: add dark mode (#12)'
+```
+
+So a repository that changes its forms does it in two pull requests: the first adds the new forms
+next to the old ones, the second removes the old ones. Every pass releases `main` before it merges,
+and merges at most one pull request; the pass that merges the second pull request has released the
+commits of the old forms already. Two ways lose them: replacing the forms in a single pull request,
+and a release that fails between the two merges - then merge the second pull request after a
+release has succeeded, or add the old forms back until it has.
 
 ### The release tag
 
@@ -248,7 +343,6 @@ merging.
 |---|---|
 | Releasing types | `!` major; `feat` minor; `fix`, `perf`, `revert`, `Revert "..."` patch |
 | Commit types | `feat`, `fix`, `perf`, `refactor`, `style`, `docs`, `test`, `build`, `ci`, `chore`, `revert` (the list of `@commitlint/config-conventional`) |
-| Subject | `<type>[(<scope>)][!]: <description> (#<issue>)` or `... (PR #<pr>)` |
 | `## Commit` lines | at most 72 characters, except for lines without whitespace |
 | Workflows | `mergeweasel-queue.yml` (workflow `mergeweasel-queue`), `mergeweasel-commits.yml` (workflow `mergeweasel-commits`) |
 | Carry-over status | context `mergeweasel/approval`; description `approved at <old head>`, then one line `approved by <login>` per reviewer |

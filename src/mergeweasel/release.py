@@ -29,14 +29,14 @@ class Change:
     body: str
 
 
-def change(message):
+def change(message, rules=commit_rule.DEFAULT_COMMIT_RULES):
     subject, _, rest = message.partition("\n")
     if commit_rule.REVERT.match(subject):
         return Change(FIX, subject, "")
-    parts = commit_rule.parse_subject(subject)
+    parts = commit_rule.parse_subject(subject, rules)
     if parts is None:
         return None
-    line = f"{parts.scope + ': ' if parts.scope else ''}{parts.description} ({parts.reference})"
+    line = parts.line()
     if parts.breaking:
         # Gitea appends Co-authored-by trailers to squash commits; they are no note.
         body = "\n".join(text for text in rest.split("\n") if not commit_rule.ATTRIBUTION.match(text))
@@ -46,6 +46,12 @@ def change(message):
     if parts.type in PATCH_TYPES:
         return Change(FIX, line, "")
     return None
+
+
+def outside_the_rule(message, rules):
+    """A subject the release cannot read: it releases nothing, whatever it meant to."""
+    subject = message.partition("\n")[0]
+    return not commit_rule.EXEMPT.match(subject) and commit_rule.parse_subject(subject, rules) is None
 
 
 def next_version(version, changes):
@@ -105,7 +111,9 @@ def release_tags(gitea, template):
 
 
 def _release(gitea, dry_run, base_branch, now):
-    template = config.load(gitea, base_branch).tag
+    configuration = config.load(gitea, base_branch)
+    # The forms only: a scope or project the list no longer names still releases what it landed as.
+    template, rules = configuration.tag, dataclasses.replace(configuration.commits, scopes=None, projects=None)
     tags = release_tags(gitea, template)
     if not tags and template.semver:
         print(f"release: no tag matching {template.text} to bump from, nothing released")
@@ -133,7 +141,11 @@ def _release(gitea, dry_run, base_branch, now):
     if not since:
         return True
     head = since[0].sha
-    changes = [item for item in (change(commit.message) for commit in reversed(since)) if item]
+    for commit in reversed(since):
+        if outside_the_rule(commit.message, rules):
+            subject = commit.message.partition("\n")[0]
+            print(f"release: {commit.sha[:7]} is outside the subject rule and releases nothing: {subject!r}")
+    changes = [item for item in (change(commit.message, rules) for commit in reversed(since)) if item]
     if not changes:
         print(f"release: nothing to release since {base}" if base
               else f"release: nothing to release on {head[:7]}, the first {template.text} release waits for a releasing commit")

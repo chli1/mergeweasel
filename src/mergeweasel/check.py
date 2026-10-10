@@ -29,10 +29,10 @@ def run(gitea, event_path, settings):
             return 0
         keep_commits = settings.keep_commits in pull.labels
         # The pull request's own version: one that breaks the file fails here, not on the base branch.
-        scopes = config.load(gitea, pull.head_sha).scopes
+        rules = config.load(gitea, pull.head_sha).commits
         commits = gitea.pull_commits(number) if keep_commits else []
         subjects = [commit.subject for commit in commits] if keep_commits else [pull.title]
-        issues = commit_rule.known_issues(subjects, gitea.is_issue)
+        issues = commit_rule.known_issues(subjects, gitea.is_issue, rules)
     except Unreachable as error:
         print(f"could not reach the Gitea API: {error.message}", file=sys.stderr)
         return 1
@@ -52,10 +52,10 @@ def run(gitea, event_path, settings):
         if not commits:
             print("the pull request has no commits - refusing to pass vacuously")
             return 1
-        problems = commit_rule.commit_problems(commits, issues, number, scopes)
+        problems = commit_rule.commit_problems(commits, issues, number, rules)
         print(f"{settings.keep_commits}: {len(commits)} commit(s) checked, {len(problems)} problem(s)")
     else:
-        message = commit_rule.squash_message(pull.title, pull.body, issues, number, scopes)
+        message = commit_rule.squash_message(pull.title, pull.body, issues, number, rules)
         problems = list(message.problems)
         print("squash commit:\n")
         print(f"{message.subject}\n\n{message.body}" if message.body else message.subject)

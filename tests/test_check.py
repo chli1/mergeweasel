@@ -119,6 +119,20 @@ def test_an_unknown_scope_fails_a_kept_commit(tmp_path, capsys):
     assert "aaaaaaa: unknown scope 'domian'" in capsys.readouterr().out
 
 
+# --- configured subject templates ---
+
+KEYS = '[commits]\nsubject = ["[{key}] {conventional} {description}"]\nprojects = ["PROJ"]\n'
+
+
+def test_a_configured_key_template_passes(tmp_path):
+    assert run(api(config=KEYS, title="[PROJ-12] feat(ui): x"), event(tmp_path)) == 0
+
+
+def test_a_title_outside_the_configured_templates_fails(tmp_path, capsys):
+    assert run(api(config=KEYS, title="feat(ui): x (#209)"), event(tmp_path)) == 1
+    assert "subject must read '[<key>] <type>[(<scope>)][!]: <description>'" in capsys.readouterr().out
+
+
 def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
     assert run(api(config="[comits]\n"), event(tmp_path)) == 1
     assert "mergeweasel.toml: unknown key comits" in capsys.readouterr().out

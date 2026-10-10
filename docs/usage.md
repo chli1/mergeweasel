@@ -19,12 +19,17 @@ of every mergeweasel log shows the names in use.
 
 By default mergeweasel squashes the pull request into one commit. The pull request's **title**
 becomes the commit's subject, and the **`## Commit` section** of its description becomes the
-commit's body. [Configuration](configuration.md#fixed-values) lists the exact rules.
+commit's body. [Configuration](configuration.md#the-subject) lists the exact rules.
 
 The scope - `api` in `fix(api): ...` - is optional. Unless the repository says otherwise, any scope
 is accepted. A repository can restrict the scopes to a fixed list in its `mergeweasel.toml`
 ([configuration](configuration.md#scopes)); a title with any other scope is then rejected, and the
 message lists the scopes the repository allows.
+
+The examples below use the default form, a reference at the end. A repository can choose other forms
+in its `mergeweasel.toml` - without a reference, or with a Jira key such as `PROJ-12`
+([configuration](configuration.md#the-subject)); the message for a title that fits none lists the
+repository's forms.
 
 Valid titles:
 

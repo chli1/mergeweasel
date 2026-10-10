@@ -1,10 +1,21 @@
+import dataclasses
+
 import pytest
 
 from mergeweasel import commit_rule as commit_message
+from mergeweasel import commit_rule, subject_template
 from mergeweasel.commit_rule import (Commit, check_reference, check_subject, commit_problems, commit_section,
                                      referenced_issues, squash_message)
+from mergeweasel.subject_template import Parts
 
 ISSUES = {99, 209}
+
+
+def rules(subject=None, **changes):
+    """The default rules with some changed; subject: the template texts."""
+    if subject is not None:
+        changes["templates"] = tuple(subject_template.compile(text) for text in subject)
+    return dataclasses.replace(commit_rule.DEFAULT_COMMIT_RULES, **changes)
 
 
 # --- subject and reference ---
@@ -20,22 +31,25 @@ def test_accepts_any_scope():
 
 
 def test_configured_scopes_reject_any_other():
-    assert check_subject("feat(ui): add dark mode (#99)", ("domain", "ui")) is None
-    assert check_subject("feat(domian): add dark mode (#99)", ("domain", "ui")) == (
+    domain_ui = rules(scopes=("domain", "ui"))
+    assert check_subject("feat(ui): add dark mode (#99)", domain_ui) is None
+    assert check_subject("feat(domian): add dark mode (#99)", domain_ui) == (
         "unknown scope 'domian', expected one of: domain, ui")
-    assert check_subject("feat: add dark mode (#99)", ("domain", "ui")) is None
+    assert check_subject("feat: add dark mode (#99)", domain_ui) is None
 
 
 def test_no_configured_scope_rejects_every_scope():
-    assert check_subject("feat(ui): add dark mode (#99)", ()) == "unknown scope 'ui', this repository allows no scope"
-    assert check_subject("feat: add dark mode (#99)", ()) is None
+    assert check_subject("feat(ui): add dark mode (#99)", rules(scopes=())) == (
+        "unknown scope 'ui', this repository allows no scope")
+    assert check_subject("feat: add dark mode (#99)", rules(scopes=())) is None
 
 
 def test_configured_scopes_reach_titles_and_commits():
-    message = squash_message("feat(domian): x (#99)", "", ISSUES, 1, ("domain",))
+    message = squash_message("feat(domian): x (#99)", "", ISSUES, 1, rules(scopes=("domain",)))
     assert message.problems == ("PR title: unknown scope 'domian', expected one of: domain",)
     commits = [Commit("a" * 40, "feat(domian): x (#99)", 1)]
-    assert commit_problems(commits, ISSUES, 1, ("domain",)) == ["aaaaaaa: unknown scope 'domian', expected one of: domain"]
+    assert commit_problems(commits, ISSUES, 1, rules(scopes=("domain",))) == [
+        "aaaaaaa: unknown scope 'domian', expected one of: domain"]
 
 
 def test_accepts_a_breaking_marker_with_and_without_a_scope():
@@ -265,10 +279,10 @@ def test_a_title_may_not_use_the_commit_exemptions():
 
 
 def test_parse_subject_returns_its_parts():
-    assert commit_message.parse_subject("feat(cli)!: drop the old flag (#8)") == commit_message.Subject(
-        type="feat", scope="cli", breaking=True, description="drop the old flag", reference="#8")
-    assert commit_message.parse_subject("fix: retry on 409 (PR #12)") == commit_message.Subject(
-        type="fix", scope=None, breaking=False, description="retry on 409", reference="PR #12")
+    assert commit_message.parse_subject("feat(cli)!: drop the old flag (#8)") == Parts(
+        "feat", "cli", True, "drop the old flag", issue="8")
+    assert commit_message.parse_subject("fix: retry on 409 (PR #12)") == Parts(
+        "fix", None, False, "retry on 409", pull="12")
 
 
 @pytest.mark.parametrize("subject", ["wip", "feat(): x (#1)", "feature: x (#1)", 'Revert "feat: x (#1)"',
@@ -279,3 +293,55 @@ def test_parse_subject_rejects_what_the_rule_rejects_or_exempts(subject):
 
 def test_revert_pattern_captures_the_original_subject():
     assert commit_message.REVERT.match('Revert "feat: x (#1)"')["original"] == "feat: x (#1)"
+
+
+# --- subject templates ---
+
+KEYS = rules(subject=["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"])
+
+
+def test_the_no_match_message_lists_the_default_forms():
+    assert check_subject("add dark mode") == (
+        "subject must read '<type>[(<scope>)][!]: <description> (#<issue>)' or "
+        "'<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'add dark mode'")
+
+
+def test_the_no_match_message_lists_the_configured_forms():
+    assert check_subject("feat: add x (#1)", KEYS) == (
+        "subject must read '[<key>] <type>[(<scope>)][!]: <description>' or "
+        "'<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'feat: add x (#1)'")
+
+
+def test_a_key_template_accepts_any_project_without_a_list():
+    assert check_subject("[ANY-1] feat: add x", KEYS) is None
+
+
+def test_configured_projects_reject_any_other():
+    projects = dataclasses.replace(KEYS, projects=("PROJ", "OPS"))
+    assert check_subject("[OPS-4] fix: repair", projects) is None
+    assert check_subject("[PORJ-4] fix: repair", projects) == "unknown project 'PORJ' in PORJ-4, expected one of: PROJ, OPS"
+
+
+def test_the_first_matching_template_decides():
+    optional = rules(subject=["{conventional} {description} (#{issue})", "{conventional} {description}"])
+    assert check_reference("feat: add x (#4711)", {99}, 101, optional).startswith("#4711 is not an issue")
+    assert check_reference("feat: add x", {99}, 101, optional) is None
+
+
+def test_a_failing_first_match_is_not_rescued_by_a_later_template():
+    both = rules(subject=["{conventional} {description} (#{issue})", "{conventional} {description}"])
+    assert check_subject("feature: add x (#1)", both).startswith("unknown type")
+
+
+def test_an_issue_before_the_type_is_looked_up():
+    prefix = rules(subject=["[#{issue}] {conventional} {description}"])
+    assert referenced_issues(["[#99] feat: add x", "[#5] fix: y"], prefix) == {99, 5}
+    assert check_reference("[#4711] feat: add x", {99}, 101, prefix).startswith("#4711 is not an issue")
+    assert check_reference("[#99] feat: add x", {99}, 101, prefix) is None
+
+
+def test_exempt_subjects_stay_exempt_under_a_custom_template():
+    for subject in ('Revert "[PROJ-1] feat: x"', "fixup! [PROJ-1] feat: x", "squash! feat: x (#1)"):
+        assert check_reference(subject, set(), 101, KEYS) is None
+        assert commit_message.parse_subject(subject, KEYS) is None
+    assert referenced_issues(['Revert "feat: x (#7)"', "fixup! feat: y (#8)"]) == set()
