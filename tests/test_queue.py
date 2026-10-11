@@ -353,7 +353,13 @@ def answer_pull(gitea, number, title=None, body="", config=None):
 
 
 def squash(number, body=""):
-    return SquashMessage(f"ci: land {number} (#1)", body, ())
+    """What answer_pull's default title lands as, with the pull reference appended."""
+    return SquashMessage(f"ci: land {number} (#1) (#{number})", body, ())
+
+
+# mergeweasel's own forms, for the tests of the issue lookups.
+ISSUE_OR_PULL = ('[commits]\nsquash_append_pull_reference = false\nsubject = '
+                 '["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]\n')
 
 
 LABEL_IDS = {"automerge": 13, "needs-fix": 14, "keep-commits": 15}
@@ -482,7 +488,7 @@ def test_squash_body_is_the_commit_section(monkeypatch, gitea):
 
 def test_keep_commits_fast_forwards_after_checking_every_commit(monkeypatch, gitea):
     given(monkeypatch, [pull(6, labels=("automerge", "keep-commits"))])
-    answer_pull(gitea, 6, title="no format needed")
+    answer_pull(gitea, 6, title="no format needed", config=ISSUE_OR_PULL)
     gitea.pull_commits.return_value = [Commit("a" * 40, "ci: move (#1)", 1), Commit("b" * 40, "ci: edit (#1)", 1)]
     run_pass(gitea, "https://gitea", dry_run=False)
     gitea.pull_commits.assert_called_once_with(6)
@@ -508,7 +514,7 @@ def test_invalid_title_read_at_merge_time_flags_needs_fix_and_hands_over(monkeyp
 
 def test_squash_looks_up_the_title_s_issue_at_merge_time(monkeypatch, gitea):
     given(monkeypatch, [pull(6)])
-    answer_pull(gitea, 6, title=" ci: land 6 (#1) ", body="## Commit\nSee #4711.")
+    answer_pull(gitea, 6, title=" ci: land 6 (#1) ", body="## Commit\nSee #4711.", config=ISSUE_OR_PULL)
     run_pass(gitea, "https://gitea", dry_run=False)
     gitea.is_issue.assert_called_once_with(1)
     assert writes(gitea)[0][0] == "merge"
@@ -516,7 +522,7 @@ def test_squash_looks_up_the_title_s_issue_at_merge_time(monkeypatch, gitea):
 
 def test_title_referencing_no_issue_flags_needs_fix(monkeypatch, gitea):
     given(monkeypatch, [pull(6)])
-    answer_pull(gitea, 6, title="ci: land 6 (#4711)")
+    answer_pull(gitea, 6, title="ci: land 6 (#4711)", config=ISSUE_OR_PULL)
     run_pass(gitea, "https://gitea", dry_run=False)
     done = writes(gitea)
     assert done[0] == ("add_label", (6, "needs-fix"))

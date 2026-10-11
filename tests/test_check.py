@@ -12,7 +12,12 @@ def raw_commit(sha, subject, parents=1):
     return Commit(sha, subject, parents)
 
 
-def api(commits=(), issues=(99, 209), config=None, title="ci: squash by default (#209)", body="", labels=(),
+# mergeweasel's own forms, which most of these tests check the lookups of.
+ISSUE_OR_PULL = ('[commits]\nsquash_append_pull_reference = false\nsubject = '
+                 '["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]\n')
+
+
+def api(commits=(), issues=(99, 209), config=ISSUE_OR_PULL, title="ci: squash by default (#209)", body="", labels=(),
         head="h" * 40, merged=False):
     """Pull request 213 as the API reads it when the job runs; config: mergeweasel.toml's text at the
     head, None without the file."""
@@ -121,7 +126,7 @@ def test_an_unknown_scope_fails_a_kept_commit(tmp_path, capsys):
 
 # --- configured subject templates ---
 
-KEYS = '[commits]\nsubject = ["[{key}] {conventional} {description}"]\nprojects = ["PROJ"]\n'
+KEYS = '[commits]\nsquash_append_pull_reference = false\nsubject = ["[{key}] {conventional} {description}"]\nprojects = ["PROJ"]\n'
 
 
 def test_a_configured_key_template_passes(tmp_path):
@@ -141,6 +146,22 @@ def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
 def test_an_unknown_key_on_the_branch_is_reported_and_ignored(tmp_path, capsys):
     assert run(api(config="[comits]\n"), event(tmp_path)) == 0
     assert "mergeweasel.toml: unknown key comits ignored" in capsys.readouterr().out
+
+
+def test_without_a_file_the_title_gets_the_pull_reference(tmp_path, capsys):
+    gitea = api(config=None, title="feat: x")
+    assert run(gitea, event(tmp_path)) == 0
+    assert "feat: x (#213)" in capsys.readouterr().out
+    gitea.is_issue.assert_not_called()
+
+
+EITHER_APPENDED = ('[commits]\nsquash_append_pull_reference = true\n'
+                   'subject = ["{conventional} {description} (#{pull_or_issue})"]\n')
+
+
+def test_the_appended_reference_is_checked_as_the_pull_request(tmp_path, capsys):
+    assert run(api(config=EITHER_APPENDED, title="feat: x"), event(tmp_path)) == 0
+    assert "feat: x (#213)" in capsys.readouterr().out
 
 
 # --- keep-commits ---

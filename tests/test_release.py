@@ -85,11 +85,24 @@ CALVER = '[release]\ntag = "{YY}.{MM}.{DD}.{count}+{sha}"\n'
 NOW = datetime.datetime(2026, 10, 5, 14, 0, tzinfo=datetime.timezone.utc)
 
 
-def fake_gitea(refs=(tag_ref("v1.0.0", 1),), history=(history_commit(1, "feat: start (#1)"),), config=None, count=None):
-    """refs: the tags; history: the base branch's commits, newest first; config: mergeweasel.toml on it,
-    None for none; count: the commit count. gitea.walked lists the commits the release read."""
+RELEASE_ON = "[release]\nenabled = true\n"
+
+
+def switched_on(text):
+    """The file's text with the release switched on, unless it sets release.enabled itself."""
+    if "enabled" in text:
+        return text
+    if "[release]\n" in text:
+        return text.replace("[release]\n", RELEASE_ON, 1)
+    return text + RELEASE_ON
+
+
+def fake_gitea(refs=(tag_ref("v1.0.0", 1),), history=(history_commit(1, "feat: start (#1)"),), config="", count=None):
+    """refs: the tags; history: the base branch's commits, newest first; config: mergeweasel.toml on it, the
+    release switched on unless it says otherwise, None for no file; count: the commit count. gitea.walked lists
+    the commits the release read."""
     gitea = mock.create_autospec(Gitea, instance=True)
-    gitea.file.return_value = None if config is None else config.encode()
+    gitea.file.return_value = None if config is None else switched_on(config).encode()
     gitea.tag_refs.return_value = list(refs)
     gitea.commit_count.return_value = count
     gitea.walked = []
@@ -308,7 +321,25 @@ def test_switched_off_the_release_reads_no_tags(capsys):
                        history=[history_commit(2, "feat!: add a (#1)"), history_commit(1, "feat: start (#1)")])
     assert release.run(gitea, dry_run=False, base_branch="main")
     assert posts(gitea) == [] and not gitea.tag_refs.called
-    assert "release: switched off by release.enabled in mergeweasel.toml" in capsys.readouterr().out
+    assert "release: to release, set release.enabled = true in mergeweasel.toml" in capsys.readouterr().out
+
+
+def test_without_a_file_the_release_is_off(capsys):
+    gitea = fake_gitea(config=None, history=[history_commit(2, "feat!: add a (#1)"), history_commit(1, "feat: start (#1)")])
+    assert release.run(gitea, dry_run=False, base_branch="main")
+    assert posts(gitea) == [] and not gitea.tag_refs.called
+    assert "release: to release, set release.enabled = true in mergeweasel.toml" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("subject, notes", [
+    ("feat: add a (#12)", "## Features\n\n- add a (#12)\n"),
+    ("fix: repair b (PR #31)", "## Fixes\n\n- repair b (PR #31)\n"),
+    ("fix: repair c (#31) (#40)", "## Fixes\n\n- repair c (#31) (#40)\n"),
+])
+def test_subjects_of_either_format_release_under_the_default(subject, notes):
+    gitea = fake_gitea(history=[history_commit(2, subject), history_commit(1, "feat: start (#1)")])
+    assert release.run(gitea, dry_run=False, base_branch="main")
+    assert posts(gitea)[0][2] == notes
 
 
 def test_switched_off_an_invalid_release_key_is_still_an_error(capsys):
@@ -329,7 +360,7 @@ def test_without_a_given_time_the_date_is_utc():
 
 # --- subject templates ---
 
-KEYS = '[commits]\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]\n'
+KEYS = '[commits]\nsquash_append_pull_reference = false\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]\n'
 
 
 def test_change_renders_the_line_through_the_subjects_template():

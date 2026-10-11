@@ -8,10 +8,11 @@ ships as a container image.
 
 Label an approved pull request `automerge`, and mergeweasel takes it from there. It rebases the
 pull request when `main` has moved on, waits for the required checks, and lands it, one pull
-request at a time. By default it squashes the pull request into one commit; with the label
-`keep-commits` it lands the commits as they are. A pull request it cannot land gets the label
-`needs-fix` and a comment that explains why. After each merge it releases: it creates a tag and
-release notes, with the version derived from the commit types.
+request at a time. By default it squashes the pull request into one commit, titled as Gitea
+suggests it: the pull request's title with its number appended. With the label `keep-commits` it
+lands the commits as they are. A pull request it cannot land gets the label `needs-fix` and a
+comment that explains why. With automatic releases switched on, it also releases what it lands: a
+tag and release notes, with the version derived from the commit types.
 
 The logic lives in the image; each repository carries only two small workflows that run it.
 
@@ -27,10 +28,41 @@ next queued pull request and takes one step:
    pull request.
 4. **All checks green:** restore the approvals the rebase cost it, merge it, and remove
    `automerge`.
-5. **Merged:** the next pass tags `main` with the next version and publishes release notes, if the
-   merge contains a commit of a releasing type or a breaking change.
+5. **Merged:** with automatic releases switched on, the next pass tags `main` with the next version
+   and publishes release notes, provided the merge contains a commit of a releasing type or a
+   breaking change.
 
 The details, and the Gitea behaviour they rest on, are in [docs/design.md](docs/design.md).
+
+## Releases
+
+Write [Conventional Commits](https://www.conventionalcommits.org/) and mergeweasel releases for you.
+After each merge it works out the next version from the commit types, tags `main`, and publishes a
+Gitea release with notes. No release workflow, no version bumps by hand.
+
+- `feat` raises the minor version, `fix` the patch version, `!` the major version.
+- `docs`, `chore`, `ci` and the other types release nothing.
+- A breaking change carries its `## Commit` section into the notes, so users read what to change.
+
+A pull request titled `feat(api): add a bulk endpoint` lands as
+`feat(api): add a bulk endpoint (#80)`, takes `v1.2.3` to `v1.3.0`, and publishes:
+
+```markdown
+## Features
+
+- api: add a bulk endpoint (#80)
+```
+
+Automatic releases are off until you switch them on, so they never collide with a release process
+already in place. Add one line to `mergeweasel.toml` and tag a first version, such as `v0.1.0`:
+
+```toml
+[release]
+enabled = true
+```
+
+Versions can be dates instead (CalVer), and which types release is configurable:
+[releases](docs/onboarding.md#releases), [configuration](docs/configuration.md#the-release-tag).
 
 ## Quick start
 
@@ -44,6 +76,7 @@ The details, and the Gitea behaviour they rest on, are in [docs/design.md](docs/
    [branch protection](docs/onboarding.md#branch-protection).
 4. Copy the two workflows: [the workflows](docs/onboarding.md#the-workflows).
 5. Approve a pull request, then label it `automerge`: [usage](docs/usage.md).
+6. For automatic releases, switch them on: [releases](#releases).
 
 ## Works with Renovate
 

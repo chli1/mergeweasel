@@ -10,8 +10,9 @@ from mergeweasel import subject_template
 
 # @commitlint/config-conventional's types, so release tools read them with their defaults.
 TYPES = ("feat", "fix", "perf", "refactor", "style", "docs", "test", "build", "ci", "chore", "revert")
-# The default of mergeweasel.toml's commits.subject.
-DEFAULT_SUBJECT = ("{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})")
+# The default of mergeweasel.toml's commits.subject: a squash fits the first form through the appended pull
+# reference; the second lets keep-commits commits land without one - their number is unknown when they are written.
+DEFAULT_SUBJECT = ("{conventional} {description} (#{pull})", "{conventional} {description}")
 # `git commit --fixup`/`--autosquash` prepend "fixup!"/"squash!" to the
 # original subject, and `git revert` produces `Revert "<original subject>"`.
 # None of the three can carry a reference of their own - they inherit the
@@ -47,6 +48,8 @@ class CommitRules:
     types: tuple | None = TYPES
     # The longest `## Commit` line that contains whitespace.
     max_line: int = MAX_LINE
+    # Squash only: the subject is the title with " (#<pr>)" appended, unless it ends in it already.
+    append_pull_reference: bool = True
 
 
 DEFAULT_COMMIT_RULES = CommitRules(tuple(subject_template.compile(text) for text in DEFAULT_SUBJECT), None, None)
@@ -98,7 +101,13 @@ def referenced_issues(subjects, rules=DEFAULT_COMMIT_RULES):
     Stripped as squash_message strips the title, so a title's reference is looked up as it is checked.
     """
     found = (first_match(subject.strip(), rules) for subject in subjects if not EXEMPT.match(subject.strip()))
-    return {int(parts.issue) for parts in found if parts and parts.issue is not None}
+    numbers = set()
+    for parts in found:
+        if parts and parts.issue is not None:
+            numbers.add(int(parts.issue))
+        if parts and parts.pull_or_issue is not None:
+            numbers.add(int(parts.pull_or_issue))
+    return numbers
 
 
 def known_issues(subjects, is_issue, rules=DEFAULT_COMMIT_RULES):
@@ -116,6 +125,9 @@ def check_reference(subject, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES
         return f"#{parts.issue} is not an issue of this repository, or the token cannot read its issues"
     if parts.pull is not None and int(parts.pull) != int(pr_number):
         return f"PR #{parts.pull} is not this pull request (#{pr_number})"
+    if (parts.pull_or_issue is not None and int(parts.pull_or_issue) != int(pr_number)
+            and int(parts.pull_or_issue) not in known_issues):
+        return f"#{parts.pull_or_issue} is neither this pull request nor an issue of this repository"
     return None
 
 
@@ -188,9 +200,19 @@ class SquashMessage:
     problems: tuple
 
 
-def squash_message(title, pr_body, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
-    """The squash commit a pull request lands as: its title, then its `## Commit` section."""
+def squash_subject(title, pr_number, rules=DEFAULT_COMMIT_RULES):
+    """What a squash lands as its subject: the stripped title, with the pull reference if the rules append it."""
     subject = (title or "").strip()
+    reference = f" (#{pr_number})"
+    if rules.append_pull_reference and not subject.endswith(reference):
+        subject += reference
+    return subject
+
+
+def squash_message(title, pr_body, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
+    """The squash commit a pull request lands as: its title - with the pull reference appended if the rules
+    say so -, then its `## Commit` section."""
+    subject = squash_subject(title, pr_number, rules)
     body, problems = commit_section(pr_body, rules.max_line)
     # No fixup!/squash!/Revert exemption: those inherit a branch commit's reference, a title has none.
     if EXEMPT.match(subject):

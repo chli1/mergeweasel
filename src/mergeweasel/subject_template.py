@@ -6,7 +6,7 @@ import dataclasses
 import re
 
 CONVENTIONAL, DESCRIPTION = "conventional", "description"
-REFERENCES = ("issue", "pull", "key")
+REFERENCES = ("issue", "pull", "pull_or_issue", "key")
 # Placeholder -> (the regex of its value, how the documentation writes it). The type is matched
 # loosely and checked against its list afterwards, so that an unknown one is named instead of
 # failing the whole pattern.
@@ -15,6 +15,7 @@ PLACEHOLDERS = {
     DESCRIPTION: (r"(?P<description>\S.*?)", "<description>"),
     "issue": (r"(?P<issue>\d+)", "<issue>"),
     "pull": (r"(?P<pull>\d+)", "<pr>"),
+    "pull_or_issue": (r"(?P<pull_or_issue>\d+)", "<pr-or-issue>"),
     "key": (r"(?P<key>[A-Z][A-Z0-9_]*-\d+)", "<key>"),
 }
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
@@ -33,6 +34,7 @@ class Parts:
     # As written; None where the template has no such placeholder.
     issue: str | None = None
     pull: str | None = None
+    pull_or_issue: str | None = None
     key: str | None = None
     template: "Template | None" = dataclasses.field(default=None, compare=False, repr=False)
 
@@ -63,7 +65,8 @@ class Template:
             return None
         values = match.groupdict()
         return Parts(values["type"], values["scope"], bool(values["breaking"]), values["description"],
-                     values.get("issue"), values.get("pull"), values.get("key"), self)
+                     issue=values.get("issue"), pull=values.get("pull"), pull_or_issue=values.get("pull_or_issue"),
+                     key=values.get("key"), template=self)
 
     def render(self, parts):
         rendered = []

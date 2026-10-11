@@ -20,10 +20,11 @@ def changed(line, text):
     return "".join(lines)
 
 
+@pytest.mark.needs_this_commit
 def test_squash_merge(repo, run_pass):
     repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
     repo.commit("author", "add-a", {"b.txt": "b\n"}, "wip")
-    number = repo.open_pull("author", "add-a", TITLE, BODY)
+    number = repo.open_pull("author", "add-a", "feat: add a", BODY)
     repo.ready(number)
     before = repo.main_sha()
 
@@ -32,16 +33,17 @@ def test_squash_merge(repo, run_pass):
     landed = repo.git_commit(repo.main_sha())
     assert [parent["sha"] for parent in landed["parents"]] == [before]
     # The branch's own commits never land; Gitea's default appends the trailer.
-    assert landed["commit"]["message"] == f"{TITLE}\n\n- adds a\n\nCo-authored-by: author <author@example.com>\n"
+    assert landed["commit"]["message"] == f"feat: add a (#{number})\n\n- adds a\n\nCo-authored-by: author <author@example.com>\n"
     assert (landed["author"]["login"], landed["committer"]["login"]) == ("author", "queue")
     assert repo.pull(number)["merged"]
     assert "automerge" not in repo.labels(number)
     assert not [review for review in repo.reviews(number) if review["user"]["login"] == "queue"]
 
 
+@pytest.mark.needs_this_commit
 def test_keep_commits_fast_forwards(repo, run_pass):
-    first = repo.commit("author", "main", {"a.txt": "a\n"}, "feat: add a (#1)", new_branch="add-a")
-    second = repo.commit("author", "add-a", {"a.txt": "a\nb\n"}, "test: cover a (#1)")
+    first = repo.commit("author", "main", {"a.txt": "a\n"}, "feat: add a", new_branch="add-a")
+    second = repo.commit("author", "add-a", {"a.txt": "a\nb\n"}, "test: cover a")
     number = repo.open_pull("author", "add-a", TITLE, BODY)
     repo.add_label("author", number, "keep-commits")
     repo.ready(number)

@@ -13,7 +13,8 @@ DEFAULT_MINOR_TYPES = ("feat",)
 DEFAULT_PATCH_TYPES = ("fix", "perf", "revert")
 # Table -> key -> type.
 SCHEMA = {"release": {"enabled": bool, "tag": str, "minor_types": list, "patch_types": list},
-          "commits": {"scopes": list, "subject": list, "projects": list, "types": list, "max_line": int}}
+          "commits": {"scopes": list, "subject": list, "projects": list, "types": list, "max_line": int,
+                      "squash_append_pull_reference": bool}}
 TYPE_NAMES = {bool: "true or false", str: "a string", list: "a list of strings", int: "an integer"}
 # What {conventional} reads as the type.
 TYPE = re.compile(r"[a-z]+")
@@ -34,8 +35,8 @@ class Config:
     # The types that release a minor and a patch version; `!` always releases a major one.
     minor_types: tuple = DEFAULT_MINOR_TYPES
     patch_types: tuple = DEFAULT_PATCH_TYPES
-    # Off: the queue releases nothing; the other release keys stay checked.
-    release_enabled: bool = True
+    # Off by default: the queue releases nothing; the other release keys stay checked.
+    release_enabled: bool = False
     # Tables and keys the file names and this version does not know, dotted; load() reports them.
     unknown_keys: tuple = ()
 
@@ -90,6 +91,9 @@ def parse(text):
                                   "it must be a non-empty string without whitespace and ')'")
         scopes = tuple(scopes)
     templates = subject_templates(commits.get("subject"))
+    append = commits.get("squash_append_pull_reference", commit_rule.DEFAULT_COMMIT_RULES.append_pull_reference)
+    if append:
+        check_appendable(templates)
     projects = commits.get("projects")
     if projects is not None:
         if not projects:
@@ -106,8 +110,8 @@ def parse(text):
     if max_line < 1:
         raise ConfigError(f"{CONFIG_FILE}: commits.max_line must be at least 1")
     minor_types, patch_types = release_types(data.get("release", {}), types)
-    return Config(tag, commit_rule.CommitRules(templates, scopes, projects, types, max_line), minor_types, patch_types,
-                  data.get("release", {}).get("enabled", True), tuple(unknown))
+    rules = commit_rule.CommitRules(templates, scopes, projects, types, max_line, append_pull_reference=append)
+    return Config(tag, rules, minor_types, patch_types, data.get("release", {}).get("enabled", False), tuple(unknown))
 
 
 def subject_templates(texts):
@@ -124,6 +128,21 @@ def subject_templates(texts):
         except subject_template.TemplateError as error:
             raise ConfigError(f"{CONFIG_FILE}: commits.subject: {text!r}: {error}") from None
     return tuple(templates)
+
+
+# A squash subject ends in the appended pull reference; these forms take it, an {issue} form would fail it.
+APPENDED_ENDINGS = (" (#{pull})", " (#{pull_or_issue})")
+
+
+def check_appendable(templates):
+    key = "commits.squash_append_pull_reference"
+    for template in templates:
+        if template.text.endswith(" (#{issue})"):
+            raise ConfigError(f"{CONFIG_FILE}: commits.subject: {template.text!r} ends like the appended pull "
+                              f"reference - use {{pull_or_issue}}, or set {key} = false")
+    if not any(template.text.endswith(APPENDED_ENDINGS) for template in templates):
+        raise ConfigError(f"{CONFIG_FILE}: {key} needs a commits.subject form ending in "
+                          + " or ".join(f"'{ending}'" for ending in APPENDED_ENDINGS) + f", or set {key} = false")
 
 
 def commit_types(texts):

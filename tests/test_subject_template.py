@@ -101,3 +101,19 @@ def test_invalid_templates(text, message):
     with pytest.raises(TemplateError) as error:
         subject_template.compile(text)
     assert str(error.value) == message
+
+
+def test_pull_or_issue_is_read():
+    read = parts("feat: x (#80)", "{conventional} {description} (#{pull_or_issue})")
+    assert read.pull_or_issue == "80"
+    assert read.issue is None and read.pull is None
+
+
+def test_pull_or_issue_counts_as_a_reference():
+    with pytest.raises(TemplateError, match="at most one reference"):
+        subject_template.compile("{conventional} {description} (#{pull_or_issue}) (#{issue})")
+
+
+def test_pull_or_issue_is_described():
+    assert (subject_template.compile("{conventional} {description} (#{pull_or_issue})").describe()
+            == "<type>[(<scope>)][!]: <description> (#<pr-or-issue>)")

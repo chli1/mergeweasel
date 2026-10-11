@@ -3,11 +3,13 @@ otherwise - and the repository's mergeweasel.toml."""
 import pytest
 
 CONFIG = """[release]
+enabled = true
 tag = "{YYYY}.{MM}.{DD}.{count}+{sha}"
 minor_types = ["feature"]
 patch_types = ["fix"]
 
 [commits]
+squash_append_pull_reference = false
 subject = ["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]
 projects = ["PROJ"]
 scopes = ["app"]

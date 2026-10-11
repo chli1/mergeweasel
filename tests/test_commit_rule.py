@@ -18,6 +18,11 @@ def rules(subject=None, **changes):
     return dataclasses.replace(commit_rule.DEFAULT_COMMIT_RULES, **changes)
 
 
+# mergeweasel's own forms: an issue, or this pull request in its own words; nothing appended.
+ISSUE_OR_PULL = rules(["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"],
+                      append_pull_reference=False)
+
+
 # --- subject and reference ---
 
 def test_accepts_every_type_without_a_scope():
@@ -85,16 +90,16 @@ def test_rejects_a_bare_subject():
 
 
 def test_rejects_a_missing_suffix():
-    assert check_subject("fix: typo in README").startswith("subject must read")
+    assert check_subject("fix: typo in README", ISSUE_OR_PULL).startswith("subject must read")
 
 
 def test_rejects_a_suffix_without_its_space():
-    assert check_subject("fix: typo in README(#99)").startswith("subject must read")
+    assert check_subject("fix: typo in README(#99)", ISSUE_OR_PULL).startswith("subject must read")
 
 
 def test_rejects_an_empty_description():
-    assert check_subject("fix: (#99)").startswith("subject must read")
-    assert check_subject("fix:  (#99)").startswith("subject must read")
+    assert check_subject("fix: (#99)", ISSUE_OR_PULL).startswith("subject must read")
+    assert check_subject("fix:  (#99)", ISSUE_OR_PULL).startswith("subject must read")
 
 
 def test_rejects_an_upper_case_type():
@@ -114,7 +119,7 @@ def test_rejects_empty_and_whitespace_scopes():
 
 
 def test_rejects_xx_going_forward():
-    assert check_subject("fix: typo in README (#XX)").startswith("subject must read")
+    assert check_subject("fix: typo in README (#XX)", ISSUE_OR_PULL).startswith("subject must read")
 
 
 def test_accepts_fixup_squash_and_revert_subjects():
@@ -124,19 +129,19 @@ def test_accepts_fixup_squash_and_revert_subjects():
 
 
 def test_reference_accepts_a_known_issue():
-    assert check_reference("ci: bind commits (#99)", {99, 100}, 101) is None
+    assert check_reference("ci: bind commits (#99)", {99, 100}, 101, ISSUE_OR_PULL) is None
 
 
 def test_reference_rejects_an_unknown_issue():
-    assert "not an issue" in check_reference("ci: bind commits (#4711)", {99, 100}, 101)
+    assert "not an issue" in check_reference("ci: bind commits (#4711)", {99, 100}, 101, ISSUE_OR_PULL)
 
 
 def test_reference_accepts_this_prs_own_number():
-    assert check_reference("ci: bind commits (PR #101)", {99, 100}, 101) is None
+    assert check_reference("ci: bind commits (PR #101)", {99, 100}, 101, ISSUE_OR_PULL) is None
 
 
 def test_reference_rejects_a_foreign_pr_number():
-    assert "this pull request" in check_reference("ci: bind commits (PR #30)", {99, 100}, 101)
+    assert "this pull request" in check_reference("ci: bind commits (PR #30)", {99, 100}, 101, ISSUE_OR_PULL)
 
 
 def test_reference_reports_the_format_before_the_reference():
@@ -146,7 +151,7 @@ def test_reference_reports_the_format_before_the_reference():
 def test_referenced_issues_are_the_distinct_issue_references():
     subjects = ["ci: one (#99)", "ci: two (#99)", "ci: three (PR #101)", "wip #5", 'Revert "ci: x (#7)"',
                 "fixup! ci: y (#8)", " fix: four (#209) "]
-    assert referenced_issues(subjects) == {99, 209}
+    assert referenced_issues(subjects, ISSUE_OR_PULL) == {99, 209}
 
 
 def test_reference_lets_exempt_subjects_pass():
@@ -156,11 +161,13 @@ def test_reference_lets_exempt_subjects_pass():
 # --- keep-commits: every commit ---
 
 def test_commit_problems_accepts_conforming_commits():
-    assert commit_problems([Commit("a" * 40, "ci: one (#99)", 1), Commit("b" * 40, "ci: two (#209)", 1)], ISSUES, 213) == []
+    assert commit_problems([Commit("a" * 40, "ci: one (#99)", 1), Commit("b" * 40, "ci: two (#209)", 1)], ISSUES, 213,
+                           ISSUE_OR_PULL) == []
 
 
 def test_commit_problems_names_each_bad_commit():
-    problems = commit_problems([Commit("a" * 40, "wip", 1), Commit("b" * 40, "ci: x (#4711)", 1)], ISSUES, 213)
+    problems = commit_problems([Commit("a" * 40, "wip", 1), Commit("b" * 40, "ci: x (#4711)", 1)], ISSUES, 213,
+                               ISSUE_OR_PULL)
     assert len(problems) == 2
     assert problems[0].startswith("aaaaaaa: ") and "subject must read" in problems[0]
     assert problems[1].startswith("bbbbbbb: ") and "not an issue" in problems[1]
@@ -262,12 +269,12 @@ def test_generated_with_inside_a_sentence_is_fine():
 # --- the squash message ---
 
 def test_squash_message_takes_title_and_section():
-    message = squash_message("ci: squash by default (#209)", "## Commit\nWhy.", ISSUES, 213)
-    assert message == commit_message.SquashMessage("ci: squash by default (#209)", "Why.", ())
+    message = squash_message("ci: squash by default", "## Commit\nWhy.", ISSUES, 213)
+    assert message == commit_message.SquashMessage("ci: squash by default (#213)", "Why.", ())
 
 
 def test_squash_message_strips_the_title():
-    assert squash_message("  ci: squash (#209)  ", None, ISSUES, 213).subject == "ci: squash (#209)"
+    assert squash_message("  ci: squash (#213)  ", None, ISSUES, 213).subject == "ci: squash (#213)"
 
 
 def test_squash_message_reports_title_and_section_problems():
@@ -277,8 +284,8 @@ def test_squash_message_reports_title_and_section_problems():
 
 
 def test_squash_message_resolves_the_pr_fallback_against_this_pr():
-    assert squash_message("chore: tidy (PR #213)", "", ISSUES, 213).problems == ()
-    assert "this pull request" in squash_message("chore: tidy (PR #30)", "", ISSUES, 213).problems[0]
+    assert squash_message("chore: tidy (PR #213)", "", ISSUES, 213, ISSUE_OR_PULL).problems == ()
+    assert "this pull request" in squash_message("chore: tidy (PR #30)", "", ISSUES, 213, ISSUE_OR_PULL).problems[0]
 
 
 # --- final review fixes ---
@@ -305,9 +312,8 @@ def test_a_title_may_not_use_the_commit_exemptions():
 
 def test_parse_subject_returns_its_parts():
     assert commit_message.parse_subject("feat(cli)!: drop the old flag (#8)") == Parts(
-        "feat", "cli", True, "drop the old flag", issue="8")
-    assert commit_message.parse_subject("fix: retry on 409 (PR #12)") == Parts(
-        "fix", None, False, "retry on 409", pull="12")
+        "feat", "cli", True, "drop the old flag", pull="8")
+    assert commit_message.parse_subject("fix: retry on 409") == Parts("fix", None, False, "retry on 409")
 
 
 @pytest.mark.parametrize("subject", ["wip", "feat(): x (#1)", "feature: x (#1)", 'Revert "feat: x (#1)"',
@@ -327,8 +333,8 @@ KEYS = rules(subject=["[{key}] {conventional} {description}", "{conventional} {d
 
 def test_the_no_match_message_lists_the_default_forms():
     assert check_subject("add dark mode") == (
-        "subject must read '<type>[(<scope>)][!]: <description> (#<issue>)' or "
-        "'<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'add dark mode'")
+        "subject must read '<type>[(<scope>)][!]: <description> (#<pr>)' or "
+        "'<type>[(<scope>)][!]: <description>', got: 'add dark mode'")
 
 
 def test_the_no_match_message_lists_the_configured_forms():
@@ -370,3 +376,57 @@ def test_exempt_subjects_stay_exempt_under_a_custom_template():
         assert check_reference(subject, set(), 101, KEYS) is None
         assert commit_message.parse_subject(subject, KEYS) is None
     assert referenced_issues(['Revert "feat: x (#7)"', "fixup! feat: y (#8)"]) == set()
+
+
+# --- {pull_or_issue} ---
+
+EITHER = rules(["{conventional} {description} (#{pull_or_issue})"])
+
+
+@pytest.mark.parametrize("subject", ["feat: x (#80)", "feat: x (#12)"])
+def test_pull_or_issue_takes_the_pull_request_or_an_issue(subject):
+    assert check_reference(subject, {12}, 80, EITHER) is None
+
+
+def test_pull_or_issue_rejects_anything_else():
+    assert (check_reference("feat: x (#4711)", {12}, 80, EITHER)
+            == "#4711 is neither this pull request nor an issue of this repository")
+
+
+def test_pull_or_issue_numbers_are_looked_up():
+    assert referenced_issues(["feat: x (#12)"], EITHER) == {12}
+
+
+# --- the appended pull reference ---
+
+APPEND = rules(["{conventional} {description} (#{pull})"], append_pull_reference=True)
+
+
+@pytest.mark.parametrize("title, subject", [
+    ("feat: x", "feat: x (#80)"),
+    ("  feat: x  ", "feat: x (#80)"),
+    ("feat: x (#80)", "feat: x (#80)"),
+    ("feat: x (#79)", "feat: x (#79) (#80)"),
+])
+def test_the_pull_reference_is_appended_once(title, subject):
+    assert commit_rule.squash_subject(title, 80, APPEND) == subject
+
+
+def test_without_the_append_the_title_is_the_subject():
+    assert commit_rule.squash_subject(" feat: x ", 80, rules(append_pull_reference=False)) == "feat: x"
+
+
+def test_the_squash_message_lands_and_checks_the_appended_subject():
+    message = squash_message("feat: x", "", set(), 80, APPEND)
+    assert (message.subject, message.problems) == ("feat: x (#80)", ())
+
+
+def test_a_problem_quotes_the_appended_subject():
+    message = squash_message("land it", "", set(), 80, APPEND)
+    assert "got: 'land it (#80)'" in message.problems[0]
+
+
+def test_by_default_kept_commits_land_with_their_own_pull_reference_or_none():
+    commits = [Commit("a" * 40, "feat: x", 1), Commit("b" * 40, "test: y (#213)", 1)]
+    assert commit_problems(commits, ISSUES, 213) == []
+    assert "is not this pull request" in commit_problems([Commit("c" * 40, "feat: x (#99)", 1)], ISSUES, 213)[0]

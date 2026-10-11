@@ -15,7 +15,8 @@ The split follows Renovate: the logic ships as a container image, and each repos
 a thin workflow layer that runs it.
 
 - **Image** `mergeweasel`: a Python package, standard library only, with a CLI of two commands:
-  - `mergeweasel pass [--dry-run]` - one queue pass, which releases first;
+  - `mergeweasel pass [--dry-run]` - one queue pass, which releases first if the release is
+    switched on;
   - `mergeweasel check-commits --event <path>` - checks what a pull request would land.
 - **Thin layer** in each repository: `mergeweasel-queue.yml` runs the pass,
   `mergeweasel-commits.yml` runs the check. Both run the image as their job container. This
@@ -55,7 +56,7 @@ candidate gets flagged `needs-fix`, the pass hands over to the next candidate wi
 
 Every merge, label change and finished check run wakes the queue, so no schedule is needed. An
 approval wakes nothing: the label `automerge` comes after it. Before its step, a pass releases
-`main` (see [Releases](#releases)).
+`main` if the repository has switched the release on (see [Releases](#releases)).
 
 ### Definitions
 
@@ -237,8 +238,8 @@ pass only merges.
 `check-commits` and the queue share one rule, so they cannot disagree. The queue validates again
 right before the merge, because the title, body and commits can change after the check ran.
 
-**Subject**: one of the forms in `commits.subject` - by default Conventional Commits with the issue
-as suffix. The forms and their placeholders are in
+**Subject**: one of the forms in `commits.subject` - by default Conventional Commits with the pull
+request's number as suffix, or without a reference. The forms and their placeholders are in
 [configuration](configuration.md#the-subject), the types in
 [configuration](configuration.md#types-and-releases), the scopes in
 [configuration](configuration.md#scopes). Each form compiles to an anchored regular expression; the
@@ -255,11 +256,15 @@ the pull request that introduces it; that one is flagged `needs-fix`, and the fi
 `main` through the queue. As a side effect, a pull request that changes the scope list or the
 subject forms is checked against what it brings, which is what its reviewers see in the diff.
 - `!` marks a breaking change, which makes a release a major one.
-- `{issue}` must be an issue of the repository; `{pull}` must be this pull request. `{key}` names
+- `{issue}` must be an issue of the repository; `{pull}` must be this pull request;
+  `{pull_or_issue}` either of the two. Gitea numbers issues and pull requests in one sequence, so a
+  number is never both. `{key}` names
   another tracker's issue, which mergeweasel cannot look up; only its project is checked, against
   `commits.projects`.
 
-**Squash** (the default): the pull request's title becomes the subject, and the `## Commit` section
+**Squash** (the default): the pull request's title becomes the subject - with ` (#<pr>)` appended
+unless it ends in it already, as Gitea's own squash suggestion does
+([configuration](configuration.md#the-appended-pull-reference)) - and the `## Commit` section
 of its body becomes the commit body - from that heading to the next heading of level 1 or 2. Line
 endings are normalised and HTML comments removed first. There may be at most one such section, it
 must keep to the line limit in [configuration](configuration.md#the-line-length), and it must not
@@ -284,14 +289,17 @@ the current text and the run that finishes last judges the latest state.
 
 ## Releases
 
-Every pass releases the repository it runs in, before its step. If `main` holds releasing commits
-since the previous release, the pass creates a Gitea release on `main`'s head - a lightweight tag
-and the notes - with one `POST releases`.
+Every pass releases the repository it runs in, before its step, if the repository has switched the
+release on. If `main` holds releasing commits since the previous release, the pass creates a Gitea
+release on `main`'s head - a lightweight tag and the notes - with one `POST releases`.
 
-`release.enabled = false` in `main`'s `mergeweasel.toml` switches the step off
-([configuration](configuration.md#switching-the-release-off)): the pass reads and checks the file,
-prints that the release is off, and reads no tags. A switch independent of the tags lets a
-repository whose tags come from other tooling opt out.
+The step runs only with `release.enabled = true` in `main`'s `mergeweasel.toml`
+([configuration](configuration.md#switching-the-release-on)). Otherwise the pass reads and checks
+the file, prints how to switch the release on, and reads no tags. The release is off by default
+because, with the default SemVer template, the default makes a difference only in a repository that
+already carries release tags - and such a repository most likely releases with other tooling
+already, which mergeweasel's tags would collide with. A CalVer template, which needs no first tag,
+is always configured deliberately, and so can the switch be.
 
 The template `release.tag` in `mergeweasel.toml` sets the version format
 ([configuration](configuration.md#the-release-tag)); the default is `v{major}.{minor}.{patch}`. The

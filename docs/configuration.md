@@ -117,10 +117,11 @@ mergeweasel.toml: unknown key commits.scopse ignored
 
 | Key | Default | Meaning |
 |---|---|---|
-| `release.enabled` | `true` | whether the queue releases at all - see [switching the release off](#switching-the-release-off) |
+| `release.enabled` | `false` | whether the queue releases - see [switching the release on](#switching-the-release-on) |
 | `release.tag` | `"v{major}.{minor}.{patch}"` | how versions look - see [the release tag](#the-release-tag) |
 | `commits.scopes` | any scope | the scopes a subject may use - see [scopes](#scopes) |
-| `commits.subject` | `(#<issue>)` or `(PR #<pr>)` at the end | the forms a subject may take - see [the subject](#the-subject) |
+| `commits.subject` | `(#<pr>)` at the end, or no reference | the forms a subject may take - see [the subject](#the-subject) |
+| `commits.squash_append_pull_reference` | `true` | a squash appends ` (#<pr>)` to the title - see [the appended pull reference](#the-appended-pull-reference) |
 | `commits.projects` | any project | the projects a `{key}` may name - see [the subject](#the-subject) |
 | `commits.types` | the types of `@commitlint/config-conventional` | the types a subject may use - see [types and releases](#types-and-releases) |
 | `commits.max_line` | `72` | the longest line of the `## Commit` section - see [the line length](#the-line-length) |
@@ -171,14 +172,21 @@ Otherwise the file is invalid, and the message names the entry.
 
 ### The subject
 
-Every subject - a pull request's title, and with `keep-commits` every commit - must take one of the
-forms in `commits.subject`. A form is a template: literal text with placeholders. By default a
-subject ends in a reference to an issue, or to the pull request itself:
+Every subject that lands on `main` - a squash's subject, and with `keep-commits` every commit - must
+take one of the forms in `commits.subject`. A squash's subject is the pull request's title with the
+pull request's number appended ([the appended pull reference](#the-appended-pull-reference)). A form
+is a template: literal text with placeholders. By default a subject ends in a reference to the pull
+request, or has no reference at all:
 
 ```toml
 [commits]
-subject = ["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]
+subject = ["{conventional} {description} (#{pull})", "{conventional} {description}"]
 ```
+
+A squash always fits the first form: the title `feat(ui): add dark mode` lands as
+`feat(ui): add dark mode (#80)`. The second form is for `keep-commits` commits, which land as they
+are: their pull request's number is not known yet when they are written, so they may do without
+one.
 
 | Placeholder | Stands for | Checked |
 |---|---|---|
@@ -186,23 +194,29 @@ subject = ["{conventional} {description} (#{issue})", "{conventional} {descripti
 | `{description}` | the description: everything between its neighbours in the template, starting with a non-space character | - |
 | `{issue}` | a number | it is an issue of this repository |
 | `{pull}` | a number | it is this pull request's number |
+| `{pull_or_issue}` | a number | it is this pull request's number, or an issue of this repository |
 | `{key}` | an issue key of another tracker, such as Jira, Linear or YouTrack: an uppercase letter, then uppercase letters, digits and `_`, a dash and a number - `PROJ-123` | its project - the part before the dash - is one of `commits.projects`, if the repository sets it. mergeweasel cannot look the key up |
 
 Some forms and the subjects they accept:
 
 | `commits.subject` | Accepts |
 |---|---|
-| the default | `feat(ui): add dark mode (#12)`, `chore: tidy the README (PR #31)` |
-| `["{conventional} {description}"]` | `feat(ui): add dark mode` - no reference at all |
-| `["{conventional} {description} (#{issue})", "{conventional} {description}"]` | both of the above: the reference is optional |
+| the default | `feat(ui): add dark mode (#80)` from pull request #80, `feat(ui): add dark mode` |
+| `["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]` | `feat(ui): add dark mode (#12)`, `chore: tidy the README (PR #31)` - with the append switched off |
+| `["{conventional} {description} (#{pull_or_issue})"]` | `feat(ui): add dark mode (#12)` for issue #12, `feat(ui): add dark mode (#80)` from pull request #80 |
 | `["{conventional} {key} {description}"]` | `feat(ui): PROJ-12 add dark mode` |
 | `["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]` | `[PROJ-12] feat: add dark mode`, `chore: tidy the README (PR #31)` |
 
 **The first form that fits decides.** mergeweasel tries the forms in the order of the list. The
 first one the subject fits is the one it is checked against; a later one is not tried, even when a
 check fails. A repository that makes the reference optional therefore lists the form without a reference
-last: `feat: add dark mode (#4711)` then fits the first form, and #4711 must be an issue. Listed
-first, the form without a reference would take `(#4711)` as part of the description, unchecked.
+last, as the default does: `feat: add dark mode (#4711)` then fits the first form, and #4711 must be
+this pull request. Listed first, the form without a reference would take `(#4711)` as part of the
+description, unchecked.
+
+`(#{issue})` and `(#{pull})` look the same in a subject, so of two forms that differ only there,
+the first always decides. A repository that accepts both kinds of number in one place uses
+`{pull_or_issue}`.
 
 **Projects.** With `{key}`, any project passes by default, and so does a typo in it. A repository
 lists its projects to catch that:
@@ -220,7 +234,7 @@ PR title: unknown project 'PORJ' in PORJ-12, expected one of: PROJ, OPS
 **A form is valid when**
 
 - it contains `{conventional}` and `{description}` once each, `{conventional}` first;
-- it contains at most one of `{issue}`, `{pull}` and `{key}`;
+- it contains at most one of `{issue}`, `{pull}`, `{pull_or_issue}` and `{key}`;
 - text separates every two placeholders - in `{description}{key}` the description's end is
   guesswork;
 - a space follows `{conventional}`, as Conventional Commits requires;
@@ -234,7 +248,7 @@ makes the file invalid, and the message names the form and the broken rule.
 A subject that fits no form fails, and the message lists the forms:
 
 ```
-PR title: subject must read '[<key>] <type>[(<scope>)][!]: <description>' or '<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'feat: add dark mode (#12)'
+PR title: subject must read '<type>[(<scope>)][!]: <description> (#<pr>)' or '<type>[(<scope>)][!]: <description>', got: 'add dark mode (#80)'
 ```
 
 **Text before the type.** mergeweasel reads any form, also one with text before `{conventional}`
@@ -244,8 +258,8 @@ start, and find none in `[PROJ-12] feat: add dark mode`. Repositories that use s
 reference after the colon or at the end.
 
 **The release notes.** A release lists each releasing commit as its subject without the type and the
-breaking marker, in the commit's own form: `feat(ui): add dark mode (#12)` becomes
-`ui: add dark mode (#12)`, `[PROJ-12] feat: add dark mode` becomes `[PROJ-12] add dark mode`.
+breaking marker, in the commit's own form: `feat(ui): add dark mode (#80)` becomes
+`ui: add dark mode (#80)`, `[PROJ-12] feat: add dark mode` becomes `[PROJ-12] add dark mode`.
 
 **Changing the forms.** The commit check reads `commits.subject` from the pull request's branch, the
 release from `main`. A commit on `main` that fits none of `main`'s forms releases nothing, and the
@@ -261,6 +275,57 @@ and merges at most one pull request; the pass that merges the second pull reques
 commits of the old forms already. Two ways lose them: replacing the forms in a single pull request,
 and a release that fails between the two merges - then merge the second pull request after a
 release has succeeded, or add the old forms back until it has.
+
+### The appended pull reference
+
+When Gitea squashes a pull request, it suggests the pull request's title with its number appended:
+pull request #80 titled `feat: add dark mode` becomes `feat: add dark mode (#80)`. mergeweasel
+squashes the same way, so a title needs no reference of its own:
+
+```toml
+[commits]
+squash_append_pull_reference = true
+```
+
+- The subject is the title, stripped of surrounding whitespace, with ` (#<pr>)` appended.
+- A title that already ends in its own number - copied from Gitea's suggestion, say - is taken as it
+  is: `feat: add dark mode (#80)` lands as `feat: add dark mode (#80)`, not with the number twice.
+- A title that ends in another number still gets its own appended: `feat: add dark mode (#79)` lands
+  as `feat: add dark mode (#79) (#80)`, just as Gitea would suggest it. With the default forms,
+  `(#79)` is then part of the description.
+- The check, its messages and the merge all use the appended subject, and `commits.subject`
+  describes it: a form ending in ` (#{pull})` or ` (#{pull_or_issue})` takes it.
+- It applies to squash merges only. `keep-commits` commits land as they are; with the default forms
+  they may end in their pull request's number or carry no reference.
+
+With the append switched on, two rules hold for `commits.subject`, and a file that breaks one is
+invalid:
+
+- Some form ends in ` (#{pull})` or ` (#{pull_or_issue})`, or no squash could land:
+
+  ```
+  mergeweasel.toml: commits.squash_append_pull_reference needs a commits.subject form ending in ' (#{pull})' or ' (#{pull_or_issue})', or set commits.squash_append_pull_reference = false
+  ```
+
+- No form ends in ` (#{issue})`. Every squash subject would fit it, since the appended number looks
+  the same, and then fail, since that number is the pull request's and not an issue's:
+
+  ```
+  mergeweasel.toml: commits.subject: '{conventional} {description} (#{issue})' ends like the appended pull reference - use {pull_or_issue}, or set commits.squash_append_pull_reference = false
+  ```
+
+A repository that wants its titles to carry their own reference switches the append off and lists
+its forms. mergeweasel's own repository, for example, references the issue, or the pull request
+where there is no issue:
+
+```toml
+[commits]
+squash_append_pull_reference = false
+subject = ["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]
+```
+
+A repository whose forms use a Jira key, such as `["[{key}] {conventional} {description}"]`,
+switches the append off as well, or adds ` (#{pull})` to the end of a form.
 
 ### Types and releases
 
@@ -323,7 +388,9 @@ only a release that failed in between leaves them unreleased.
 by default, other types through presets or `semanticCommitType`, for example
 `ci(deps): update docker.io/chli1ro/mergeweasel docker tag to v2.1.0`. A repository that uses
 Renovate and sets `commits.types` has to include every type its Renovate writes, or those pull
-requests are flagged `needs-fix`.
+requests are flagged `needs-fix`. With the default forms, Renovate's titles need no reference:
+`chore(deps): update pytest to v8.4.2` from pull request #81 lands as
+`chore(deps): update pytest to v8.4.2 (#81)`.
 
 ### The line length
 
@@ -429,24 +496,33 @@ merging.
 - **Docker tags.** Git tags allow `+`, Docker tags do not. A workflow that publishes an image
   tagged with the version has to replace the `+`, for example with `-`.
 
-### Switching the release off
+### Switching the release on
 
-A repository that releases with other tooling, or not at all, turns the release step off:
+The release is off by default: the queue merges, but never tags `main` or creates a Gitea release,
+whatever the merged commits and whatever tags the repository carries. A repository that has
+mergeweasel release switches it on:
 
 ```toml
 [release]
-enabled = false
+enabled = true
 ```
 
-The queue then merges as usual but never tags `main` or creates a Gitea release, whatever the
-merged commits and whatever tags the repository carries. Each pass prints that the release is
-switched off. The commit check is unchanged: subjects still need a type from `commits.types`.
+With the default SemVer template, the first release also needs a first tag on `main`, set by hand -
+see [SemVer and CalVer](#semver-and-calver). While the release is off, each pass says how to switch
+it on:
+
+```
+release: to release, set release.enabled = true in mergeweasel.toml
+```
+
+The commit check does not depend on the switch: subjects need a type from `commits.types` either
+way.
 
 The other `release` keys stay checked while the release is off: an invalid `release.tag` or an
 unknown type in `release.patch_types` still fails the pass's release and shows in its log. Set them
-as you want them for the day you switch back on, or leave them out. Once switched back on, the
-next release covers every releasing commit since the previous release, the ones merged while the
-release was off included.
+as you want them for the day you switch the release on, or leave them out. Once switched on, the
+first release covers every releasing commit since the previous release tag, the ones merged while
+the release was off included.
 
 ## Image
 

@@ -45,7 +45,7 @@ set each unit as listed. An account that fills both roles needs both columns.
 | Code | write | read | the merger rebases pull requests and sets the carry-over status; both read commits |
 | Pull requests | write | write | the merger merges and sets labels and comments; the approvers approve |
 | Releases | write | - | the merger creates the release after a releasing merge |
-| Issues | read | - | the merger checks that an `{issue}` reference in a title - `(#N)` by default - names an issue |
+| Issues | read | - | the merger checks that an `{issue}` or `{pull_or_issue}` reference in a subject names an issue; the default forms have none |
 | Actions | read | - | the merger reads the queue's workflow runs, to run one pass at a time |
 
 In a public repository everyone can read, so only the write permissions need granting. On `main`'s
@@ -91,16 +91,24 @@ Renovate really runs as, and keep its token as safe as an approver token.
 
 ## Configuration
 
-This step is optional: mergeweasel works without any configuration. To change a rule for the
-repository's commits or releases, add `mergeweasel.toml` to the root of the repository and merge it
-to `main`. [Configuration](configuration.md#the-configuration-file) lists the keys.
+mergeweasel merges without any configuration; the release needs one line, see
+[releases](#releases). To change a rule for the repository's commits or releases, add
+`mergeweasel.toml` to the root of the repository and merge it to `main`.
+[Configuration](configuration.md#the-configuration-file) lists the keys.
 
 ## Releases
 
-After each merge, the queue checks whether the merged commits call for a release: a commit of a
-releasing type ([configuration](configuration.md#types-and-releases)), or a breaking change (`!`).
-If so, it creates a tag on `main` and a Gitea release with notes. `release.tag` sets the version
-format ([configuration](configuration.md#the-release-tag)):
+The release is off until the repository switches it on in its `mergeweasel.toml`:
+
+```toml
+[release]
+enabled = true
+```
+
+Then, after each merge, the queue checks whether the merged commits call for a release: a commit
+of a releasing type ([configuration](configuration.md#types-and-releases)), or a breaking change
+(`!`). If so, it creates a tag on `main` and a Gitea release with notes. `release.tag` sets the
+version format ([configuration](configuration.md#the-release-tag)):
 
 - **SemVer**, `vX.Y.Z`, the default: mergeweasel counts up from the previous `vX.Y.Z` tag on
   `main`. To start, tag a commit on `main` by hand, for example `v0.1.0`. Until that tag exists,
@@ -108,8 +116,8 @@ format ([configuration](configuration.md#the-release-tag)):
 - **CalVer**, for example `tag = "{YY}.{MM}.{DD}.{count}+{sha}"`: no first tag is needed; the first
   merge that releases creates it.
 
-A repository that releases otherwise sets `release.enabled = false`
-([configuration](configuration.md#switching-the-release-off)); the queue then only merges.
+Without `enabled = true` the queue only merges, which suits a repository that releases with other
+tooling ([configuration](configuration.md#switching-the-release-on)).
 
 Tags on other branches are ignored. If you keep a maintenance branch for an older version, create
 it only once `main` has moved past that version line - otherwise both branches can arrive at the

@@ -18,38 +18,38 @@ of every mergeweasel log shows the names in use.
 ## The commit message
 
 By default mergeweasel squashes the pull request into one commit. The pull request's **title**
-becomes the commit's subject, and the **`## Commit` section** of its description becomes the
-commit's body. [Configuration](configuration.md#the-subject) lists the exact rules.
+becomes the commit's subject, with the pull request's number appended as Gitea's own squash
+suggestion does, and the **`## Commit` section** of its description becomes the commit's body.
+[Configuration](configuration.md#the-subject) lists the exact rules.
 
 The scope - `api` in `fix(api): ...` - is optional. Unless the repository says otherwise, any scope
 is accepted. A repository can restrict the scopes to a fixed list in its `mergeweasel.toml`
 ([configuration](configuration.md#scopes)); a title with any other scope is then rejected, and the
 message lists the scopes the repository allows.
 
-The examples below use the default form, a reference at the end. A repository can choose other forms
-in its `mergeweasel.toml` - without a reference, or with a Jira key such as `PROJ-12`
+The examples below use the default forms. A repository can choose other forms in its
+`mergeweasel.toml` - with an issue reference, or with a Jira key such as `PROJ-12`
 ([configuration](configuration.md#the-subject)); the message for a title that fits none lists the
 repository's forms.
 
-Valid titles:
+Valid titles, and what pull request #80 lands as with each:
 
 ```
-feat: add dark mode (#12)
-fix(api): retry on 409 (#7)
-feat!: drop the v1 endpoints (#30)
-chore: tidy the README (PR #31)
+feat: add dark mode                 feat: add dark mode (#80)
+fix(api): retry on 409              fix(api): retry on 409 (#80)
+feat!: drop the v1 endpoints        feat!: drop the v1 endpoints (#80)
+chore: tidy the README (#80)        chore: tidy the README (#80) - the number is not doubled
 ```
 
-`(#N)` names an issue of the repository. `(PR #N)` is for a change without an issue and names the
-pull request itself.
+Link the issue a pull request resolves in its description, for example with `Closes #12`.
 
 Rejected titles:
 
 ```
-feat(): add dark mode (#12)        an empty scope - leave out the parentheses
-feat(my ui): add dark mode (#12)   a scope with whitespace
-feat(domian): add dark mode (#12)  a scope missing from commits.scopes, if the repository sets it
-add dark mode                      no type, no reference
+feat(): add dark mode               an empty scope - leave out the parentheses
+feat(my ui): add dark mode          a scope with whitespace
+feat(domian): add dark mode         a scope missing from commits.scopes, if the repository sets it
+add dark mode                       no type
 ```
 
 A description with a `## Commit` section. Only that section lands; everything from the next `##`
@@ -89,10 +89,16 @@ show its `## Commit` section, so say there what users must change.
 
 ## `keep-commits`
 
-Every commit of the pull request lands as it is. So every commit must follow the subject rule
-above, and none may be a merge commit. Subjects made by `git commit --fixup`, `git commit --squash`
-and `git revert` (`fixup! ...`, `squash! ...`, `Revert "..."`) are exempt, because they refer to an
-earlier commit.
+Every commit of the pull request lands as it is, without an appended number. So every commit must
+follow the subject rule above, and none may be a merge commit. With the default forms, a commit
+either has no reference - `feat: add dark mode` - or ends in its pull request's number. A commit
+ending in an issue's number, `fix: repair b (#12)`, is rejected with
+`PR #12 is not this pull request`: by default `(#N)` names the pull request. A repository whose
+commits reference issues uses the placeholder `{pull_or_issue}`
+([configuration](configuration.md#the-subject)).
+
+Subjects made by `git commit --fixup`, `git commit --squash` and `git revert` (`fixup! ...`,
+`squash! ...`, `Revert "..."`) are exempt, because they refer to an earlier commit.
 
 ## What a `needs-fix` comment means
 

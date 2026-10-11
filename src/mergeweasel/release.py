@@ -119,7 +119,7 @@ def release_tags(gitea, template):
 def _release(gitea, dry_run, base_branch, now):
     configuration = config.load(gitea, base_branch)
     if not configuration.release_enabled:
-        print(f"release: switched off by release.enabled in {config.CONFIG_FILE}, nothing released")
+        print(f"release: to release, set release.enabled = true in {config.CONFIG_FILE}")
         return True
     # The forms only: a scope, project or type the lists no longer name is still read as it landed;
     # the release lists decide whether it releases.

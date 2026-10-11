@@ -70,7 +70,8 @@ answer - an uncommitted marker, a shallow clone, a released image without a revi
 
 This repository lands its pull requests through its own queue, running mergeweasel's `latest`
 image. The pull request title and its `## Commit` section become the commit; the rules are
-in [usage](docs/usage.md).
+in [usage](docs/usage.md), with this repository's own forms from `mergeweasel.toml`: the title
+ends in its issue, `(#N)`, or in its own number, `(PR #N)`, and nothing is appended.
 
 CI (`ci.yml`) runs on every pull request:
 

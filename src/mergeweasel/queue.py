@@ -406,7 +406,8 @@ def merge_message(gitea, action):
         problems = commit_rule.commit_problems(commits, issues, action.number, rules)
     else:
         pull_request = gitea.pull(action.number)
-        issues = commit_rule.known_issues([pull_request.title], gitea.is_issue, rules)
+        subject = commit_rule.squash_subject(pull_request.title, action.number, rules)
+        issues = commit_rule.known_issues([subject], gitea.is_issue, rules)
         message = commit_rule.squash_message(pull_request.title, pull_request.body, issues, action.number, rules)
         problems = list(message.problems)
     if problems:

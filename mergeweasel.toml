@@ -1,0 +1,6 @@
+[commits]
+squash_append_pull_reference = false
+subject = ["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"]
+
+[release]
+enabled = true

@@ -31,7 +31,8 @@ def run(gitea, event_path, settings):
         # The pull request's own version: one that breaks the file fails here, not on the base branch.
         rules = config.load(gitea, pull.head_sha).commits
         commits = gitea.pull_commits(number) if keep_commits else []
-        subjects = [commit.subject for commit in commits] if keep_commits else [pull.title]
+        subjects = ([commit.subject for commit in commits] if keep_commits
+                    else [commit_rule.squash_subject(pull.title, number, rules)])
         issues = commit_rule.known_issues(subjects, gitea.is_issue, rules)
     except Unreachable as error:
         print(f"could not reach the Gitea API: {error.message}", file=sys.stderr)

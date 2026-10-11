@@ -71,7 +71,7 @@ def test_without_the_keys_the_subject_is_the_default():
 
 
 def test_the_subject_templates_are_read_in_order():
-    text = ('[commits]\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description}"]\n'
+    text = ('[commits]\nsquash_append_pull_reference = false\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description}"]\n'
             'projects = ["PROJ", "OPS"]\n')
     commits = config.parse(text).commits
     assert [template.text for template in commits.templates] == ["[{key}] {conventional} {description}",
@@ -111,12 +111,19 @@ def test_a_default_release_list_keeps_only_what_the_file_allows(text, minor, pat
 
 
 @pytest.mark.parametrize("text, enabled", [
-    ("", True),
+    ("", False),
     ("[release]\nenabled = true\n", True),
     ("[release]\nenabled = false\n", False),
 ])
 def test_the_release_switch(text, enabled):
     assert config.parse(text).release_enabled is enabled
+
+
+def test_by_default_the_pull_reference_is_appended():
+    commits = config.parse("").commits
+    assert commits.append_pull_reference is True
+    assert [template.text for template in commits.templates] == ["{conventional} {description} (#{pull})",
+                                                                 "{conventional} {description}"]
 
 
 def test_crlf_line_ends_parse():
@@ -149,7 +156,33 @@ def test_a_file_without_unknown_keys_prints_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
+PULL = '"{conventional} {description} (#{pull})"'
+ISSUE = '"{conventional} {description} (#{issue})"'
+
+
+@pytest.mark.parametrize("text, append", [
+    ("[commits]\nsquash_append_pull_reference = false\n", False),
+    (f"[commits]\nsquash_append_pull_reference = true\nsubject = [{PULL}]\n", True),
+])
+def test_the_append_switch_is_read(text, append):
+    assert config.parse(text).commits.append_pull_reference is append
+
+
+def test_without_the_append_any_forms_pass():
+    text = ('[commits]\nsquash_append_pull_reference = false\nsubject = [' + ISSUE
+            + ', "{conventional} {description} (PR #{pull})"]\n')
+    assert config.parse(text).commits.append_pull_reference is False
+
+
 @pytest.mark.parametrize("text, message", [
+    ('[commits]\nsquash_append_pull_reference = "yes"\n',
+     "mergeweasel.toml: commits.squash_append_pull_reference must be true or false"),
+    ('[commits]\nsquash_append_pull_reference = true\nsubject = ["{conventional} {description} (PR #{pull})"]\n',
+     "mergeweasel.toml: commits.squash_append_pull_reference needs a commits.subject form ending in"
+     " ' (#{pull})' or ' (#{pull_or_issue})', or set commits.squash_append_pull_reference = false"),
+    ('[commits]\nsquash_append_pull_reference = true\nsubject = [' + PULL + ', ' + ISSUE + ']\n',
+     "mergeweasel.toml: commits.subject: '{conventional} {description} (#{issue})' ends like the appended"
+     " pull reference - use {pull_or_issue}, or set commits.squash_append_pull_reference = false"),
     ('release = "x"\n', "mergeweasel.toml: release must be a table"),
     ("[release]\ntag = 1\n", "mergeweasel.toml: release.tag must be a string"),
     ('[release]\nenabled = "false"\n', "mergeweasel.toml: release.enabled must be true or false"),
@@ -166,9 +199,9 @@ def test_a_file_without_unknown_keys_prints_nothing(capsys):
     ("[commits]\nsubject = [1]\n", "mergeweasel.toml: commits.subject: 1 is not a template"),
     ('[commits]\nsubject = ["{conventional}{description}"]\n',
      "mergeweasel.toml: commits.subject: '{conventional}{description}': {conventional} must be followed by a space"),
-    ('[commits]\nsubject = ["{conventional} {key} {description}"]\nprojects = []\n',
+    ('[commits]\nsquash_append_pull_reference = false\nsubject = ["{conventional} {key} {description}"]\nprojects = []\n',
      "mergeweasel.toml: commits.projects must not be empty"),
-    ('[commits]\nsubject = ["{conventional} {key} {description}"]\nprojects = ["proj"]\n',
+    ('[commits]\nsquash_append_pull_reference = false\nsubject = ["{conventional} {key} {description}"]\nprojects = ["proj"]\n',
      "mergeweasel.toml: commits.projects: 'proj' is not a project"),
     ('[commits]\nprojects = ["PROJ"]\n', "mergeweasel.toml: commits.projects needs a commits.subject template with {key}"),
     ('[commits]\ntypes = "feat"\n', "mergeweasel.toml: commits.types must be a list of strings"),
