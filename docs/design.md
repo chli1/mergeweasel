@@ -288,6 +288,11 @@ Every pass releases the repository it runs in, before its step. If `main` holds 
 since the previous release, the pass creates a Gitea release on `main`'s head - a lightweight tag
 and the notes - with one `POST releases`.
 
+`release.enabled = false` in `main`'s `mergeweasel.toml` switches the step off
+([configuration](configuration.md#switching-the-release-off)): the pass reads and checks the file,
+prints that the release is off, and reads no tags. A switch independent of the tags lets a
+repository whose tags come from other tooling opt out.
+
 The template `release.tag` in `mergeweasel.toml` sets the version format
 ([configuration](configuration.md#the-release-tag)); the default is `v{major}.{minor}.{patch}`. The
 pass reads the file from `main` with one `GET contents` before releasing, so a pull request cannot

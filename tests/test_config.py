@@ -110,6 +110,15 @@ def test_a_default_release_list_keeps_only_what_the_file_allows(text, minor, pat
     assert (configuration.minor_types, configuration.patch_types) == (minor, patch)
 
 
+@pytest.mark.parametrize("text, enabled", [
+    ("", True),
+    ("[release]\nenabled = true\n", True),
+    ("[release]\nenabled = false\n", False),
+])
+def test_the_release_switch(text, enabled):
+    assert config.parse(text).release_enabled is enabled
+
+
 def test_crlf_line_ends_parse():
     assert config.parse('[release]\r\ntag = "{YY}.{count}"\r\n').tag.text == "{YY}.{count}"
 
@@ -119,6 +128,8 @@ def test_crlf_line_ends_parse():
     ('[release]\ntags = "{YY}.{count}"\n', "mergeweasel.toml: unknown key release.tags"),
     ('release = "x"\n', "mergeweasel.toml: release must be a table"),
     ("[release]\ntag = 1\n", "mergeweasel.toml: release.tag must be a string"),
+    ('[release]\nenabled = "false"\n', "mergeweasel.toml: release.enabled must be true or false"),
+    ("[release]\nenabled = 0\n", "mergeweasel.toml: release.enabled must be true or false"),
     ('[release]\ntag = "{yy}"\n', "mergeweasel.toml: release.tag: unknown placeholder {yy}"),
     ("[release\n", "mergeweasel.toml: "),
     ('[commits]\nscopes = "ui"\n', "mergeweasel.toml: commits.scopes must be a list of strings"),

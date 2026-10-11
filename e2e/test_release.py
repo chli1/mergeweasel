@@ -2,6 +2,8 @@
 import datetime
 import re
 
+import pytest
+
 TITLE = "fix: repair a (#1)"
 
 
@@ -92,3 +94,15 @@ def test_calver_releases_from_the_first_releasing_merge(repo, run_pass):
     following = release_on(repo, second)
     assert following.endswith(f".{commit_count(repo, second)}+{second[:7]}")
     assert repo.release(following)["body"] == "## Features\n\n- add b (#1)\n"
+
+
+@pytest.mark.needs_this_commit
+def test_switched_off_a_tagged_repository_gets_no_release(repo, run_pass):
+    repo.tag("v1.0.0")
+    repo.move_main({"mergeweasel.toml": "[release]\nenabled = false\n"}, "ci: release by hand (#1)")
+    merge_through_the_queue(repo, run_pass, TITLE)
+
+    output = run_pass()
+
+    assert set(repo.tags()) == {"v1.0.0"}
+    assert "switched off by release.enabled" in output

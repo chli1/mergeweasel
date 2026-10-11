@@ -303,6 +303,20 @@ def test_an_invalid_configuration_is_a_release_error(capsys):
     assert "release failed: mergeweasel.toml: release.tag: unknown placeholder {yy}" in capsys.readouterr().err
 
 
+def test_switched_off_the_release_reads_no_tags(capsys):
+    gitea = fake_gitea(config="[release]\nenabled = false\n",
+                       history=[history_commit(2, "feat!: add a (#1)"), history_commit(1, "feat: start (#1)")])
+    assert release.run(gitea, dry_run=False, base_branch="main")
+    assert posts(gitea) == [] and not gitea.tag_refs.called
+    assert "release: switched off by release.enabled in mergeweasel.toml" in capsys.readouterr().out
+
+
+def test_switched_off_an_invalid_release_key_is_still_an_error(capsys):
+    gitea = fake_gitea(config='[release]\nenabled = false\ntag = "{yy}"\n')
+    assert not release.run(gitea, dry_run=False, base_branch="main")
+    assert "release.tag: unknown placeholder {yy}" in capsys.readouterr().err
+
+
 def test_without_a_given_time_the_date_is_utc():
     gitea = fake_gitea(config='[release]\ntag = "{YYYY}.{MM}.{DD}.{count}"\n', count=5,
                        history=[history_commit(2, "fix: repair (#2)")])

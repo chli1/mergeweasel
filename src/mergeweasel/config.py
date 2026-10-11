@@ -12,9 +12,9 @@ DEFAULT_TAG = "v{major}.{minor}.{patch}"
 DEFAULT_MINOR_TYPES = ("feat",)
 DEFAULT_PATCH_TYPES = ("fix", "perf", "revert")
 # Table -> key -> type.
-SCHEMA = {"release": {"tag": str, "minor_types": list, "patch_types": list},
+SCHEMA = {"release": {"enabled": bool, "tag": str, "minor_types": list, "patch_types": list},
           "commits": {"scopes": list, "subject": list, "projects": list, "types": list, "max_line": int}}
-TYPE_NAMES = {str: "a string", list: "a list of strings", int: "an integer"}
+TYPE_NAMES = {bool: "true or false", str: "a string", list: "a list of strings", int: "an integer"}
 # What {conventional} reads as the type.
 TYPE = re.compile(r"[a-z]+")
 # What the subject's scope can hold: non-empty, no whitespace, no closing parenthesis.
@@ -34,6 +34,8 @@ class Config:
     # The types that release a minor and a patch version; `!` always releases a major one.
     minor_types: tuple = DEFAULT_MINOR_TYPES
     patch_types: tuple = DEFAULT_PATCH_TYPES
+    # Off: the queue releases nothing; the other release keys stay checked.
+    release_enabled: bool = True
 
 
 def load(gitea, ref):
@@ -67,7 +69,7 @@ def parse(text):
             if expected is None:
                 raise ConfigError(f"{CONFIG_FILE}: unknown key {table}.{key}")
             # TOML's true is an int to Python.
-            if not isinstance(value, expected) or isinstance(value, bool):
+            if not isinstance(value, expected) or isinstance(value, bool) != (expected is bool):
                 raise ConfigError(f"{CONFIG_FILE}: {table}.{key} must be {TYPE_NAMES[expected]}")
     try:
         tag = version_template.compile(data.get("release", {}).get("tag", DEFAULT_TAG))
@@ -98,7 +100,8 @@ def parse(text):
     if max_line < 1:
         raise ConfigError(f"{CONFIG_FILE}: commits.max_line must be at least 1")
     minor_types, patch_types = release_types(data.get("release", {}), types)
-    return Config(tag, commit_rule.CommitRules(templates, scopes, projects, types, max_line), minor_types, patch_types)
+    return Config(tag, commit_rule.CommitRules(templates, scopes, projects, types, max_line), minor_types, patch_types,
+                  data.get("release", {}).get("enabled", True))
 
 
 def subject_templates(texts):

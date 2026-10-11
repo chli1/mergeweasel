@@ -108,6 +108,9 @@ format ([configuration](configuration.md#the-release-tag)):
 - **CalVer**, for example `tag = "{YY}.{MM}.{DD}.{count}+{sha}"`: no first tag is needed; the first
   merge that releases creates it.
 
+A repository that releases otherwise sets `release.enabled = false`
+([configuration](configuration.md#switching-the-release-off)); the queue then only merges.
+
 Tags on other branches are ignored. If you keep a maintenance branch for an older version, create
 it only once `main` has moved past that version line - otherwise both branches can arrive at the
 same version. The merger account creates the tag, so workflows that run on tag pushes start for

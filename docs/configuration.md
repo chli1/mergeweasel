@@ -94,8 +94,9 @@ An optional file named `mergeweasel.toml` in the root of the repository.
 
 Which version of the file mergeweasel reads depends on what it is doing:
 
-- **The release** reads the version on `main`. A change to `release.tag` therefore takes effect with
-  the first release after its pull request is merged.
+- **The release** reads the version on `main`. A change to a `release` key therefore takes effect
+  with the first release after its pull request is merged; each pass releases before it merges, so
+  that release already covers the commit that makes the change.
 - **The commit check** reads the version on the pull request's branch. This covers both
   `check-commits` and the check the queue runs right before it merges. So a pull request that
   changes the file is already checked against its own change: one that adds a scope to
@@ -110,6 +111,7 @@ error, and the message names the key.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `release.enabled` | `true` | whether the queue releases at all - see [switching the release off](#switching-the-release-off) |
 | `release.tag` | `"v{major}.{minor}.{patch}"` | how versions look - see [the release tag](#the-release-tag) |
 | `commits.scopes` | any scope | the scopes a subject may use - see [scopes](#scopes) |
 | `commits.subject` | `(#<issue>)` or `(PR #<pr>)` at the end | the forms a subject may take - see [the subject](#the-subject) |
@@ -306,11 +308,6 @@ The rules for the two lists:
   minus the types the other list names. So narrowing `commits.types`, or moving a type to the other
   list, takes one key, as the last two rows of the table show.
 
-**Which version counts.** The commit check reads `commits.types` from the pull request's branch, so
-a pull request that adds a type may already use it in its own title. The release reads the lists on
-`main`. Each pass releases before it merges, so the release after the merge of a change to the
-lists already uses the changed lists - for the commit that changes them, too.
-
 **Removing a type.** A commit on `main` with a type that `commits.types` no longer lists is still
 read by the release, and releases nothing - the release lists can only name listed types. Every
 pass releases `main` before it merges, so commits merged before the change are released already;
@@ -425,6 +422,25 @@ merging.
   release a day; add `{count}` or `{sha}` to give every merge its own version.
 - **Docker tags.** Git tags allow `+`, Docker tags do not. A workflow that publishes an image
   tagged with the version has to replace the `+`, for example with `-`.
+
+### Switching the release off
+
+A repository that releases with other tooling, or not at all, turns the release step off:
+
+```toml
+[release]
+enabled = false
+```
+
+The queue then merges as usual but never tags `main` or creates a Gitea release, whatever the
+merged commits and whatever tags the repository carries. Each pass prints that the release is
+switched off. The commit check is unchanged: subjects still need a type from `commits.types`.
+
+The other `release` keys stay checked while the release is off: an invalid `release.tag` or an
+unknown type in `release.patch_types` still fails the pass's release and shows in its log. Set them
+as you want them for the day you switch back on, or leave them out. Once switched back on, the
+next release covers every releasing commit since the previous release, the ones merged while the
+release was off included.
 
 ## Image
 
