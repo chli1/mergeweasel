@@ -103,11 +103,17 @@ Which version of the file mergeweasel reads depends on what it is doing:
   `commits.scopes` may use that scope in its own title.
 
 Because the commit check reads the branch's version, a pull request that breaks the file - with a
-typo in a key, say - fails its own check, and the queue flags it `needs-fix` instead of merging it.
+value of the wrong type, say - fails its own check, and the queue flags it `needs-fix` instead of merging it.
 An invalid file therefore stays on its branch and never holds up the other pull requests.
 
-Every key is optional; a missing key keeps its default. An unknown key or an invalid value is an
-error, and the message names the key.
+Every key is optional; a missing key keeps its default. An invalid value is an error, and the
+message names the key. An unknown table or key is ignored: every run that reads the file prints it,
+so a typo shows in the log, and a file that already uses a key of a newer mergeweasel keeps working
+with an older one:
+
+```
+mergeweasel.toml: unknown key commits.scopse ignored
+```
 
 | Key | Default | Meaning |
 |---|---|---|

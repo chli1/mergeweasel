@@ -36,22 +36,25 @@ class Config:
     patch_types: tuple = DEFAULT_PATCH_TYPES
     # Off: the queue releases nothing; the other release keys stay checked.
     release_enabled: bool = True
+    # Tables and keys the file names and this version does not know, dotted; load() reports them.
+    unknown_keys: tuple = ()
 
 
 def load(gitea, ref):
-    """The file as of ref: a branch, or a commit's SHA."""
+    """The file as of ref: a branch, or a commit's SHA. Prints the keys it ignores."""
     try:
         content = gitea.file(CONFIG_FILE, ref)
     except NotAFile as error:
         raise ConfigError(error.message) from None
-    if content is None:
-        return parse("")
     try:
         # utf-8-sig: tomllib refuses the byte order mark some editors write.
-        text = content.decode("utf-8-sig")
+        text = "" if content is None else content.decode("utf-8-sig")
     except ValueError:
         raise ConfigError(f"{CONFIG_FILE}: cannot read it as UTF-8 text") from None
-    return parse(text)
+    configuration = parse(text)
+    for key in configuration.unknown_keys:
+        print(f"{CONFIG_FILE}: unknown key {key} ignored")
+    return configuration
 
 
 def parse(text):
@@ -59,15 +62,18 @@ def parse(text):
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise ConfigError(f"{CONFIG_FILE}: {error}") from None
+    unknown = []
     for table, keys in data.items():
         if table not in SCHEMA:
-            raise ConfigError(f"{CONFIG_FILE}: unknown key {table}")
+            unknown.append(table)
+            continue
         if not isinstance(keys, dict):
             raise ConfigError(f"{CONFIG_FILE}: {table} must be a table")
         for key, value in keys.items():
             expected = SCHEMA[table].get(key)
             if expected is None:
-                raise ConfigError(f"{CONFIG_FILE}: unknown key {table}.{key}")
+                unknown.append(f"{table}.{key}")
+                continue
             # TOML's true is an int to Python.
             if not isinstance(value, expected) or isinstance(value, bool) != (expected is bool):
                 raise ConfigError(f"{CONFIG_FILE}: {table}.{key} must be {TYPE_NAMES[expected]}")
@@ -101,7 +107,7 @@ def parse(text):
         raise ConfigError(f"{CONFIG_FILE}: commits.max_line must be at least 1")
     minor_types, patch_types = release_types(data.get("release", {}), types)
     return Config(tag, commit_rule.CommitRules(templates, scopes, projects, types, max_line), minor_types, patch_types,
-                  data.get("release", {}).get("enabled", True))
+                  data.get("release", {}).get("enabled", True), tuple(unknown))
 
 
 def subject_templates(texts):

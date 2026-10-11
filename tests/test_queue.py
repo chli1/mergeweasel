@@ -546,14 +546,22 @@ def test_unknown_scope_at_merge_time_flags_needs_fix(monkeypatch, gitea):
 
 def test_invalid_config_on_the_branch_flags_needs_fix_and_hands_over(monkeypatch, gitea):
     given(monkeypatch, [pull(6), pull(7, behind=True)])
-    answer_pull(gitea, 6, config="[comits]\n")
+    answer_pull(gitea, 6, config="[commits]\nmax_line = 0\n")
     gitea.branch_head.return_value = "e" * 40
     action = run_pass(gitea, "https://gitea", dry_run=False)
     done = writes(gitea)
     assert done[0] == ("add_label", (6, "needs-fix"))
-    assert "mergeweasel.toml: unknown key comits" in done[1][1][1]
+    assert "mergeweasel.toml: commits.max_line must be at least 1" in done[1][1][1]
     assert "Fix `mergeweasel.toml` on the branch" in done[1][1][1]
     assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
+
+
+def test_an_unknown_key_on_the_branch_does_not_stop_the_merge(monkeypatch, gitea, capsys):
+    given(monkeypatch, [pull(6)])
+    answer_pull(gitea, 6, config="[comits]\n")
+    run_pass(gitea, "https://gitea", dry_run=False)
+    assert ("merge", (6, f"{6:040x}", squash(6))) in writes(gitea)
+    assert "mergeweasel.toml: unknown key comits ignored" in capsys.readouterr().out
 
 
 def test_refused_merge_flags_needs_fix_with_giteas_reason_and_hands_over(monkeypatch, gitea):
@@ -634,10 +642,10 @@ def test_dry_run_flags_an_invalid_title_and_hands_over(monkeypatch, gitea, capsy
 
 def test_dry_run_flags_an_invalid_config_and_hands_over(monkeypatch, gitea, capsys):
     given(monkeypatch, [pull(6), pull(7, behind=True)])
-    answer_pull(gitea, 6, config="[comits]\n")
+    answer_pull(gitea, 6, config="[commits]\nmax_line = 0\n")
     action = run_pass(gitea, "https://gitea", dry_run=True)
     assert writes(gitea) == []
-    assert "mergeweasel.toml: unknown key comits" in capsys.readouterr().out
+    assert "mergeweasel.toml: commits.max_line must be at least 1" in capsys.readouterr().out
     assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
 
 
@@ -658,7 +666,7 @@ def test_only_a_merge_is_validated(gitea):
 
 def test_execute_leaves_message_problems_to_validation(gitea):
     # A Land is validated already: execute reads neither the message nor the config again.
-    answer_pull(gitea, 6, title="land six", config="[comits]\n")
+    answer_pull(gitea, 6, title="land six", config="[commits]\nmax_line = 0\n")
     executed = queue.execute(gitea, land(6, squash(6)), Approvers({}), {6: LABEL_IDS}, SETTINGS)
     assert executed == land(6, squash(6))
     gitea.pull.assert_not_called()

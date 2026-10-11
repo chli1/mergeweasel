@@ -104,7 +104,7 @@ earlier commit.
   section, or with `keep-commits` the commits. An unknown scope shows up here too: use one of the
   scopes the message lists, or leave the scope out.
 - **`mergeweasel.toml` is invalid:** the pull request changes `mergeweasel.toml`, and the changed
-  file cannot be read - an unknown key, say, or a value of the wrong type. The comment names the
+  file cannot be read - a value of the wrong type, say. The comment names the
   problem. Fix the file on the branch.
 
 Then remove `needs-fix`.

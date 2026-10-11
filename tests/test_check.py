@@ -134,8 +134,13 @@ def test_a_title_outside_the_configured_templates_fails(tmp_path, capsys):
 
 
 def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
-    assert run(api(config="[comits]\n"), event(tmp_path)) == 1
-    assert "mergeweasel.toml: unknown key comits" in capsys.readouterr().out
+    assert run(api(config="[commits]\nmax_line = 0\n"), event(tmp_path)) == 1
+    assert "mergeweasel.toml: commits.max_line must be at least 1" in capsys.readouterr().out
+
+
+def test_an_unknown_key_on_the_branch_is_reported_and_ignored(tmp_path, capsys):
+    assert run(api(config="[comits]\n"), event(tmp_path)) == 0
+    assert "mergeweasel.toml: unknown key comits ignored" in capsys.readouterr().out
 
 
 # --- keep-commits ---

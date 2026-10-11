@@ -123,9 +123,33 @@ def test_crlf_line_ends_parse():
     assert config.parse('[release]\r\ntag = "{YY}.{count}"\r\n').tag.text == "{YY}.{count}"
 
 
+@pytest.mark.parametrize("text, unknown", [
+    ("[relase]\n", ("relase",)),
+    ('relase = "x"\n', ("relase",)),
+    ('[release]\ntags = "{YY}.{count}"\n', ("release.tags",)),
+    ('[commits]\nscopse = ["ui"]\n[x]\ny = 1\n', ("commits.scopse", "x")),
+])
+def test_unknown_keys_are_collected_not_rejected(text, unknown):
+    assert config.parse(text).unknown_keys == unknown
+
+
+def test_unknown_keys_keep_the_known_ones():
+    configuration = config.parse('[release]\ntags = "x"\ntag = "{YY}.{count}"\n')
+    assert configuration.tag.text == "{YY}.{count}"
+
+
+def test_load_prints_each_unknown_key(capsys):
+    config.load(gitea_with(contents('[comits]\n[release]\ntags = "x"\n')), "main")
+    assert capsys.readouterr().out == ("mergeweasel.toml: unknown key comits ignored\n"
+                                       "mergeweasel.toml: unknown key release.tags ignored\n")
+
+
+def test_a_file_without_unknown_keys_prints_nothing(capsys):
+    config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n')), "main")
+    assert capsys.readouterr().out == ""
+
+
 @pytest.mark.parametrize("text, message", [
-    ("[relase]\n", "mergeweasel.toml: unknown key relase"),
-    ('[release]\ntags = "{YY}.{count}"\n', "mergeweasel.toml: unknown key release.tags"),
     ('release = "x"\n', "mergeweasel.toml: release must be a table"),
     ("[release]\ntag = 1\n", "mergeweasel.toml: release.tag must be a string"),
     ('[release]\nenabled = "false"\n', "mergeweasel.toml: release.enabled must be true or false"),
