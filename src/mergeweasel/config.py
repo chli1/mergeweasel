@@ -41,8 +41,12 @@ class Config:
     unknown_keys: tuple = ()
 
 
-def load(gitea, ref):
-    """The file as of ref: a branch, or a commit's SHA. Prints the keys it ignores."""
+def load(gitea, ref, strict=False):
+    """The file as of ref: a branch, or a commit's SHA. Prints the keys it ignores.
+
+    strict: an unknown key is a ConfigError instead - for a reader that runs the pull request's own
+    image, which knows every key the pull request may use.
+    """
     try:
         content = gitea.file(CONFIG_FILE, ref)
     except NotAFile as error:
@@ -53,6 +57,8 @@ def load(gitea, ref):
     except ValueError:
         raise ConfigError(f"{CONFIG_FILE}: cannot read it as UTF-8 text") from None
     configuration = parse(text)
+    if strict and configuration.unknown_keys:
+        raise ConfigError(f"{CONFIG_FILE}: unknown key {', '.join(configuration.unknown_keys)}")
     for key in configuration.unknown_keys:
         print(f"{CONFIG_FILE}: unknown key {key} ignored")
     return configuration

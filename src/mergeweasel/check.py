@@ -29,7 +29,8 @@ def run(gitea, event_path, settings):
             return 0
         keep_commits = settings.keep_commits in pull.labels
         # The pull request's own version: one that breaks the file fails here, not on the base branch.
-        rules = config.load(gitea, pull.head_sha).commits
+        # Strict: this check runs the pull request's own workflow, and with it its image.
+        rules = config.load(gitea, pull.head_sha, strict=True).commits
         commits = gitea.pull_commits(number) if keep_commits else []
         subjects = ([commit.subject for commit in commits] if keep_commits
                     else [commit_rule.squash_subject(pull.title, number, rules)])

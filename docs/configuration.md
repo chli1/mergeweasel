@@ -136,13 +136,27 @@ value of the wrong type, say - fails its own check, and the queue flags it `need
 An invalid file therefore stays on its branch and never holds up the other pull requests.
 
 Every key is optional; a missing key keeps its default. An invalid value is an error, and the
-message names the key. An unknown table or key is ignored: every run that reads the file prints it,
-so a typo shows in the log, and a file that already uses a key of a newer mergeweasel keeps working
-with an older one:
+message names the key. An unknown table or key is an error in `check-commits` too, so a typo such
+as `commits.scopse` turns the pull request's check red instead of silently leaving the rule unset:
+
+```
+mergeweasel.toml: unknown key commits.scopse
+```
+
+The check runs the pull request's own workflow, and with it the image the pull request pins, so
+that image knows every key the pull request may use. The queue's check before the merge and the
+release run the workflow from `main` instead, possibly with an older image than the pull request's.
+They ignore an unknown table or key and print it:
 
 ```
 mergeweasel.toml: unknown key commits.scopse ignored
 ```
+
+This way a pull request that raises the image pin and starts using a key of the new version in
+the same change passes its check with the new image and lands through the queue running the old
+one. The reverse direction is strict: after the image pin goes back to a version that does not know
+a key, every pull request's check fails on that key until it is removed from the file. A pull
+request that rolls the pin back therefore removes those keys in the same change.
 
 | Key | Default | Meaning |
 |---|---|---|

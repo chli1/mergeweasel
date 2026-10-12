@@ -151,6 +151,16 @@ def test_load_prints_each_unknown_key(capsys):
                                        "mergeweasel.toml: unknown key release.tags ignored\n")
 
 
+def test_strict_load_rejects_unknown_keys_naming_each():
+    with pytest.raises(config.ConfigError, match=r"^mergeweasel.toml: unknown key comits, release.tags$"):
+        config.load(gitea_with(contents('[comits]\n[release]\ntags = "x"\n')), "main", strict=True)
+
+
+def test_strict_load_accepts_a_file_of_known_keys():
+    assert config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n')), "main",
+                       strict=True).tag.text == "{YY}.{count}"
+
+
 def test_a_file_without_unknown_keys_prints_nothing(capsys):
     config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n')), "main")
     assert capsys.readouterr().out == ""
