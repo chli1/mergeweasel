@@ -1,53 +1,45 @@
 # Configuration
 
-Everything mergeweasel needs to reach Gitea comes from the Gitea Actions environment. Settings come
-from two places, split by one rule: a repository's commits must work unchanged on another Gitea.
+Everything a repository sets for mergeweasel, ordered by where it is set. One rule decides the
+place: a repository's commits must work unchanged on another Gitea. What belongs to the Gitea
+installation - tokens, label names, accounts, runners - is set in Gitea's settings, and only the
+rules for the repository's commits and releases travel with it, in a file.
 
-- [Instance settings](#instance-settings) belong to the Gitea installation - the label names, the
-  Renovate account, the runner label. They are Gitea Actions variables, set in the organization's or
-  the repository's settings, never in a file of the repository.
-- [`mergeweasel.toml`](#the-configuration-file) belongs to the repository's content - the rules for
-  its commits and releases. It travels with the commits.
+- [Secrets](#secrets): the tokens of the merger and the approver accounts.
+- [Actions variables](#actions-variables): the label names, the Renovate account and the runner
+  label.
+- [The base branch](#the-base-branch): the repository's default branch.
+- [`mergeweasel.toml`](#the-configuration-file): the rules for the repository's commits and
+  releases.
 
-The [fixed values](#fixed-values) are the same everywhere.
+The [fixed values](#fixed-values) are the same everywhere. The workflows hand the secrets and
+variables to the image; [design](design.md#the-image-and-its-workflows) describes that interface.
+What a message in the log means, and how to fix its cause, is in
+[troubleshooting](troubleshooting.md).
 
 Throughout these documents, `main` stands for the repository's default branch, and the labels go by
 their default names.
 
-## The command
+## Secrets
 
-```
-mergeweasel pass [--dry-run]
-mergeweasel check-commits --event <path>
-```
+Set these as Gitea Actions secrets, under *Settings > Actions > Secrets* of the repository, or of
+the organization to share them between its repositories. A repository's secret overrides the
+organization's secret of the same name. Only `mergeweasel-queue.yml` reads them.
 
-- `pass` runs one queue pass, which releases `main` first. With `--dry-run` it decides and reports,
-  but changes nothing.
-- `check-commits` checks what a pull request would land on `main`. `<path>` is the `pull_request`
-  event payload (`$GITHUB_EVENT_PATH` in a workflow). Only the pull request's number is taken from
-  it; the title, body, labels and head are read from Gitea when the check runs.
-
-Both commands exit with 0 when they succeed and with 1 when they fail. `pass` also exits with 1
-when its release failed, after it has run the rest of the pass.
-
-## Environment
-
-| Variable | Set by | Used by |
+| Secret | Required | Meaning |
 |---|---|---|
-| `GITHUB_SERVER_URL` | Gitea Actions | both commands: the Gitea server |
-| `GITHUB_REPOSITORY` | Gitea Actions | both commands: `owner/repository` |
-| `MERGEWEASEL_MERGER_TOKEN` | the workflow, from the secret | `pass`: required, except with `--dry-run`. The merger rebases, writes the carry-over and merges |
-| `MERGEWEASEL_APPROVER_TOKENS` | the workflow, from the secret | `pass`: optional, one token per line. The approver accounts restore the approvals a rebase dismissed. Without it, `--dry-run` assumes there are enough |
-| `GITHUB_TOKEN` | the workflow, from the run token | `check-commits`, and `pass --dry-run` without `MERGEWEASEL_MERGER_TOKEN`. The merger is then unknown, and any carry-over counts |
-| `GITHUB_RUN_ID`, `GITHUB_EVENT_NAME` | Gitea Actions | `pass`: to run one pass at a time. Without `GITHUB_RUN_ID` the pass does not wait for others |
-| `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL`, `MERGEWEASEL_RENOVATE_ACCOUNT` | the workflow, from the Actions variables | both commands: the [instance settings](#instance-settings) |
+| `MERGEWEASEL_MERGER_TOKEN` | yes, except for a dry run | the token of the merger, which rebases, records the approvals across a rebase and merges |
+| `MERGEWEASEL_APPROVER_TOKENS` | no | the tokens of the approver accounts, one per line, which restore the approvals a rebase dismissed and approve Renovate's own updates. Without them, no approval is restored, and a dry run assumes there are enough |
 
-## Instance settings
+[The accounts](onboarding.md#the-accounts) lists the scopes the tokens need and how one account can
+fill both roles. Every pass prints the logins behind the tokens, never the tokens.
+
+## Actions variables
 
 Set these as Gitea Actions variables, under *Settings > Actions > Variables* of the organization or
 of the repository. A repository's variable overrides the organization's variable of the same name,
-so an organization can set its names once for all its repositories. The workflows pass the variables
-to mergeweasel unchanged; an unset or empty variable keeps its default.
+so an organization can set its names once for all its repositories. An unset or empty variable
+keeps its default.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -55,12 +47,8 @@ to mergeweasel unchanged; an unset or empty variable keeps its default.
 | `MERGEWEASEL_NEEDS_FIX_LABEL` | `needs-fix` | the label the queue sets on a pull request it cannot land |
 | `MERGEWEASEL_KEEP_COMMITS_LABEL` | `keep-commits` | the label that lands the commits as they are instead of squashing them |
 | `MERGEWEASEL_PRIO_LABEL` | `prio` | the label that puts a queued pull request ahead of every other |
-| `MERGEWEASEL_RENOVATE_ACCOUNT` | none: the Renovate rule is off | the account whose own updates the approver accounts approve, and whose push removes `needs-fix` - see [Renovate](onboarding.md#renovate) |
+| `MERGEWEASEL_RENOVATE_ACCOUNT` | none: the Renovate rule is off | the account whose own updates the approver accounts approve, and whose push removes `needs-fix` - see [Renovate](#renovate) |
 | `MERGEWEASEL_RUNNER_LABEL` | `ubuntu-latest` | the runner label both workflows run on; only the workflows read it |
-
-The **base branch** is the repository's default branch, as set in its settings. The queue lands on
-it, releases it, and reads its branch protection; pull requests against any other branch are left
-alone, and the workflows skip them before a runner starts.
 
 For example, an organization whose labels are called `merge-me`, `broken`, `no-squash` and
 `hotfix`, whose Renovate runs as `deps-bot` and whose runners carry the label `docker` sets these
@@ -91,6 +79,44 @@ exist. Likewise `prio`: without it no pull request goes first, unless `MERGEWEAS
 names a label. When the pass cannot read the organization's labels - in a repository owned by a
 user, or in a dry run with the run token - it prints that it did not check, and goes on.
 
+### Renovate
+
+mergeweasel lands [Renovate](https://docs.renovatebot.com/)'s pull requests like any other, once
+Renovate labels them `automerge` (its `addLabels` option) instead of merging them itself. With
+`MERGEWEASEL_RENOVATE_ACCOUNT` set to the login of the account Renovate runs as, the queue treats
+that account's pull requests specially:
+
+- **Approval:** its own update gets approved by the approver accounts, so no human has to. That
+  holds as long as only Renovate or the merger pushed to it, and Renovate added `automerge` last.
+  Once anyone else pushes, or a human sets `automerge`, the update needs a human approval like any
+  other pull request. Without approver accounts, every update waits for a human approval.
+- **Retry:** a push by Renovate to an update labelled `needs-fix`, for example its rebase, removes
+  the label, so a failed update is retried without anyone stepping in.
+
+Without the variable, Renovate's pull requests are ordinary pull requests. The variable has no
+default: whichever account it names gets its updates approved
+([security model](design.md#security-model)).
+
+Renovate's subjects have to pass the commit check like any other. Renovate writes them with the
+scope `deps` and takes the type from its own configuration - `chore(deps):` by default, other types
+through presets or `semanticCommitType`, for example
+`ci(deps): update docker.io/chli1ro/mergeweasel docker tag to v2.1.0`. A repository that sets
+[`commits.scopes`](#scopes) has to include `deps`, and one that sets
+[`commits.types`](#types-and-releases) every type its Renovate writes, or those pull requests are
+flagged `needs-fix`. With the default forms, Renovate's titles need no reference:
+`chore(deps): update pytest to v8.4.2` from pull request #81 lands as
+`chore(deps): update pytest to v8.4.2 (#81)`.
+
+The image is on Docker Hub, where Renovate finds its release dates, so a `minimumReleaseAge`
+applies to mergeweasel like to any other image.
+
+## The base branch
+
+The base branch is the repository's default branch, as set in its settings - there is nothing to
+set for mergeweasel. The queue lands on it, releases it, and reads its branch protection; pull
+requests against any other branch are left alone, and the workflows skip them before a runner
+starts.
+
 ## The configuration file
 
 An optional file named `mergeweasel.toml` in the root of the repository.
@@ -120,14 +146,14 @@ mergeweasel.toml: unknown key commits.scopse ignored
 
 | Key | Default | Meaning |
 |---|---|---|
-| `release.enabled` | `false` | whether the queue releases - see [switching the release on](#switching-the-release-on) |
-| `release.tag` | `"v{major}.{minor}.{patch}"` | how versions look - see [the release tag](#the-release-tag) |
+| `commits.types` | the types of `@commitlint/config-conventional` | the types a subject may use - see [types and releases](#types-and-releases) |
 | `commits.scopes` | any scope | the scopes a subject may use - see [scopes](#scopes) |
 | `commits.subject` | `(#<pr>)` at the end, or no reference | the forms a subject may take - see [the subject](#the-subject) |
-| `commits.squash_append_pull_reference` | `true` | a squash appends ` (#<pr>)` to the title - see [the appended pull reference](#the-appended-pull-reference) |
 | `commits.projects` | any project | the projects a `{key}` may name - see [the subject](#the-subject) |
-| `commits.types` | the types of `@commitlint/config-conventional` | the types a subject may use - see [types and releases](#types-and-releases) |
+| `commits.squash_append_pull_reference` | `true` | a squash appends ` (#<pr>)` to the title - see [the appended pull reference](#the-appended-pull-reference) |
 | `commits.max_line` | `72` | the longest line of the `## Commit` section - see [the line length](#the-line-length) |
+| `release.enabled` | `false` | whether the queue releases - see [switching the release on](#switching-the-release-on) |
+| `release.tag` | `"v{major}.{minor}.{patch}"` | how versions look - see [the release tag](#the-release-tag) |
 | `release.minor_types` | `["feat"]` | the types that release a minor version - see [types and releases](#types-and-releases) |
 | `release.patch_types` | `["fix", "perf", "revert"]` | the types that release a patch version - see [types and releases](#types-and-releases) |
 
@@ -135,7 +161,7 @@ mergeweasel.toml: unknown key commits.scopse ignored
 
 The scope is the optional part in parentheses after the commit type: `ui` in
 `feat(ui): add dark mode (#12)`. It is part of `{conventional}`, so `commits.scopes` needs forms
-with it - see [subjects without a type](#subjects-without-a-type). By default any scope is
+with it - see [subjects without a type](#the-subject). By default any scope is
 accepted, as long as it is not empty and contains no whitespace. That also means a typo goes
 through unnoticed: `feat(domian): ...` passes just like `feat(domain): ...`.
 
@@ -168,11 +194,6 @@ There are three cases to tell apart:
 
 Each entry must itself be a valid scope: a non-empty string without whitespace and without `)`.
 Otherwise the file is invalid, and the message names the entry.
-
-**Renovate.** Renovate writes its subjects with the scope `deps`, for example
-`fix(deps): update dependency pytest to v8.4.2`. A repository that uses Renovate and sets
-`commits.scopes` has to include `deps` in the list, or every Renovate pull request is flagged
-`needs-fix`.
 
 ### The subject
 
@@ -210,7 +231,7 @@ Some forms and the subjects they accept:
 | `["{conventional} {description} (#{pull_or_issue})"]` | `feat(ui): add dark mode (#12)` for issue #12, `feat(ui): add dark mode (#80)` from pull request #80 |
 | `["{conventional} {key} {description}"]` | `feat(ui): PROJ-12 add dark mode` |
 | `["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]` | `[PROJ-12] feat: add dark mode`, `chore: tidy the README (PR #31)` |
-| `["{description} (#{pull_or_issue})"]` | `fix the login (#12)` for issue #12, `Add dark mode (#80)` from pull request #80 - with the release off, see [subjects without a type](#subjects-without-a-type) |
+| `["{description} (#{pull_or_issue})"]` | `fix the login (#12)` for issue #12, `Add dark mode (#80)` from pull request #80 - with the release off, see [subjects without a type](#the-subject) |
 
 **The first form that fits decides.** mergeweasel tries the forms in the order of the list. The
 first one the subject fits is the one it is checked against; a later one is not tried, even when a
@@ -298,10 +319,6 @@ commitlint, changelog generators, Renovate's detection of semantic commits - exp
 start, and find none in `[PROJ-12] feat: add dark mode`. Repositories that use such tools put the
 reference after the colon or at the end.
 
-**The release notes.** A release lists each releasing commit as its subject without the type and the
-breaking marker, in the commit's own form: `feat(ui): add dark mode (#80)` becomes
-`ui: add dark mode (#80)`, `[PROJ-12] feat: add dark mode` becomes `[PROJ-12] add dark mode`.
-
 **Changing the forms.** The commit check reads `commits.subject` from the pull request's branch, the
 release from `main`. A commit on `main` that fits none of `main`'s forms releases nothing, and the
 release prints it:
@@ -386,7 +403,7 @@ patch_types = ["fix", "perf", "revert"]
 
 The types need forms with `{conventional}`: in a repository whose forms have none, setting
 `commits.types`, `release.minor_types` or `release.patch_types` makes the file invalid - see
-[subjects without a type](#subjects-without-a-type).
+[subjects without a type](#the-subject).
 
 **The accepted types.** `commits.types` lists the types a subject may use. Any other type fails
 `check-commits`, and the queue flags the pull request `needs-fix` instead of merging it. The message
@@ -404,9 +421,15 @@ release, and with a SemVer template how far the version rises: a type in `minor_
 minor version, a type in `patch_types` the patch version, and a type in neither list releases
 nothing. A breaking change, marked with `!`, always raises the major version, whatever its type.
 git's own revert subject, `Revert "..."`, counts as the type `revert`. With a CalVer template the
-lists decide only whether a merge releases. The release notes list a type of `minor_types` under
-"Features" and a type of `patch_types` under "Fixes", whatever its name: with `build` in
-`patch_types`, a dependency update shows under "Fixes".
+lists decide only whether a merge releases.
+
+**The release notes.** The notes list the releasing commits, oldest first, under "Breaking changes",
+"Features" and "Fixes". A type of `minor_types` shows under "Features" and a type of `patch_types`
+under "Fixes", whatever its name: with `build` in `patch_types`, a dependency update shows under
+"Fixes". Each commit shows as its subject without the type and the breaking marker, in the commit's
+own form: `feat(ui): add dark mode (#80)` becomes `ui: add dark mode (#80)`,
+`[PROJ-12] feat: add dark mode` becomes `[PROJ-12] add dark mode`. Under a breaking change the notes
+also show its commit body.
 
 | `mergeweasel.toml` | Effect |
 |---|---|
@@ -428,14 +451,6 @@ The rules for the two lists:
 read by the release, and releases nothing - the release lists can only name listed types. Every
 pass releases `main` before it merges, so commits merged before the change are released already;
 only a release that failed in between leaves them unreleased.
-
-**Renovate.** Renovate takes the type of its subjects from its own configuration - `chore(deps):`
-by default, other types through presets or `semanticCommitType`, for example
-`ci(deps): update docker.io/chli1ro/mergeweasel docker tag to v2.1.0`. A repository that uses
-Renovate and sets `commits.types` has to include every type its Renovate writes, or those pull
-requests are flagged `needs-fix`. With the default forms, Renovate's titles need no reference:
-`chore(deps): update pytest to v8.4.2` from pull request #81 lands as
-`chore(deps): update pytest to v8.4.2 (#81)`.
 
 ### The line length
 
@@ -562,7 +577,7 @@ release: to release, set release.enabled = true in mergeweasel.toml
 
 With the release on, every form must contain `{conventional}`, so every subject needs a type from
 `commits.types`. With the release off, the forms decide: forms with `{conventional}` still require
-a type, forms without it require none - see [subjects without a type](#subjects-without-a-type).
+a type, forms without it require none - see [subjects without a type](#the-subject).
 Switching the release on in a repository whose forms have no type makes the file invalid, and the
 commit check of that pull request fails.
 

@@ -5,14 +5,15 @@ For pull request authors in a repository that runs mergeweasel.
 ## The labels
 
 The labels go by these names unless your Gitea setup renames them; the `settings:` line at the top
-of every mergeweasel log shows the names in use.
+of every mergeweasel log shows the names in use
+([Actions variables](configuration.md#actions-variables)).
 
 - **`automerge`** queues the pull request. If the repository requires approvals, approve the pull
   request first and set the label afterwards: an approval alone does not wake the queue. The pull
   request lands once its checks pass. Removing the label withdraws it, even while its checks run.
 - **`needs-fix`** is set by mergeweasel, always together with a comment that says why. Fix the
   cause, then remove the label to queue the pull request again. If the repository is set up for
-  Renovate, a push by Renovate removes the label by itself.
+  [Renovate](configuration.md#renovate), a push by Renovate removes the label by itself.
 - **`keep-commits`** lands the branch's commits as they are instead of squashing them into one.
 - **`prio`** puts the pull request ahead of every other in the queue. It is meant for a hotfix that
   must reach `main` at once, and needs `automerge` as well: see [`prio`](#prio).
@@ -68,7 +69,8 @@ browser.
 Screenshots and the review discussion stay here.
 ```
 
-The section is optional. It must keep to the line limit in
+The section is optional; without it, the commit has only a subject. A description may hold at most
+one such section. It must keep to the line limit in
 [configuration](configuration.md#the-line-length) and must not contain a `Co-authored-by:` or
 "Generated with" line.
 
@@ -78,16 +80,13 @@ job runs, not as it was when the job first started, so the re-run judges the fix
 
 ## What releases
 
-After the merge, the queue releases if the repository is set up for it
-([onboarding](onboarding.md#releases)). The commit types decide whether a merge releases: breaking
-changes (`!`) and the releasing types do, the others do not;
-[configuration](configuration.md#types-and-releases) lists the releasing types and how a
-repository changes them. With SemVer versions, the default, they also decide the increase: `!`
-raises the major version, a type of `release.minor_types` the minor version, and a type of
-`release.patch_types` the patch version.
-
-The release notes list the description of each releasing commit. Under a breaking change they also
-show its `## Commit` section, so say there what users must change.
+After the merge, the queue releases if the repository has
+[switched the release on](configuration.md#switching-the-release-on). The commit types decide
+whether a merge releases and how far the version rises - with the defaults, `feat` raises the minor
+version, `fix` the patch version, and a breaking change (`!`) the major version;
+[types and releases](configuration.md#types-and-releases) has the full rules and the release notes.
+Under a breaking change the notes show its `## Commit` section, so say there what users must
+change.
 
 ## `keep-commits`
 
@@ -136,5 +135,7 @@ other runs by hand in the repository's *Actions* tab.
 - **`mergeweasel.toml` is invalid:** the pull request changes `mergeweasel.toml`, and the changed
   file cannot be read - a value of the wrong type, say. The comment names the
   problem. Fix the file on the branch.
+- **Too few approver accounts to restore the approvals:** a rebase dismissed approvals that the
+  queue cannot restore. Approve the pull request again.
 
 Then remove `needs-fix`.

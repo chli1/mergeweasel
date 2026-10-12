@@ -22,10 +22,11 @@ The test reaches that Gitea by its IP address on Docker's default bridge network
 host, or in a container on the default bridge. Docker Desktop does not work, because its host
 cannot reach container IP addresses; neither does a CI job on a network of its own.
 
-Each pass gets the environment and the command that `mergeweasel-queue.yml` gives it: the job's
-and the real pass step's `env`, with the test's values for each `${{ vars.X }}` and
-`${{ secrets.X }}`. An expression of any other shape, or a variable or secret the test does not
-supply, fails the test, so a change to the workflow cannot slip past it.
+Each pass gets the environment and the command that `mergeweasel-queue.yml` gives it
+([the image and its workflows](docs/design.md#the-image-and-its-workflows)): the job's and the real
+pass step's `env`, with the test's values for each `${{ vars.X }}` and `${{ secrets.X }}`. An
+expression of any other shape, or a variable or secret the test does not supply, fails the test, so
+a change to the workflow cannot slip past it.
 
 Every scenario runs twice, as `[built]` against the built image and as `[released]` against the
 newest release, the `latest` image the workflow runs, which proves that the workflow files keep
@@ -64,7 +65,8 @@ answer - an uncommitted marker, a shallow clone, a released image without a revi
   and systems around the queue), `workflow.py` (what `mergeweasel-queue.yml` hands a pass),
   `history.py` (when a `needs_this_commit` scenario may run against the newest release),
   `test_queue.py`, `test_instance.py` and `test_release.py` (the scenarios).
-- `docs/`: [design](docs/design.md) explains how a pass works and why.
+- `docs/`: the user documentation, listed in the [README](README.md#documentation);
+  [design](docs/design.md) explains how a pass works and why.
 
 ## Pull requests
 
@@ -91,6 +93,6 @@ which builds the image and pushes it to `docker.io/chli1ro/mergeweasel` as `X.Y.
 
 The repository needs three secrets:
 
-- `MERGEWEASEL_MERGER_TOKEN` - the merger's token ([onboarding](docs/onboarding.md#the-accounts));
-- `MERGEWEASEL_APPROVER_TOKENS` - the approver accounts' tokens, one per line;
+- `MERGEWEASEL_MERGER_TOKEN` and `MERGEWEASEL_APPROVER_TOKENS` - the queue's tokens
+  ([secrets](docs/configuration.md#secrets));
 - `DOCKERHUB_TOKEN` - a Docker Hub access token of `chli1ro` with write access to the repository.

@@ -2,8 +2,9 @@
 
 How mergeweasel works, the Gitea behaviour it relies on, and its security model: why it works the
 way it does, and what to keep intact when changing it. For using it, see the
-[README](../README.md), [onboarding](onboarding.md) and [usage](usage.md); every fixed value is
-listed in [configuration](configuration.md).
+[README](../README.md), [onboarding](onboarding.md), [usage](usage.md) and
+[troubleshooting](troubleshooting.md); every value, variable and key is listed in
+[configuration](configuration.md).
 
 ## Overview
 
@@ -14,10 +15,8 @@ is behind `main`, waits for its checks, and merges it - squashed by default, fas
 The split follows Renovate: the logic ships as a container image, and each repository carries only
 a thin workflow layer that runs it.
 
-- **Image** `mergeweasel`: a Python package, standard library only, with a CLI of two commands:
-  - `mergeweasel pass [--dry-run]` - one queue pass, which releases first if the release is
-    switched on;
-  - `mergeweasel check-commits --event <path>` - checks what a pull request would land.
+- **Image** `mergeweasel`: a Python package, standard library only, with a CLI of two commands
+  ([the image and its workflows](#the-image-and-its-workflows)).
 - **Thin layer** in each repository: `mergeweasel-queue.yml` runs the pass,
   `mergeweasel-commits.yml` runs the check. Both run the image as their job container. This
   repository carries the reference copy and runs on it itself.
@@ -37,8 +36,8 @@ Principles:
 
 - **Gitea API only.** The image holds no git and checks nothing out; Gitea rebases, merges and tags
   on the server.
-- **Environment only.** The Gitea server and repository come from the Actions variables
-  `GITHUB_SERVER_URL` and `GITHUB_REPOSITORY`. Without them the CLI exits with an error.
+- **Environment only.** The Gitea server and repository come from the environment Gitea Actions
+  sets ([the image and its workflows](#the-image-and-its-workflows)).
 - **The repository travels, the instance stays outside.** A repository's commits must work
   unchanged on another Gitea, with other account names, other labels and another default branch.
   What belongs to the repository's content - the commit and release rules - lives in
@@ -48,6 +47,50 @@ Principles:
 
 Throughout this document, `main` stands for the repository's default branch, and the labels go by
 their default names.
+
+## The image and its workflows
+
+The workflows are the image's only callers: they run its two commands and hand it what it reads
+from the environment. Users configure the secrets and variables the workflows pass on
+([configuration](configuration.md)), never the commands or the environment themselves. The
+commands and the environment are still a contract, because consumers copy the workflow files: a
+change to either needs new workflow files, which makes it breaking (see [Releases](#releases)).
+
+```
+mergeweasel pass [--dry-run]
+mergeweasel check-commits --event <path>
+```
+
+- `pass` runs one queue pass. It first releases what earlier merges landed on `main`, if the
+  release is switched on, and then takes its step on the queue ([the queue pass](#the-queue-pass)).
+  A merge therefore gets its release from the next pass, which that merge wakes. With `--dry-run`
+  the pass decides and reports, but changes nothing.
+- `check-commits` checks what a pull request would land on `main`. `<path>` is the `pull_request`
+  event payload (`$GITHUB_EVENT_PATH` in a workflow). Only the pull request's number is taken from
+  it; the title, body, labels and head are read from Gitea when the check runs
+  ([the pull request as it is now](#what-lands-on-main)).
+
+Both commands exit with 0 when they succeed and with 1 when they fail. `pass` also exits with 1
+when its release failed, after it has run the rest of the pass.
+
+The `GITHUB_` variables come from Gitea Actions itself. Gitea sets the variables of GitHub Actions
+under their GitHub names, so that workflows and actions written for GitHub run on Gitea unchanged;
+mergeweasel reads them like any action does, and nobody sets them by hand. Only the run token
+reaches a job as the secret `GITHUB_TOKEN`, which the commit workflow passes on. The `MERGEWEASEL_`
+variables are filled by the workflows from the [secrets](configuration.md#secrets) and
+[Actions variables](configuration.md#actions-variables).
+
+| Variable | Set by | Used by |
+|---|---|---|
+| `GITHUB_SERVER_URL` | Gitea Actions | both commands: the Gitea server to talk to |
+| `GITHUB_REPOSITORY` | Gitea Actions | both commands: `owner/repository`, the repository the workflow runs in |
+| `GITHUB_TOKEN` | the commit workflow, from the run token | `check-commits`, and `pass --dry-run` without `MERGEWEASEL_MERGER_TOKEN`. The merger is then unknown, and any carry-over counts |
+| `GITHUB_RUN_ID`, `GITHUB_EVENT_NAME` | Gitea Actions | `pass`: to run one pass at a time ([serialized passes](#serialized-passes)). Without `GITHUB_RUN_ID` the pass does not wait for others |
+| `MERGEWEASEL_MERGER_TOKEN`, `MERGEWEASEL_APPROVER_TOKENS` | the queue workflow, from the secrets | `pass` |
+| `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL`, `MERGEWEASEL_PRIO_LABEL`, `MERGEWEASEL_RENOVATE_ACCOUNT` | both workflows, from the Actions variables | both commands |
+
+`MERGEWEASEL_RUNNER_LABEL` is read by the workflows only, in `runs-on`. Without `GITHUB_SERVER_URL`
+or `GITHUB_REPOSITORY` the CLI exits with an error.
 
 ## The queue pass
 
@@ -99,11 +142,12 @@ approval wakes nothing: the label `automerge` comes after it. Before its step, a
    it waits (or rebases, if the pull request is behind) until that run's completion wakes the queue
    again.
 1. Read `main`'s head and the open pull requests.
-2. Pick the candidate: the lowest-numbered queued pull request that is up to date, otherwise the
-   lowest-numbered queued one - first among the queued pull requests labelled `prio`, then among
-   the rest. If there is none, stop. Preferring up-to-date pull requests keeps the one in flight in
-   place; a `prio` pull request overtakes it. The one in flight is not touched: its checks run on,
-   and once the `prio` pull request has landed, it is behind and gets rebased like any other.
+2. Pick the candidate among the queued pull requests, in this order: labelled `prio` before
+   unlabelled, then up to date before behind, then the lowest number. So a `prio` pull request
+   always comes first, even when it is behind. If there is none, stop. Preferring up-to-date pull
+   requests keeps the one in flight in place; a `prio` pull request overtakes it. The one in flight
+   is not touched: its checks run on, and once the `prio` pull request has landed, it is behind and
+   gets rebased like any other.
 3. **Behind `main`:** `POST pulls/{n}/update?style=rebase`. A `409` flags `needs-fix` ("conflicts
    with main") and hands over. Otherwise the pass sets the carry-over on the new head and stops;
    the check runs on the new head wake the queue.
@@ -150,16 +194,6 @@ request, is skipped, because Gitea refuses approving one's own pull request. Too
 accounts, or none configured, flag `needs-fix`. Once the pull request is approved again by hand and
 the flag removed, it queues again - an approval alone wakes no pass.
 
-### Labels
-
-- `automerge` is the human's intent. The queue removes it only from a pull request it merged.
-  Removing it withdraws the pull request, even while its checks run.
-- `needs-fix` is the queue's verdict, always with a comment that states the reason and what to do.
-  Removing it queues the pull request again; the queue itself removes it only in step 0.
-- `keep-commits` makes the queue fast-forward the commits as they are instead of squashing them.
-- `prio` puts a queued pull request ahead of every other, even the one in flight - for a hotfix
-  that must reach `main` at once. It only orders: without `automerge` it queues nothing.
-
 ### Serialized passes
 
 Passes run one at a time. The pass serializes itself instead of using a workflow `concurrency`
@@ -183,9 +217,10 @@ without a login, or two tokens of one account - Gitea counts one approval per ac
 The approver accounts also give a trusted Renovate pull request the approvals it is missing, in the
 same order and with the same skips, and name the reason in the review.
 
-The merger never approves as itself. Its token may be one of the approver tokens; one account then
-fills both roles. An account used as an approver must not open pull requests, because Gitea refuses
-approving one's own.
+The merger approves only as an approver account. If its token is also one of the approver tokens,
+one account fills both roles: it rebases, restores the approvals and merges, so that one token
+satisfies the review requirement on its own. Separate accounts keep the two powers apart. An account
+used as an approver must not open pull requests, because Gitea refuses approving one's own.
 
 A dry run is the exception. Without the merger token - CI runs its dry run with the run token - the
 merger is unknown, and the dry run accepts any carry-over as genuine. Without approver tokens it
@@ -200,21 +235,18 @@ which names it worked with:
 - **The base branch** is the repository's `default_branch` (`GET repos/{owner}/{repo}`). The
   queue lands on it, releases it and takes its branch protection; a pull request against another
   branch is not a candidate.
-- **The label names and the Renovate account** come from the environment variables
-  `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL`,
-  `MERGEWEASEL_PRIO_LABEL` and `MERGEWEASEL_RENOVATE_ACCOUNT`. The workflows fill them from the
+- **The label names and the Renovate account** come from environment variables
+  ([Actions variables](configuration.md#actions-variables)), which the workflows fill from the
   Actions variables of the same names. An empty value is an unset one: `${{ vars.X }}` of an unset
-  variable is the empty string. An unset label keeps its default name; an unset Renovate account
-  turns the Renovate rule off, because a trusted account must never be a default.
+  variable is the empty string. An unset Renovate account turns the Renovate rule off, because a
+  trusted account must never be a default.
 
-Two roles on one label are an error, since the queue could no longer tell a verdict from an intent.
-The pass then checks that the required labels exist, in the repository or in its organization,
-because a misspelt name would otherwise leave the queue idle without a word. A missing one fails
-the pass before the release. `automerge` and `needs-fix` are always required. `keep-commits` and
-`prio` are only when their variable names them: a repository without them squashes every pull
-request and gives none priority, but a name someone set on purpose has to be right. If the
-organization's labels cannot be read - a user's repository, or a dry run with the run token - the
-pass says so and goes on unchecked.
+`automerge` is the human's intent, `needs-fix` the queue's verdict. The queue removes `automerge`
+only from a pull request it merged, and `needs-fix` only in step 0. Two roles on one label are an
+error, since the queue could no longer tell the two apart. The pass checks that the required labels
+exist because a misspelt name would otherwise leave the queue idle without a word. `keep-commits`
+and `prio` are required only when their variable names them: a repository can do without them, but
+a name someone set on purpose has to be right.
 
 The workflows cannot filter on the default branch in `on:`, which takes no expressions; a
 `branches` filter would have to name the branch literally. Instead each job carries an `if:` that
@@ -243,47 +275,29 @@ pass only merges.
 `check-commits` and the queue share one rule, so they cannot disagree. The queue validates again
 right before the merge, because the title, body and commits can change after the check ran.
 
-**Subject**: one of the forms in `commits.subject` - by default Conventional Commits with the pull
-request's number as suffix, or without a reference. The forms and their placeholders are in
-[configuration](configuration.md#the-subject), the types in
-[configuration](configuration.md#types-and-releases), the scopes in
-[configuration](configuration.md#scopes). Each form compiles to an anchored regular expression; the
-first form a subject fits decides, so the order of the list is the order of precedence.
-
-- No scope means no parentheses: `feat(): ...` is rejected, and so is `feat(my ui): ...`.
-- The scope is free by default. A repository can restrict it to a fixed list with `commits.scopes`
-  in `mergeweasel.toml` ([configuration](configuration.md#scopes)).
-- Forms without `{conventional}` serve repositories that do not use Conventional Commits. Either
-  every form has it or none: in a mixed list, a typed subject with a mistyped type would fit a
-  form without one and pass, its type taken for description. The release reads the type, so it
-  stays off with such forms.
+**Subject**: one of the forms in `commits.subject`
+([the subject](configuration.md#the-subject) lists the forms, placeholders and rules). Each form
+compiles to an anchored regular expression; the first form a subject fits decides, so the order of
+the list is the order of precedence. Gitea numbers issues and pull requests in one sequence, so the
+number a `{pull_or_issue}` reference names is never both.
 
 The commit check reads `mergeweasel.toml` from the pull request's head, not from `main`. Read from
 `main`, an invalid file would fail the check of every pull request - including the one that fixes
 the file, which could then only be merged by hand. Read from the head, the invalid file fails only
 the pull request that introduces it; that one is flagged `needs-fix`, and the file never reaches
-`main` through the queue. As a side effect, a pull request that changes the scope list or the
-subject forms is checked against what it brings, which is what its reviewers see in the diff.
-- `!` marks a breaking change, which makes a release a major one.
-- `{issue}` must be an issue of the repository; `{pull}` must be this pull request;
-  `{pull_or_issue}` either of the two. Gitea numbers issues and pull requests in one sequence, so a
-  number is never both. `{key}` names
-  another tracker's issue, which mergeweasel cannot look up; only its project is checked, against
-  `commits.projects`.
+`main` through the queue. A pull request that changes the scope list or the subject forms is
+checked against what it brings, which is what its reviewers see in the diff.
 
 **Squash** (the default): the pull request's title becomes the subject - with ` (#<pr>)` appended
 unless it ends in it already, as Gitea's own squash suggestion does
 ([configuration](configuration.md#the-appended-pull-reference)) - and the `## Commit` section
 of its body becomes the commit body - from that heading to the next heading of level 1 or 2. Line
-endings are normalised and HTML comments removed first. There may be at most one such section, it
-must keep to the line limit in [configuration](configuration.md#the-line-length), and it must not
-contain a `Co-authored-by:` or "Generated with" line. Without the section, the commit has only a
-subject. The branch's own commits never land and are not checked.
+endings are normalised and HTML comments removed first; [usage](usage.md#the-commit-message) has
+the rules the section keeps to. The branch's own commits never land and are not checked.
 
 **`keep-commits`**: every commit of the pull request (`GET pulls/{n}/commits`) lands as it is, so
-each one is checked: its subject, its reference, and that it has a single parent. Subjects starting
-with `fixup!` or `squash!`, and git's `Revert "..."` subjects, are exempt - they inherit the
-original commit's reference.
+each one is checked: its subject, its reference, and that it has a single parent. The exempt
+subjects ([usage](usage.md#keep-commits)) refer to an earlier commit and inherit its reference.
 
 **Merged**: removing `automerge` after a merge re-runs the check on the landed pull request. A
 merged pull request passes without a check: after a fast-forward its head is `main`'s head, whose
@@ -311,11 +325,10 @@ already, which mergeweasel's tags would collide with. A CalVer template, which n
 is always configured deliberately, and so can the switch be.
 
 The template `release.tag` in `mergeweasel.toml` sets the version format
-([configuration](configuration.md#the-release-tag)); the default is `v{major}.{minor}.{patch}`. The
-pass reads the file from `main` with one `GET contents` before releasing, so a pull request cannot
-change the rules it is released under. The template compiles to an anchored regular expression: its
-text is escaped, and each placeholder becomes the pattern of its values. A tag is a release exactly
-when it matches.
+([configuration](configuration.md#the-release-tag)). The pass reads the file from `main` with one
+`GET contents` before releasing, so a pull request cannot change the rules it is released under. The
+template compiles to an anchored regular expression: its text is escaped, and each placeholder
+becomes the pattern of its values. A tag is a release exactly when it matches.
 
 The previous release is the nearest commit in `main`'s history that carries a matching tag; if it
 carries several, a SemVer template takes the highest version. Because `main` is linear, that commit
@@ -323,14 +336,8 @@ is its predecessor, whatever other branches tag: a maintenance branch cut once `
 version line never decides `main`'s next version. The pass reads every tag with one
 `GET git/refs/tags` and walks `main` back, 50 commits per call, up to the limit in
 [configuration](configuration.md#the-release-tag). The commit types decide the bump, by the lists in
-[configuration](configuration.md#types-and-releases):
-
-- `!` - major, in 0.x too;
-- a type in `release.minor_types` - minor;
-- a type in `release.patch_types` - patch;
-- every other type releases nothing, and neither does a subject outside the rule.
-
-git's `Revert "..."` counts as the type `revert`.
+[types and releases](configuration.md#types-and-releases); a breaking change raises the major
+version in 0.x too.
 
 The release reads the subjects with `main`'s `commits.subject`, the same file it takes `release.tag`
 from. It reads the types it releases from the same file, and reads a commit's type even when
@@ -338,27 +345,17 @@ from. It reads the types it releases from the same file, and reads a commit's ty
 prints it, so a change of the forms that left unreleased commits behind shows in the log
 ([configuration](configuration.md#the-subject) describes the change in two steps).
 
-The notes list the releasing commits, oldest first, under "Breaking changes", "Features" and
-"Fixes". A breaking change also shows its commit body.
-
-Without a matching tag, a SemVer template releases nothing: there is no previous version to
-increase. A CalVer template starts from `main`'s head instead: the head commit alone decides the
-first release, and the notes list only that commit.
+Without a matching tag, a SemVer template has no previous version to increase and releases
+nothing. A CalVer template starts from `main`'s head instead
+([SemVer and CalVer](configuration.md#semver-and-calver)).
 
 `{count}` comes from the `X-Total-Count` header of one `GET commits` on the head; date and time come
 from the pass's UTC clock.
 
 Each merge wakes a pass, so each merge gets its own release. A failed release is printed and fails
-the job at its end, but the pass still runs, so a release problem never holds up the queue. A
-release fails when
-
-- no matching tag lies on `main` within the search limit;
-- the new version is already tagged on another commit - for example a second CalVer release on the
-  same day;
-- `mergeweasel.toml` is invalid;
-- Gitea gives an unexpected answer.
-
-A tag that appears between reading the tags and creating the release comes from a parallel pass
+the job at its end, but the pass still runs, so a release problem never holds up the queue
+([troubleshooting](troubleshooting.md#messages-of-the-release) lists the failures). A tag that
+appears between reading the tags and creating the release comes from a parallel pass
 and is not an error.
 
 The merger creates the release, so the tag push starts the repository's tag-triggered workflows;
@@ -441,16 +438,18 @@ version releases nothing, unless it needs a fix.
   `mergeweasel-queue.yml`.
 - **The run token** serves `check-commits` and the dry run in CI. Keeping the merge token out of
   CI protects against a bug in new code - a dry run that writes - not against an attacker.
-- **The trust boundary is write access.** Gitea hands repository secrets to every non-fork pull
-  request run. So anyone with write access can read the merge token through a workflow on their own
-  branch, and anyone who may push tags can publish an image. The approvals whitelist does not
-  narrow that.
+- **The trust boundary is write access.** This is Gitea's security model, not mergeweasel's, and
+  it holds for every secret of every workflow: Gitea hands repository and organization secrets to
+  every non-fork pull request run, and a workflow cannot keep them out. So anyone with write
+  access can read the merge token through a workflow on their own branch, and anyone who may push
+  tags can publish an image. Neither mergeweasel nor the approvals whitelist can narrow that; only
+  granting write access can.
 - **Releases**: whoever lands a releasing commit causes a release, and anyone who may push tags can
   publish one - both inside the write-access boundary.
-- **The Renovate account** gets its own updates approved, so its token is as sensitive as an
-  approver token. The required checks remain the gate. It is never a default: on another instance an
-  account of the same name could belong to anyone. Its name comes from an Actions variable, which
-  only a repository or organization admin can set, so a pull request cannot make its own author
-  trusted.
+- **The Renovate account** gets its own updates approved, so its token - held by Renovate, not by
+  mergeweasel - is as sensitive as an approver token. The required checks remain the gate. It is
+  never a default: on another instance an account of the same name could belong to anyone. Its name
+  comes from an Actions variable, which only a repository or organization admin can set, so a pull
+  request cannot make its own author trusted.
 - **Carry-over**: trusted only from the merger. A forged status counts only in a dry run, which
   writes nothing.

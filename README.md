@@ -17,6 +17,26 @@ tag and release notes, with the version derived from the commit types.
 
 The logic lives in the image; each repository carries only two small workflows that run it.
 
+## Features
+
+- **One pull request at a time, always on top of `main`.** The queue rebases a pull request that
+  is behind, waits for the required checks, and merges only a tested head.
+- **Approvals survive the rebase.** Gitea may dismiss approvals when the queue rebases; approver
+  accounts restore them, so nobody has to approve twice.
+- **Clean history.** The pull request's title and the `## Commit` section of its description
+  become the squash commit. A check on every pull request rejects a message that would not fit
+  before it reaches the queue.
+- **Labels for the special cases.** `keep-commits` lands the commits as they are, `prio` puts a
+  hotfix first, and `needs-fix` with a comment tells the author what went wrong.
+- **Releases.** Tags and release notes from the commit types, as SemVer or CalVer versions.
+- **Your conventions.** One file, `mergeweasel.toml`, sets the allowed scopes and types, subject
+  forms with issue numbers or Jira keys - or no Conventional Commits at all - and the line length.
+- **Your Gitea's names.** Label names and the runner label are Actions variables, so the
+  repository's files work unchanged on any Gitea.
+- **Renovate.** mergeweasel approves Renovate's own updates and retries a failed one after
+  Renovate's next rebase.
+- **A dry run** shows what the queue would do, without changing anything.
+
 ## How a pull request travels
 
 Every merge, label change and finished check run wakes the queue for one pass. A pass picks the
@@ -41,10 +61,6 @@ Write [Conventional Commits](https://www.conventionalcommits.org/) and mergeweas
 After each merge it works out the next version from the commit types, tags `main`, and publishes a
 Gitea release with notes. No release workflow, no version bumps by hand.
 
-- `feat` raises the minor version, `fix` the patch version, `!` the major version.
-- `docs`, `chore`, `ci` and the other types release nothing.
-- A breaking change carries its `## Commit` section into the notes, so users read what to change.
-
 A pull request titled `feat(api): add a bulk endpoint` lands as
 `feat(api): add a bulk endpoint (#80)`, takes `v1.2.3` to `v1.3.0`, and publishes:
 
@@ -54,52 +70,59 @@ A pull request titled `feat(api): add a bulk endpoint` lands as
 - api: add a bulk endpoint (#80)
 ```
 
-Automatic releases are off until you switch them on, so they never collide with a release process
-already in place. Add one line to `mergeweasel.toml` and tag a first version, such as `v0.1.0`:
+Which types release, and how far, is configurable, and versions can be dates instead (CalVer):
+[types and releases](docs/configuration.md#types-and-releases),
+[the release tag](docs/configuration.md#the-release-tag). Automatic releases are off until you
+switch them on, so they never collide with a release process already in place.
+
+## Quick start
+
+The shortest way to try mergeweasel on a Gitea repository with Actions enabled. One account does
+all of mergeweasel's work here; [onboarding](docs/onboarding.md) covers the full setup.
+
+1. **An account.** Create a Gitea account for mergeweasel, for example `mergeweasel`, that will
+   never open pull requests itself. Add it to the repository as a collaborator with *Write*, and
+   create a token for it with the scopes `write:repository`, `write:issue` and `read:user`.
+2. **Secrets.** Store that token in the repository as both secrets `MERGEWEASEL_MERGER_TOKEN` and
+   `MERGEWEASEL_APPROVER_TOKENS`: the account merges, and restores approvals after a rebase. For
+   finer-grained permissions, give the two roles distinct accounts
+   ([the accounts](docs/onboarding.md#the-accounts)).
+3. **Labels.** Create the labels `automerge` and `needs-fix` in the repository.
+4. **Merge settings.** In the repository settings, allow squash merges.
+5. **Workflows.** Take the two workflows from the latest release `vX.Y.Z`:
+
+   ```sh
+   releases=<mergeweasel's repository URL>/releases/download/vX.Y.Z
+   curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue.yml"
+   curl -fsSL -o .gitea/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
+   ```
+
+   In `mergeweasel-queue.yml`, list the workflows of your CI under `workflow_run`, next to
+   `mergeweasel-commits`, and commit both files to `main`.
+6. **Branch protection.** Protect `main`: require status checks - your CI's checks plus
+   `mergeweasel-commits / check (pull_request)` - allow only `mergeweasel` to merge, and turn on
+   *Block merge on outdated branch*.
+7. **Try it.** Open a pull request titled `feat: try mergeweasel`. If `main` requires approvals,
+   have someone other than its author approve it. Then label it `automerge` - last, because an
+   approval does not wake the queue. Once its checks pass, mergeweasel merges it as
+   `feat: try mergeweasel (#<number>)`.
+
+To have it release as well, add `mergeweasel.toml` to the repository and tag a commit on `main`
+with the version to count up from, for example `v0.1.0`:
 
 ```toml
 [release]
 enabled = true
 ```
 
-Versions can be dates instead (CalVer), and which types release is configurable:
-[releases](docs/onboarding.md#releases), [configuration](docs/configuration.md#the-release-tag).
-
-## Quick start
-
-1. Create the merger and approver accounts and their tokens:
-   [the accounts](docs/onboarding.md#the-accounts).
-2. Store the tokens as the repository secrets `MERGEWEASEL_MERGER_TOKEN` and
-   `MERGEWEASEL_APPROVER_TOKENS`, and create the labels: [labels](docs/onboarding.md#labels). Your
-   Gitea's own label names, runner label and Renovate account are Actions variables:
-   [instance settings](docs/configuration.md#instance-settings).
-3. Protect `main` with required checks and approvals, and allow only the merger to merge:
-   [branch protection](docs/onboarding.md#branch-protection).
-4. Copy the two workflows: [the workflows](docs/onboarding.md#the-workflows).
-5. Approve a pull request, then label it `automerge`: [usage](docs/usage.md).
-6. For automatic releases, switch them on: [releases](#releases).
-
-## Works with Renovate
-
-mergeweasel lands [Renovate](https://docs.renovatebot.com/)'s pull requests like any other. Let
-Renovate label them `automerge` (its `addLabels` option) instead of merging them itself, and name
-Renovate's account in the Actions variable `MERGEWEASEL_RENOVATE_ACCOUNT`
-([Renovate](docs/onboarding.md#renovate)) for the two extras below.
-
-- **Approvals:** with approver accounts configured, mergeweasel approves Renovate's own updates, so
-  no human has to. Without approver accounts, or once someone else has pushed to an update, the
-  update waits for a human approval.
-- **Retries:** when an update fails its checks and gets `needs-fix`, Renovate's next push to it,
-  for example its rebase, removes the label. The update is then retried without anyone stepping in.
-- **Release age:** the image is on Docker Hub, where Renovate finds its release dates, so a
-  `minimumReleaseAge` applies to mergeweasel like to any other image.
+If something does not work, see [troubleshooting](docs/troubleshooting.md).
 
 ## Documentation
 
-- [Onboarding](docs/onboarding.md): set up a repository.
+- [Onboarding](docs/onboarding.md): set up a repository, step by step.
 - [Usage](docs/usage.md): for pull request authors - labels and commit messages.
-- [Configuration](docs/configuration.md): the command, its environment, the instance settings,
-  `mergeweasel.toml` and the fixed values.
+- [Configuration](docs/configuration.md): every variable, setting and `mergeweasel.toml` key.
+- [Troubleshooting](docs/troubleshooting.md): what a message means and how to fix its cause.
 - [Design](docs/design.md): how a pass works, the Gitea behaviour it relies on, and security.
 - [Contributing](CONTRIBUTING.md): development and releases.
 

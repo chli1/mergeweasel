@@ -30,10 +30,8 @@ request.
    token goes into both secrets.
 
 Without approver tokens the queue restores no approvals: a pull request whose approvals a rebase
-dismissed gets `needs-fix` and has to be approved again by hand.
-
-Why not the workflow's run token: Gitea starts no workflow for pushes by the Actions bot, so the
-checks would never run on a pull request the queue rebased.
+dismissed gets `needs-fix` and has to be approved again by hand. Why the queue needs accounts of
+its own instead of the workflow's run token: [design](design.md#gitea-behaviour-relied-on).
 
 ### Permissions
 
@@ -61,34 +59,30 @@ whitelist if you use one ([branch protection](#branch-protection)).
 ## Labels
 
 Create the labels `automerge`, `needs-fix`, `keep-commits` and `prio`, at organization or
-repository level. [Usage](usage.md#the-labels) explains what they mean. `keep-commits` and `prio`
-are optional: without `keep-commits`, every pull request is squashed; without `prio`, the queue
-keeps its plain order.
+repository level. [Usage](usage.md#the-labels) explains what they mean; `keep-commits` and `prio`
+are optional.
 
 To use other names - because the organization already has labels for these roles, say - create
 those instead and set the Actions variables `MERGEWEASEL_AUTOMERGE_LABEL`,
 `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL` and `MERGEWEASEL_PRIO_LABEL` to
-their names ([instance settings](configuration.md#instance-settings)). Set them at organization
-level to name the labels once for every repository. The pass fails with a message that names the
-label when `automerge` or `needs-fix` is missing, and when `keep-commits` or `prio` is missing
-although its variable names it.
+their names ([Actions variables](configuration.md#actions-variables)). Set them at organization
+level to name the labels once for every repository. The same section lists which labels must
+exist.
 
 ## Renovate
 
-This step is only for repositories that Renovate updates. Set the Actions variable
-`MERGEWEASEL_RENOVATE_ACCOUNT` to the login of the account Renovate runs as, for example
-`renovate`. The queue then treats that account's pull requests specially:
+This step is only for repositories that Renovate updates.
 
-- **Approval:** its own update gets approved by the approver accounts, so no human has to. That
-  holds as long as only Renovate or the merger pushed to it, and Renovate added `automerge` last.
-  Once anyone else pushes, or a human sets `automerge`, the update needs a human approval like any
-  other pull request.
-- **Retry:** a push by Renovate to an update labelled `needs-fix`, for example its rebase, removes
-  the label, so a failed update is retried without anyone stepping in.
+1. Let Renovate label its pull requests `automerge` (its `addLabels` option) instead of merging
+   them itself.
+2. Set the Actions variable `MERGEWEASEL_RENOVATE_ACCOUNT` to the login of the account Renovate
+   runs as, for example `renovate`. Name only the account Renovate really runs as: the approver
+   accounts approve its updates, so whoever holds that account's token - in Renovate's own setup -
+   gets changes approved, as with an approver token.
+3. If the repository restricts `commits.scopes` or `commits.types`, allow what Renovate writes.
 
-Without the variable, Renovate's pull requests are ordinary pull requests. The variable has no
-default on purpose: whichever account it names gets its updates approved, so name only the account
-Renovate really runs as, and keep its token as safe as an approver token.
+[Renovate](configuration.md#renovate) explains what the queue does with Renovate's pull requests,
+and what each of these steps is for.
 
 ## Configuration
 
@@ -106,24 +100,14 @@ The release is off until the repository switches it on in its `mergeweasel.toml`
 enabled = true
 ```
 
-Then, after each merge, the queue checks whether the merged commits call for a release: a commit
-of a releasing type ([configuration](configuration.md#types-and-releases)), or a breaking change
-(`!`). If so, it creates a tag on `main` and a Gitea release with notes. `release.tag` sets the
-version format ([configuration](configuration.md#the-release-tag)):
+Then, with the default SemVer versions, tag a commit on `main` by hand as the first version, for
+example `v0.1.0`; mergeweasel counts up from there. With a CalVer template set in `release.tag`, no
+first tag is needed. [Switching the release on](configuration.md#switching-the-release-on) covers
+both, and [types and releases](configuration.md#types-and-releases) which commits release.
 
-- **SemVer**, `vX.Y.Z`, the default: mergeweasel counts up from the previous `vX.Y.Z` tag on
-  `main`. To start, tag a commit on `main` by hand, for example `v0.1.0`. Until that tag exists,
-  nothing is released.
-- **CalVer**, for example `tag = "{YY}.{MM}.{DD}.{count}+{sha}"`: no first tag is needed; the first
-  merge that releases creates it.
-
-Without `enabled = true` the queue only merges, which suits a repository that releases with other
-tooling ([configuration](configuration.md#switching-the-release-on)).
-
-Tags on other branches are ignored. If you keep a maintenance branch for an older version, create
-it only once `main` has moved past that version line - otherwise both branches can arrive at the
-same version. The merger account creates the tag, so workflows that run on tag pushes start for
-it.
+If you keep a maintenance branch for an older version, create it only once `main` has moved past
+that version line - otherwise both branches can arrive at the same version. The merger account
+creates the tag, so workflows that run on tag pushes start for it.
 
 ## Merge styles
 
@@ -136,8 +120,8 @@ branch after merge by default*, so Gitea deletes the branch of every pull reques
 Protect `main` with these settings:
 
 - **Required status checks:** on, listing the checks of your CI plus
-  `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing,
-  because no status could tell a tested head from an untested one.
+  `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing
+  ([why](design.md#definitions)).
 - **Required approvals:** any number, 0 included. If you use an approvals whitelist, it must include
   the approver accounts; without one, any approval by an account with write access counts.
 - **Merge whitelist:** only the merger.
@@ -167,10 +151,9 @@ Keep the file names and workflow names as they are: the pass finds its own runs 
 them.
 
 Nothing in the workflows names your Gitea's labels, accounts, runners or default branch: they read
-the [instance settings](configuration.md#instance-settings) from Actions variables. The jobs run on
-runners labelled `ubuntu-latest`; if yours carry another label, set the Actions variable
-`MERGEWEASEL_RUNNER_LABEL` to it. Pull requests against a branch other than the default branch skip
-both jobs, so stacked pull requests cost no runner time.
+them from [Actions variables](configuration.md#actions-variables). The jobs run on runners labelled
+`ubuntu-latest`; if yours carry another label, set the Actions variable `MERGEWEASEL_RUNNER_LABEL`
+to it.
 
 To update, let Renovate bump the image pin; that is all a minor or patch release needs. A major
 release says in its notes which workflow change it requires, and its image may not work with the
@@ -192,43 +175,6 @@ ADD_CO_COMMITTER_TRAILERS = false
 ## Verify
 
 Run the workflow `mergeweasel-queue` by hand with `dry_run` checked. Its log starts with the
-settings it found - base branch, labels and Renovate account - and then shows what the queue would
-do. Nothing changes.
-
-## Troubleshooting
-
-- **The queue waits forever.** Check that `main` has required status checks, that every required
-  check reports on the pull request, and that the pull request is approved. An approval does not
-  wake the queue: a pull request approved after `automerge` was set waits for the next event.
-  Remove `automerge` and set it again to wake the queue.
-- **`needs-fix` comes back.** The comment names the reason. Checks count only on the up-to-date
-  head of the pull request: fix them there, then remove `needs-fix`.
-- **"merge deferred: Please try again later".** Gitea was still checking whether the pull request
-  can be merged; the next pass retries.
-- **"cannot read the account of MERGEWEASEL_MERGER_TOKEN"**, or of a token of
-  `MERGEWEASEL_APPROVER_TOKENS`, named by its position. The message gives Gitea's reason: the token
-  expired, was revoked, or lacks `read:user`. Create a new token with the scopes listed in
-  [the accounts](#the-accounts).
-- **"... belongs to ... again".** Two approver tokens belong to the same account, and Gitea counts
-  only one approval per account. Use a token of another account.
-- **The jobs never start.** No runner carries the label the workflows ask for. Set
-  `MERGEWEASEL_RUNNER_LABEL` to a label your runners have.
-- **The queue ignores a pull request.** Check its base: only pull requests against the default
-  branch are queued. Check the label name against the `settings:` line of the log.
-- **"labels missing in the repository and its organization: ...".** A label the settings name does
-  not exist. Create it, or correct the variable.
-- **"the label variables must name four different labels".** Two of the four label variables name
-  the same label. Give each role a label of its own.
-- **"release failed: ...".** The pass ran, but the release did not; the message gives Gitea's
-  reason. The next pass tries again, so nothing is lost.
-- **"release failed: user should have a permission to write to a repo".** The merger lacks write
-  permission on the Releases unit - typically through a team that grants permissions per unit. Grant
-  it as listed in [permissions](#permissions); the next pass releases.
-- **"release failed: mergeweasel.toml: ...".** The file on `main` is invalid, and the message names
-  the key. Fix it in a pull request - the queue still lands it.
-- **A traceback, then "release failed: SomeError(...)".** A bug in mergeweasel's release step, not
-  a problem of your setup. The pass still ran and landed what it could; report the bug with the
-  traceback.
-- **"too few approver accounts to restore the approvals".** Add approver accounts to
-  `MERGEWEASEL_APPROVER_TOKENS` (and to the approvals whitelist, if you use one), or approve again
-  by hand. Then remove `needs-fix`.
+`settings:` line ([Actions variables](configuration.md#actions-variables)) and then shows what the
+queue would do. Nothing changes. If the run fails, or a later pass does not do what you expect, see
+[troubleshooting](troubleshooting.md).
