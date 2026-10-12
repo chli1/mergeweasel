@@ -27,7 +27,8 @@ class TemplateError(ValueError):
 
 @dataclasses.dataclass(frozen=True)
 class Parts:
-    type: str
+    # None where the template has no {conventional}.
+    type: str | None
     scope: str | None
     breaking: bool
     description: str
@@ -64,7 +65,7 @@ class Template:
         if match is None:
             return None
         values = match.groupdict()
-        return Parts(values["type"], values["scope"], bool(values["breaking"]), values["description"],
+        return Parts(values.get("type"), values.get("scope"), bool(values.get("breaking")), values["description"],
                      issue=values.get("issue"), pull=values.get("pull"), pull_or_issue=values.get("pull_or_issue"),
                      key=values.get("key"), template=self)
 
@@ -99,15 +100,14 @@ def compile(text):
             raise TemplateError(f"unknown placeholder {{{name}}}")
         if names.count(name) > 1:
             raise TemplateError(f"{{{name}}} appears twice")
-    for name in (CONVENTIONAL, DESCRIPTION):
-        if name not in names:
-            raise TemplateError(f"needs {{{name}}}")
-    if names.index(CONVENTIONAL) > names.index(DESCRIPTION):
+    if DESCRIPTION not in names:
+        raise TemplateError(f"needs {{{DESCRIPTION}}}")
+    if CONVENTIONAL in names and names.index(CONVENTIONAL) > names.index(DESCRIPTION):
         raise TemplateError("{conventional} must come before {description}")
     references = [name for name in names if name in REFERENCES]
     if len(references) > 1:
         raise TemplateError(f"{{{references[0]}}} and {{{references[1]}}} - at most one reference")
-    if not texts[names.index(CONVENTIONAL) + 1].startswith(" "):
+    if CONVENTIONAL in names and not texts[names.index(CONVENTIONAL) + 1].startswith(" "):
         raise TemplateError("{conventional} must be followed by a space")
     for index in range(1, len(names)):
         if not texts[index]:

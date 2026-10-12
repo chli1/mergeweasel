@@ -75,7 +75,7 @@ def check_subject(subject, rules=DEFAULT_COMMIT_RULES):
     parts = first_match(subject, rules)
     if parts is None:
         return subject_problem(subject, rules)
-    if rules.types is not None and parts.type not in rules.types:
+    if parts.type is not None and rules.types is not None and parts.type not in rules.types:
         return f"unknown type {parts.type!r}, expected one of: {', '.join(rules.types)}"
     scope = parts.scope
     if scope is not None and (not scope or re.search(r"\s", scope)):

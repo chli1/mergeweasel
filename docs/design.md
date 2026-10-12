@@ -248,6 +248,10 @@ first form a subject fits decides, so the order of the list is the order of prec
 - No scope means no parentheses: `feat(): ...` is rejected, and so is `feat(my ui): ...`.
 - The scope is free by default. A repository can restrict it to a fixed list with `commits.scopes`
   in `mergeweasel.toml` ([configuration](configuration.md#scopes)).
+- Forms without `{conventional}` serve repositories that do not use Conventional Commits. Either
+  every form has it or none: in a mixed list, a typed subject with a mistyped type would fit a
+  form without one and pass, its type taken for description. The release reads the type, so it
+  stays off with such forms.
 
 The commit check reads `mergeweasel.toml` from the pull request's head, not from `main`. Read from
 `main`, an invalid file would fail the check of every pull request - including the one that fixes

@@ -59,6 +59,12 @@ def test_without_a_type_list_any_type_passes():
     assert check_subject("yolo: add dark mode (#99)", rules(types=None)) is None
 
 
+def test_a_type_free_subject_passes_type_free_forms():
+    free = rules(["{description} (#{pull_or_issue})"])
+    assert check_reference("fix the login (#12)", {12}, 80, free) is None
+    assert squash_message("fix the login", "", set(), 80, free).problems == ()
+
+
 def test_configured_scopes_reach_titles_and_commits():
     message = squash_message("feat(domian): x (#99)", "", ISSUES, 1, rules(scopes=("domain",)))
     assert message.problems == ("PR title: unknown scope 'domian', expected one of: domain",)

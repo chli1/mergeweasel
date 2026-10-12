@@ -131,9 +131,10 @@ mergeweasel.toml: unknown key commits.scopse ignored
 ### Scopes
 
 The scope is the optional part in parentheses after the commit type: `ui` in
-`feat(ui): add dark mode (#12)`. By default any scope is accepted, as long as it is not empty and
-contains no whitespace. That also means a typo goes through unnoticed: `feat(domian): ...` passes
-just like `feat(domain): ...`.
+`feat(ui): add dark mode (#12)`. It is part of `{conventional}`, so `commits.scopes` needs forms
+with it - see [subjects without a type](#subjects-without-a-type). By default any scope is
+accepted, as long as it is not empty and contains no whitespace. That also means a typo goes
+through unnoticed: `feat(domian): ...` passes just like `feat(domain): ...`.
 
 A repository with a fixed set of scopes - its modules, for example - can list them in
 `commits.scopes`:
@@ -206,6 +207,7 @@ Some forms and the subjects they accept:
 | `["{conventional} {description} (#{pull_or_issue})"]` | `feat(ui): add dark mode (#12)` for issue #12, `feat(ui): add dark mode (#80)` from pull request #80 |
 | `["{conventional} {key} {description}"]` | `feat(ui): PROJ-12 add dark mode` |
 | `["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]` | `[PROJ-12] feat: add dark mode`, `chore: tidy the README (PR #31)` |
+| `["{description} (#{pull_or_issue})"]` | `fix the login (#12)` for issue #12, `Add dark mode (#80)` from pull request #80 - with the release off, see [subjects without a type](#subjects-without-a-type) |
 
 **The first form that fits decides.** mergeweasel tries the forms in the order of the list. The
 first one the subject fits is the one it is checked against; a later one is not tried, even when a
@@ -231,13 +233,49 @@ projects = ["PROJ", "OPS"]
 PR title: unknown project 'PORJ' in PORJ-12, expected one of: PROJ, OPS
 ```
 
+**Subjects without a type.** A repository that does not use Conventional Commits leaves
+`{conventional}` out of its forms. mergeweasel then reads no type, and a subject passes with
+whatever its description starts with:
+
+```toml
+[commits]
+subject = ["{description} (#{pull_or_issue})", "{description}"]
+```
+
+The subject `fix the login (#12)` passes for issue #12, and the title `Add dark mode` from pull
+request #80 lands as `Add dark mode (#80)`. Such forms come with three rules:
+
+- The release stays off. The release decides from the type whether a merge releases and how far
+  the version rises, so `release.enabled = true` with forms without `{conventional}` makes the
+  file invalid:
+
+  ```
+  mergeweasel.toml: release.enabled needs commits.subject templates with {conventional} - the release reads the commit type; add it, or set release.enabled = false
+  ```
+
+- Either every form contains `{conventional}` or none does. In a mixed list, a typed subject with
+  a typo in its type, `fx: repair the login (#12)`, would fit the form without a type and pass
+  with `fx: repair the login` as its description, so the file is invalid instead.
+- The keys that read `{conventional}` - `commits.types`, `commits.scopes`,
+  `release.minor_types` and `release.patch_types` - make the file invalid when set, rather than
+  being silently ignored:
+
+  ```
+  mergeweasel.toml: commits.types needs commits.subject templates with {conventional}
+  ```
+
+A subject without a type still has to fit a form, and its reference is checked as with a type:
+with the forms above, a `keep-commits` commit `fix the login (#4711)` fails if #4711 is neither
+the pull request nor an issue.
+
 **A form is valid when**
 
-- it contains `{conventional}` and `{description}` once each, `{conventional}` first;
+- it contains `{description}` once, and `{conventional}` at most once, before `{description}`;
 - it contains at most one of `{issue}`, `{pull}`, `{pull_or_issue}` and `{key}`;
 - text separates every two placeholders - in `{description}{key}` the description's end is
   guesswork;
 - a space follows `{conventional}`, as Conventional Commits requires;
+- either every form of the list contains `{conventional}` or none does;
 - it neither starts nor ends with whitespace - mergeweasel strips a title before it checks it;
 - every `{...}` is one of the placeholders above. There is no way to write a literal brace.
 
@@ -342,6 +380,10 @@ types = ["feat", "fix", "perf", "refactor", "style", "docs", "test", "build", "c
 minor_types = ["feat"]
 patch_types = ["fix", "perf", "revert"]
 ```
+
+The types need forms with `{conventional}`: in a repository whose forms have none, setting
+`commits.types`, `release.minor_types` or `release.patch_types` makes the file invalid - see
+[subjects without a type](#subjects-without-a-type).
 
 **The accepted types.** `commits.types` lists the types a subject may use. Any other type fails
 `check-commits`, and the queue flags the pull request `needs-fix` instead of merging it. The message
@@ -515,14 +557,18 @@ it on:
 release: to release, set release.enabled = true in mergeweasel.toml
 ```
 
-The commit check does not depend on the switch: subjects need a type from `commits.types` either
-way.
+With the release on, every form must contain `{conventional}`, so every subject needs a type from
+`commits.types`. With the release off, the forms decide: forms with `{conventional}` still require
+a type, forms without it require none - see [subjects without a type](#subjects-without-a-type).
+Switching the release on in a repository whose forms have no type makes the file invalid, and the
+commit check of that pull request fails.
 
 The other `release` keys stay checked while the release is off: an invalid `release.tag` or an
-unknown type in `release.patch_types` still fails the pass's release and shows in its log. Set them
-as you want them for the day you switch the release on, or leave them out. Once switched on, the
-first release covers every releasing commit since the previous release tag, the ones merged while
-the release was off included.
+unknown type in `release.patch_types` makes the file invalid, like any other invalid value. With
+forms without a type, `release.minor_types` and `release.patch_types` must not be set at all. Set
+them as you want them for the day you switch the release on, or leave them out. Once switched on,
+the first release covers every releasing commit since the previous release tag, the ones merged
+while the release was off included.
 
 ## Image
 

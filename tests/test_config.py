@@ -158,6 +158,7 @@ def test_a_file_without_unknown_keys_prints_nothing(capsys):
 
 PULL = '"{conventional} {description} (#{pull})"'
 ISSUE = '"{conventional} {description} (#{issue})"'
+FREE = '"{description} (#{pull_or_issue})"'
 
 
 @pytest.mark.parametrize("text, append", [
@@ -172,6 +173,12 @@ def test_without_the_append_any_forms_pass():
     text = ('[commits]\nsquash_append_pull_reference = false\nsubject = [' + ISSUE
             + ', "{conventional} {description} (PR #{pull})"]\n')
     assert config.parse(text).commits.append_pull_reference is False
+
+
+def test_type_free_forms_with_the_release_off():
+    commits = config.parse(f'[commits]\nsubject = [{FREE}, "{{description}}"]\n[release]\nenabled = false\n').commits
+    assert [template.text for template in commits.templates] == ["{description} (#{pull_or_issue})", "{description}"]
+    assert commit_rule.check_subject("fix the login (#12)", commits) is None
 
 
 @pytest.mark.parametrize("text, message", [
@@ -203,6 +210,22 @@ def test_without_the_append_any_forms_pass():
      "mergeweasel.toml: commits.projects must not be empty"),
     ('[commits]\nsquash_append_pull_reference = false\nsubject = ["{conventional} {key} {description}"]\nprojects = ["proj"]\n',
      "mergeweasel.toml: commits.projects: 'proj' is not a project"),
+    ('[commits]\nsubject = ["{conventional} {description} (#{pull})", "{description} (#{pull})"]\n',
+     "mergeweasel.toml: commits.subject: '{conventional} {description} (#{pull})' has {conventional}, "
+     "'{description} (#{pull})' does not - either every form has it or none"),
+    (f'[commits]\nsubject = [{FREE}]\ntypes = ["fix"]\n',
+     "mergeweasel.toml: commits.types needs commits.subject templates with {conventional}"),
+    (f'[commits]\nsubject = [{FREE}]\nscopes = []\n',
+     "mergeweasel.toml: commits.scopes needs commits.subject templates with {conventional}"),
+    (f'[commits]\nsubject = [{FREE}]\nscopes = ["my ui"]\n',
+     "mergeweasel.toml: commits.scopes needs commits.subject templates with {conventional}"),
+    (f'[commits]\nsubject = [{FREE}]\n[release]\nminor_types = []\n',
+     "mergeweasel.toml: release.minor_types needs commits.subject templates with {conventional}"),
+    (f'[commits]\nsubject = [{FREE}]\n[release]\npatch_types = ["fix"]\n',
+     "mergeweasel.toml: release.patch_types needs commits.subject templates with {conventional}"),
+    (f'[commits]\nsubject = [{FREE}]\n[release]\nenabled = true\n',
+     "mergeweasel.toml: release.enabled needs commits.subject templates with {conventional} - the release reads the "
+     "commit type; add it, or set release.enabled = false"),
     ('[commits]\nprojects = ["PROJ"]\n', "mergeweasel.toml: commits.projects needs a commits.subject template with {key}"),
     ('[commits]\ntypes = "feat"\n', "mergeweasel.toml: commits.types must be a list of strings"),
     ("[commits]\ntypes = []\n", "mergeweasel.toml: commits.types must not be empty"),

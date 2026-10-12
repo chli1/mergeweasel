@@ -78,11 +78,15 @@ def parse(text):
             # TOML's true is an int to Python.
             if not isinstance(value, expected) or isinstance(value, bool) != (expected is bool):
                 raise ConfigError(f"{CONFIG_FILE}: {table}.{key} must be {TYPE_NAMES[expected]}")
+    release = data.get("release", {})
+    enabled = release.get("enabled", False)
     try:
-        tag = version_template.compile(data.get("release", {}).get("tag", DEFAULT_TAG))
+        tag = version_template.compile(release.get("tag", DEFAULT_TAG))
     except version_template.TemplateError as error:
         raise ConfigError(f"{CONFIG_FILE}: release.tag: {error}") from None
     commits = data.get("commits", {})
+    templates = subject_templates(commits.get("subject"))
+    check_conventional(templates, commits, release, enabled)
     scopes = commits.get("scopes")
     if scopes is not None:
         for scope in scopes:
@@ -90,7 +94,6 @@ def parse(text):
                 raise ConfigError(f"{CONFIG_FILE}: commits.scopes: {scope!r} is not a scope - "
                                   "it must be a non-empty string without whitespace and ')'")
         scopes = tuple(scopes)
-    templates = subject_templates(commits.get("subject"))
     append = commits.get("squash_append_pull_reference", commit_rule.DEFAULT_COMMIT_RULES.append_pull_reference)
     if append:
         check_appendable(templates)
@@ -109,9 +112,9 @@ def parse(text):
     max_line = commits.get("max_line", commit_rule.MAX_LINE)
     if max_line < 1:
         raise ConfigError(f"{CONFIG_FILE}: commits.max_line must be at least 1")
-    minor_types, patch_types = release_types(data.get("release", {}), types)
+    minor_types, patch_types = release_types(release, types)
     rules = commit_rule.CommitRules(templates, scopes, projects, types, max_line, append_pull_reference=append)
-    return Config(tag, rules, minor_types, patch_types, data.get("release", {}).get("enabled", False), tuple(unknown))
+    return Config(tag, rules, minor_types, patch_types, enabled, tuple(unknown))
 
 
 def subject_templates(texts):
@@ -128,6 +131,28 @@ def subject_templates(texts):
         except subject_template.TemplateError as error:
             raise ConfigError(f"{CONFIG_FILE}: commits.subject: {text!r}: {error}") from None
     return tuple(templates)
+
+
+# The keys that read {conventional}, by table; type-free forms leave them nothing to read.
+TYPE_KEYS = {"commits": ("types", "scopes"), "release": ("minor_types", "patch_types")}
+
+
+def check_conventional(templates, commits, release, enabled):
+    """Either every form has {conventional} or none has - then nothing may need the type."""
+    typed = [template for template in templates if subject_template.CONVENTIONAL in template.names]
+    if len(typed) == len(templates):
+        return
+    if typed:
+        free = next(template for template in templates if template not in typed)
+        raise ConfigError(f"{CONFIG_FILE}: commits.subject: {typed[0].text!r} has {{conventional}}, "
+                          f"{free.text!r} does not - either every form has it or none")
+    for table, keys in (("commits", commits), ("release", release)):
+        for key in TYPE_KEYS[table]:
+            if key in keys:
+                raise ConfigError(f"{CONFIG_FILE}: {table}.{key} needs commits.subject templates with {{conventional}}")
+    if enabled:
+        raise ConfigError(f"{CONFIG_FILE}: release.enabled needs commits.subject templates with {{conventional}} - "
+                          "the release reads the commit type; add it, or set release.enabled = false")
 
 
 # A squash subject ends in the appended pull reference; these forms take it, an {issue} form would fail it.

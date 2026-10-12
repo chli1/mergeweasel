@@ -53,6 +53,15 @@ def test_the_bare_template_takes_everything_as_description():
     assert parts("feat: add x (#12)", "{conventional} {description}") == Parts("feat", None, False, "add x (#12)")
 
 
+def test_a_type_free_form_reads_no_type():
+    assert parts("fix the login (#12)", "{description} (#{pull_or_issue})") == Parts(
+        None, None, False, "fix the login", pull_or_issue="12")
+
+
+def test_a_type_free_form_takes_a_type_as_description():
+    assert parts("feat!: add x", "{description}") == Parts(None, None, False, "feat!: add x")
+
+
 @pytest.mark.parametrize("subject", ["fix: typo(#99)", "fix: (#99)", "fix:  x (#99)", "fix x (#99)",
                                      " fix: x (#99)", "fix: x (#XX)", "feat!(ui): x (#1)"])
 def test_the_default_rejects(subject):
@@ -67,6 +76,7 @@ def test_the_default_rejects(subject):
     ("{conventional} {key} {description}", "feat(ui)!: PROJ-12 add dark mode", "ui: PROJ-12 add dark mode"),
     ("[{key}] {conventional} {description}", "[PROJ-12] feat: add dark mode", "[PROJ-12] add dark mode"),
     ("[{key}] {conventional} {description}", "[PROJ-12] feat(ui): add dark mode", "[PROJ-12] ui: add dark mode"),
+    ("[{key}] {description}", "[PROJ-12] add dark mode", "[PROJ-12] add dark mode"),
 ])
 def test_the_line_is_the_subject_without_type_and_breaking_marker(text, subject, line):
     assert parts(subject, text).line() == line
@@ -74,6 +84,10 @@ def test_the_line_is_the_subject_without_type_and_breaking_marker(text, subject,
 
 def test_describe_writes_the_documentations_notation():
     assert subject_template.compile(DEFAULT[0]).describe() == "<type>[(<scope>)][!]: <description> (#<issue>)"
+
+
+def test_describe_a_type_free_form():
+    assert subject_template.compile("{description} (#{issue})").describe() == "<description> (#<issue>)"
 
 
 def test_describe_names_key_and_pull():
@@ -88,7 +102,6 @@ def test_describe_names_key_and_pull():
     ("{conventional} {description} {", "a { or } outside a placeholder"),
     ("{conventional} {description} ({ticket})", "unknown placeholder {ticket}"),
     ("{conventional} {description} {description}", "{description} appears twice"),
-    ("{description} (#{issue})", "needs {conventional}"),
     ("{conventional} (#{issue})", "needs {description}"),
     ("{description} {conventional} x", "{conventional} must come before {description}"),
     ("{conventional} {description} (#{issue}) [{key}]", "{issue} and {key} - at most one reference"),
