@@ -2,7 +2,8 @@ FROM python:3.14-slim@sha256:0741d101873c12ab927e6f8653feb8862b9bd58771177acb1b8
 
 LABEL org.opencontainers.image.title="mergeweasel" \
       org.opencontainers.image.description="A merge queue for Gitea: lands pull requests one at a time, only once they are tested, and releases them." \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/chli1/mergeweasel"
 
 COPY . /tmp/mergeweasel
 RUN pip install --no-cache-dir /tmp/mergeweasel && rm -rf /tmp/mergeweasel \

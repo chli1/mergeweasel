@@ -110,6 +110,11 @@ flagged `needs-fix`. With the default forms, Renovate's titles need no reference
 The image is on Docker Hub, where Renovate finds its release dates, so a `minimumReleaseAge`
 applies to mergeweasel like to any other image.
 
+The image's label `org.opencontainers.image.source` points Renovate to mergeweasel's GitHub
+repository, whose releases carry the release notes, and Renovate shows them in its update pull
+requests. On Gitea, Renovate reads them from github.com only with a github.com token in its
+environment variable `GITHUB_COM_TOKEN`; without one, the update pull requests come without notes.
+
 ## The base branch
 
 The base branch is the repository's default branch, as set in its settings - there is nothing to

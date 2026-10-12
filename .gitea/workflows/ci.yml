@@ -165,6 +165,33 @@ jobs:
             curl -fsS -X POST -H "Authorization: token $GITEA_TOKEN" -F "attachment=@templates/$file" \
               "$api/releases/$release/assets?name=$file" > /dev/null
           done
+      # The same release on the GitHub mirror: the tag goes first, so the release finds it. Name, notes
+      # and assets are Gitea's; a re-run reuses the release and replaces the assets. Without the token
+      # there is no mirror, and the step does nothing.
+      - name: Publish the release on GitHub
+        env:
+          MERGEWEASEL_GITHUB_SYNC_TOKEN: ${{ secrets.MERGEWEASEL_GITHUB_SYNC_TOKEN }}
+        run: |
+          if [ -z "$MERGEWEASEL_GITHUB_SYNC_TOKEN" ]; then
+            echo "MERGEWEASEL_GITHUB_SYNC_TOKEN is not set: no GitHub release"
+            exit 0
+          fi
+          git push "https://chli1:$MERGEWEASEL_GITHUB_SYNC_TOKEN@github.com/chli1/mergeweasel.git" \
+            "refs/tags/$GITHUB_REF_NAME"
+          api=https://api.github.com/repos/chli1/mergeweasel
+          auth="Authorization: Bearer $MERGEWEASEL_GITHUB_SYNC_TOKEN"
+          if ! curl -fsS -H "$auth" "$api/releases/tags/$GITHUB_REF_NAME" > github-release.json; then
+            python3 -c 'import json, sys; r = json.load(open("release.json")); json.dump({"tag_name": r["tag_name"], "name": r["name"], "body": r["body"]}, sys.stdout)' |
+              curl -fsS -X POST -H "$auth" --data-binary @- "$api/releases" > github-release.json
+          fi
+          release=$(python3 -c 'import json; print(json.load(open("github-release.json"))["id"])')
+          for file in mergeweasel-commits.yml mergeweasel-queue.yml; do
+            for asset in $(python3 -c 'import json, sys; print(*[a["id"] for a in json.load(open("github-release.json"))["assets"] if a["name"] == sys.argv[1]])' "$file"); do
+              curl -fsS -X DELETE -H "$auth" "$api/releases/assets/$asset"
+            done
+            curl -fsS -X POST -H "$auth" -H "Content-Type: application/yaml" --data-binary "@templates/$file" \
+              "https://uploads.github.com/repos/chli1/mergeweasel/releases/$release/assets?name=$file" > /dev/null
+          done
       - name: Log out and remove the image
         if: always()
         run: |

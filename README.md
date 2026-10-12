@@ -92,7 +92,7 @@ all of mergeweasel's work here; [onboarding](docs/onboarding.md) covers the full
 5. **Workflows.** Take the two workflows from the latest release `vX.Y.Z`:
 
    ```sh
-   releases=<mergeweasel's repository URL>/releases/download/vX.Y.Z
+   releases=https://github.com/chli1/mergeweasel/releases/download/vX.Y.Z
    curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue.yml"
    curl -fsSL -o .gitea/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
    ```
@@ -125,6 +125,20 @@ If something does not work, see [troubleshooting](docs/troubleshooting.md).
 - [Troubleshooting](docs/troubleshooting.md): what a message means and how to fix its cause.
 - [Design](docs/design.md): how a pass works, the Gitea behaviour it relies on, and security.
 - [Contributing](CONTRIBUTING.md): development and releases.
+
+## Source and contact
+
+The source is public at [github.com/chli1/mergeweasel](https://github.com/chli1/mergeweasel), a
+read-only mirror of the repository mergeweasel is developed in. It receives `main` and every
+release tag, and its [releases](https://github.com/chli1/mergeweasel/releases) carry the release
+notes and the two workflow files. The mirror takes no pull requests and has no issue tracker.
+
+For bug reports, questions and ideas, open a thread in the mirror's
+[Discussions](https://github.com/chli1/mergeweasel/discussions).
+
+Commit subjects and release notes end in `(#N)`: the issue or pull request of the development
+repository the change came from. On GitHub, `#N` links to GitHub's own numbering instead, which
+belongs to the Discussions and has nothing to do with the change.
 
 ## License
 

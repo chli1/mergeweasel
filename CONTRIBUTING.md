@@ -60,7 +60,8 @@ answer - an uncommitted marker, a shallow clone, a released image without a revi
 - `tests/`: pytest, one suite per module, on constructed state and a client faked with
   `mock.create_autospec`; only `test_gitea.py` fakes HTTP.
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
-  `mergeweasel-commits.yml`), which each release also publishes as the template, and `ci.yml`.
+  `mergeweasel-commits.yml`), which each release also publishes as the template, `ci.yml` and
+  `mirror.yml`.
 - `e2e/`: the end-to-end test - `gitea.Dockerfile` (the pinned Gitea), `driver.py` (the people
   and systems around the queue), `workflow.py` (what `mergeweasel-queue.yml` hands a pass),
   `history.py` (when a `needs_this_commit` scenario may run against the newest release),
@@ -89,10 +90,8 @@ The required checks are `ci / test (pull_request)`, `ci / image (pull_request)`,
 
 The queue sets the tags: every merge with a releasing commit gets the next version
 ([design](docs/design.md#releases)). A tag `vX.Y.Z` on `main` starts the `release` job of `ci.yml`,
-which builds the image and pushes it to `docker.io/chli1ro/mergeweasel` as `X.Y.Z` and `latest`.
-
-The repository needs three secrets:
-
-- `MERGEWEASEL_MERGER_TOKEN` and `MERGEWEASEL_APPROVER_TOKENS` - the queue's tokens
-  ([secrets](docs/configuration.md#secrets));
-- `DOCKERHUB_TOKEN` - a Docker Hub access token of `chli1ro` with write access to the repository.
+which builds the image and pushes it to `docker.io/chli1ro/mergeweasel` as `X.Y.Z` and `latest`,
+attaches the workflow templates to the release, and publishes the same release on the GitHub
+mirror. Every push to `main` starts `mirror.yml`, which pushes `main` and the release tags to
+[github.com/chli1/mergeweasel](https://github.com/chli1/mergeweasel). Both GitHub steps do nothing
+in a repository without the token secret they read.

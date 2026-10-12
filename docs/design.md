@@ -367,6 +367,12 @@ The job then attaches `mergeweasel-commits.yml` and `mergeweasel-queue.yml` to t
 they stand at the tag but pinned to the image it just pushed (`X.Y.Z@sha256:...`). These assets
 are the template consumers copy. A re-run replaces the assets.
 
+The public copy of the repository is a read-only mirror on GitHub. `mirror.yml` pushes `main` and
+the release tags there on every push to `main`, and the `release` job pushes its tag and publishes
+the same release there - name, notes and both assets - so consumers outside the development
+repository's reach can read the source and download the templates. The image label
+`org.opencontainers.image.source` names the mirror, so Renovate finds the release notes there.
+
 The files on `main` are this repository's own installation and run the `latest` image, so this
 repository runs each release as soon as it is published and meets its errors before any consumer
 does. The runners pull a job's image on every run, so `latest` is never a stale local copy.

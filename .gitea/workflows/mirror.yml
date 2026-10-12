@@ -1,0 +1,28 @@
+name: mirror
+on:
+  push:
+    branches: [main]
+jobs:
+  github:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      # Without the token there is no mirror, and the step does nothing.
+      # The run pushes its own commit, not the newest one: a run overtaken by a later merge's run finds
+      # its commit already in GitHub's main and succeeds. The tags catch up on every run.
+      - name: Push main and the release tags to GitHub
+        env:
+          MERGEWEASEL_GITHUB_SYNC_TOKEN: ${{ secrets.MERGEWEASEL_GITHUB_SYNC_TOKEN }}
+        run: |
+          if [ -z "$MERGEWEASEL_GITHUB_SYNC_TOKEN" ]; then
+            echo "MERGEWEASEL_GITHUB_SYNC_TOKEN is not set: no GitHub mirror"
+            exit 0
+          fi
+          remote="https://chli1:$MERGEWEASEL_GITHUB_SYNC_TOKEN@github.com/chli1/mergeweasel.git"
+          if ! git push "$remote" "$GITHUB_SHA:refs/heads/main"; then
+            git fetch "$remote" main
+            git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
+          fi
+          git push "$remote" 'refs/tags/v*:refs/tags/v*'
