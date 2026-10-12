@@ -17,6 +17,8 @@ tag and release notes, with the version derived from the commit types.
 
 The logic lives in the image; each repository carries only two small workflows that run it.
 
+**mergeweasel ships itself: every change merged and released by its own queue.**
+
 ## Features
 
 - **One pull request at a time, always on top of `main`.** The queue rebases a pull request that
