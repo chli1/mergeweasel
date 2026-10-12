@@ -20,15 +20,16 @@ def gitea_with(default_branch="trunk", repo_labels=(), org_labels=()):
 
 def test_without_variables_the_defaults_hold_and_renovate_is_off():
     gitea = gitea_with()
-    assert settings.read(gitea, {}) == settings.Settings("trunk", "automerge", "needs-fix", "keep-commits", None)
+    assert settings.read(gitea, {}) == settings.Settings("trunk", "automerge", "needs-fix", "keep-commits", "prio", None)
     gitea.default_branch.assert_called_once_with()
 
 
 def test_each_variable_sets_its_name():
     environ = {"MERGEWEASEL_AUTOMERGE_LABEL": "merge-me", "MERGEWEASEL_NEEDS_FIX_LABEL": "broken",
-               "MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash", "MERGEWEASEL_RENOVATE_ACCOUNT": "deps-bot"}
+               "MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash", "MERGEWEASEL_PRIO_LABEL": "hotfix",
+               "MERGEWEASEL_RENOVATE_ACCOUNT": "deps-bot"}
     assert settings.read(gitea_with(), environ) == settings.Settings(
-        "trunk", "merge-me", "broken", "no-squash", "deps-bot", keep_commits_required=True)
+        "trunk", "merge-me", "broken", "no-squash", "hotfix", "deps-bot", keep_commits_required=True, prio_required=True)
 
 
 def test_an_empty_or_blank_variable_keeps_the_default():
@@ -38,14 +39,22 @@ def test_an_empty_or_blank_variable_keeps_the_default():
 
 
 def test_two_roles_on_one_label_are_refused():
-    with pytest.raises(settings.SettingsError, match="three different labels, not automerge, automerge, keep-commits"):
+    with pytest.raises(settings.SettingsError, match="four different labels, not automerge, automerge, keep-commits, prio"):
         settings.read(gitea_with(), {"MERGEWEASEL_NEEDS_FIX_LABEL": "automerge"})
 
 
 def test_describe_names_every_setting():
     assert settings.Settings("trunk", renovate="deps-bot").describe() == (
-        "settings: base branch trunk; labels automerge, needs-fix, keep-commits; Renovate account deps-bot")
+        "settings: base branch trunk; labels automerge, needs-fix, keep-commits, prio; Renovate account deps-bot")
     assert settings.Settings("trunk").describe().endswith("; Renovate rule off")
+
+
+def test_prio_is_required_once_its_variable_names_it():
+    named = settings.read(gitea_with(), {"MERGEWEASEL_PRIO_LABEL": "hotfix"})
+    assert named.prio_required and not named.keep_commits_required
+    assert settings.required_labels(named) == ("automerge", "needs-fix", "hotfix")
+    both = settings.read(gitea_with(), {"MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash", "MERGEWEASEL_PRIO_LABEL": "prio"})
+    assert settings.required_labels(both) == ("automerge", "needs-fix", "no-squash", "prio")
 
 
 ALL = ("automerge", "needs-fix", "keep-commits")

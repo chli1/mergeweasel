@@ -57,6 +57,33 @@ def test_keep_commits_fast_forwards(repo, run_pass):
     assert "automerge" not in repo.labels(number)
 
 
+@pytest.mark.needs_this_commit  # the prio label
+def test_prio_overtakes_the_pull_in_flight(repo, run_pass):
+    repo.commit("author", "main", {"fix.txt": "fix\n"}, "fix production", new_branch="hotfix")
+    repo.move_main({"a.txt": "a\n"}, "feat: add a (#1)")
+    repo.commit("author", "main", {"b.txt": "b\n"}, "add b", new_branch="add-b")
+    in_flight = repo.open_pull("author", "add-b", "feat: add b (#1)", BODY)
+    repo.ready(in_flight, state="pending")
+    hotfix = repo.open_pull("author", "hotfix", "fix: repair production (#1)", BODY)
+    repo.add_label("author", hotfix, "prio")
+    repo.ready(hotfix)
+    old_head, in_flight_head = repo.head(hotfix), repo.head(in_flight)
+
+    # Without prio the pass would wait for the up-to-date pull request; it rebases the hotfix instead.
+    run_pass(mergeable=hotfix)
+
+    new_head = eventually(lambda: (head := repo.head(hotfix)) != old_head and head)
+    assert [parent["sha"] for parent in repo.git_commit(new_head)["parents"]] == [repo.main_sha()]
+    assert repo.head(in_flight) == in_flight_head
+
+    repo.post_status(new_head, "success")
+    eventually(lambda: repo.pusher(hotfix, new_head))
+    run_pass(mergeable=hotfix)
+
+    assert repo.pull(hotfix)["merged"]
+    assert not repo.pull(in_flight)["merged"]
+
+
 def test_rebase_carries_the_approval_over(repo, run_pass):
     repo.move_main({"a.txt": LINES}, "feat: add a (#1)")
     repo.commit("author", "main", {"a.txt": changed(1, "first")}, "change the first line", new_branch="first-line")

@@ -238,7 +238,9 @@ def carry_over_description(reviewers, head_sha):
 
 
 def decide(pulls, required, needed, approvers, settings):
-    candidates = sorted((pull for pull in pulls if queued(pull, needed, approvers, settings)), key=lambda pull: (pull.behind, pull.number))
+    # prio first, then up to date - the one in flight stays in place - then the lowest number.
+    candidates = sorted((pull for pull in pulls if queued(pull, needed, approvers, settings)),
+                        key=lambda pull: (settings.prio not in pull.labels, pull.behind, pull.number))
     if not candidates:
         return Idle()
     pull = candidates[0]

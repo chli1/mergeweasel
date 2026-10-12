@@ -280,7 +280,7 @@ def test_pass_prints_and_passes_the_instances_settings(env, fake, capsys):
     fake.labels = ["merge-me", "needs-fix", "keep-commits"]
     assert cli.main(["pass"]) == 0
     assert fake.settings() == Settings("trunk", automerge="merge-me", renovate="deps-bot")
-    assert "settings: base branch trunk; labels merge-me, needs-fix, keep-commits; Renovate account deps-bot" in capsys.readouterr().out
+    assert "settings: base branch trunk; labels merge-me, needs-fix, keep-commits, prio; Renovate account deps-bot" in capsys.readouterr().out
 
 
 def test_a_missing_label_fails_the_pass_before_the_release(env, fake, capsys):
@@ -306,7 +306,7 @@ def test_one_label_for_two_roles_fails_both_commands(env, fake, capsys):
     env.setenv("MERGEWEASEL_KEEP_COMMITS_LABEL", "automerge")
     assert cli.main(["pass"]) == 1
     assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
-    assert capsys.readouterr().err.count("three different labels") == 2
+    assert capsys.readouterr().err.count("four different labels") == 2
     fake.run_pass.assert_not_called()
 
 

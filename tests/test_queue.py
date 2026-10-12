@@ -80,6 +80,22 @@ def test_up_to_date_pull_beats_a_lower_number():
     assert action == queue.Wait(7)
 
 
+def test_prio_beats_the_pull_in_flight():
+    pending = statuses(test="pending", smoke="pending")
+    action = decide([pull(2, checks=pending), pull(7, behind=True, labels=("automerge", "prio"))], REQUIRED)
+    assert action == queue.Rebase(7, "branch-7", f"{7:040x}", ("chli1",))
+
+
+def test_among_prio_pulls_up_to_date_first_then_lowest_number():
+    prio = ("automerge", "prio")
+    pulls = [pull(1), pull(3, behind=True, labels=prio), pull(5, labels=prio), pull(4, labels=prio)]
+    assert decide(pulls, REQUIRED) == merge_action(4)
+
+
+def test_prio_without_automerge_is_not_queued():
+    assert decide([pull(1, labels=("prio",))], REQUIRED) == queue.Idle()
+
+
 def test_unapproved_pull_is_not_queued():
     assert decide([pull(1, approvers=())], REQUIRED) == queue.Idle()
 
@@ -713,7 +729,7 @@ def test_read_state_builds_queued_pulls_from_the_api():
     assert 5 not in [call.args[0] for call in gitea.timeline.call_args_list]
 
 
-CUSTOM = Settings("trunk", "merge-me", "broken", "no-squash", "deps-bot")
+CUSTOM = Settings("trunk", "merge-me", "broken", "no-squash", "hotfix", "deps-bot")
 
 
 def test_read_state_uses_the_instances_names():
@@ -746,6 +762,12 @@ def test_decide_reads_the_instances_labels():
     pulls = [pull(1, labels=("automerge",)), pull(2, labels=("merge-me", "broken")), pull(3, labels=("merge-me", "no-squash"))]
     action = queue.decide(pulls, REQUIRED, 1, approvers_of(APPROVER), CUSTOM)
     assert action == queue.Merge(3, f"{3:040x}", approvals=(), keep_commits=True)
+
+
+def test_decide_reads_the_instances_prio_label():
+    pulls = [pull(1, labels=("merge-me",)), pull(2, labels=("merge-me", "prio"), behind=True),
+             pull(3, labels=("merge-me", "hotfix"), behind=True)]
+    assert queue.decide(pulls, REQUIRED, 1, approvers_of(APPROVER), CUSTOM).number == 3
 
 
 def test_comments_name_the_instances_labels_and_branch():

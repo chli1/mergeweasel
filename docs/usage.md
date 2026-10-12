@@ -14,6 +14,8 @@ of every mergeweasel log shows the names in use.
   cause, then remove the label to queue the pull request again. If the repository is set up for
   Renovate, a push by Renovate removes the label by itself.
 - **`keep-commits`** lands the branch's commits as they are instead of squashing them into one.
+- **`prio`** puts the pull request ahead of every other in the queue. It is meant for a hotfix that
+  must reach `main` at once, and needs `automerge` as well: see [`prio`](#prio).
 
 ## The commit message
 
@@ -99,6 +101,28 @@ commits reference issues uses the placeholder `{pull_or_issue}`
 
 Subjects made by `git commit --fixup`, `git commit --squash` and `git revert` (`fixup! ...`,
 `squash! ...`, `Revert "..."`) are exempt, because they refer to an earlier commit.
+
+## `prio`
+
+The queue normally works in a plain order: a pull request that is up to date with `main` - usually
+the one whose checks are running - goes first, then the lowest number. When production is broken,
+waiting behind that order is pointless. Add `prio` next to `automerge`, and the next pass takes the
+`prio` pull request before any other: it rebases it if it is behind, waits for its checks and
+merges it.
+
+The pull request that was in flight is not touched. Its checks run on, and once the `prio` pull
+request has landed, it is behind `main` and gets rebased and checked again - the price of the
+priority.
+
+`prio` changes only the order. The pull request still needs `automerge`, its approvals and green
+checks, and gets `needs-fix` like any other when it cannot land. Several `prio` pull requests follow
+the plain order among themselves. Set the label at any time, before or after `automerge`; a label
+change wakes the queue.
+
+The priority holds for the queue only, not for the runners. The checks of a `prio` pull request get
+no priority there: when every runner is busy - with the pull request it overtook, or with jobs of
+other repositories - its jobs wait until one is free. If even that wait is too long, cancel the
+other runs by hand in the repository's *Actions* tab.
 
 ## What a `needs-fix` comment means
 

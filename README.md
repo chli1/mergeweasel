@@ -10,7 +10,8 @@ Label an approved pull request `automerge`, and mergeweasel takes it from there.
 pull request when `main` has moved on, waits for the required checks, and lands it, one pull
 request at a time. By default it squashes the pull request into one commit, titled as Gitea
 suggests it: the pull request's title with its number appended. With the label `keep-commits` it
-lands the commits as they are. A pull request it cannot land gets the label `needs-fix` and a
+lands the commits as they are, and with `prio` it goes ahead of every other pull request - for a
+hotfix that cannot wait. A pull request it cannot land gets the label `needs-fix` and a
 comment that explains why. With automatic releases switched on, it also releases what it lands: a
 tag and release notes, with the version derived from the commit types.
 
@@ -19,7 +20,7 @@ The logic lives in the image; each repository carries only two small workflows t
 ## How a pull request travels
 
 Every merge, label change and finished check run wakes the queue for one pass. A pass picks the
-next queued pull request and takes one step:
+next queued pull request - one labelled `prio` first - and takes one step:
 
 1. **Behind `main`:** rebase it onto `main` and keep its approvals, which Gitea may dismiss on the
    rebase.

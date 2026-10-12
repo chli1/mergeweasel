@@ -28,10 +28,11 @@ PASS_TIMEOUT_SECONDS = 300
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "required_approvals(n): the repository's required approvals, 1 by default")
-    config.addinivalue_line("markers", "instance(branch, labels): the default branch and the automerge, needs-fix "
-                                       "and keep-commits labels' names, set as the passes' variables")
+    config.addinivalue_line("markers", "instance(branch, labels): the default branch and the automerge, needs-fix, "
+                                       "keep-commits and prio labels' names, set as the passes' variables")
     config.addinivalue_line("markers", "needs_this_commit: needs what the released image lacks - not run against it "
-                                       "until the newest release contains the commit that added this marker")
+                                       "until the newest release contains the commit that added this marker; a comment on its "
+                                       "line names what the test needs")
 
 
 def pytest_generate_tests(metafunc):
@@ -186,11 +187,12 @@ def run_pass(gitea, image, queue_workflow, repo, instance):
         """
         if mergeable is not None:
             eventually(lambda: repo.pull(mergeable)["mergeable"])
-        automerge, needs_fix, keep_commits = instance[1]
+        automerge, needs_fix, keep_commits, prio = instance[1]
         # The repository's Actions variables and secrets; the default branch is the repository's own.
         contexts = {
             "vars": {"MERGEWEASEL_AUTOMERGE_LABEL": automerge, "MERGEWEASEL_NEEDS_FIX_LABEL": needs_fix,
-                     "MERGEWEASEL_KEEP_COMMITS_LABEL": keep_commits, "MERGEWEASEL_RENOVATE_ACCOUNT": "renovate"},
+                     "MERGEWEASEL_KEEP_COMMITS_LABEL": keep_commits, "MERGEWEASEL_PRIO_LABEL": prio,
+                     "MERGEWEASEL_RENOVATE_ACCOUNT": "renovate"},
             "secrets": {"MERGEWEASEL_MERGER_TOKEN": gitea.tokens["queue"],
                         "MERGEWEASEL_APPROVER_TOKENS": "\n".join(gitea.tokens[account] for account in approvers)},
         }

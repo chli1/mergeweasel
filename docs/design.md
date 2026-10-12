@@ -100,8 +100,10 @@ approval wakes nothing: the label `automerge` comes after it. Before its step, a
    again.
 1. Read `main`'s head and the open pull requests.
 2. Pick the candidate: the lowest-numbered queued pull request that is up to date, otherwise the
-   lowest-numbered queued one. If there is none, stop. Preferring up-to-date pull requests keeps
-   the one in flight in place.
+   lowest-numbered queued one - first among the queued pull requests labelled `prio`, then among
+   the rest. If there is none, stop. Preferring up-to-date pull requests keeps the one in flight in
+   place; a `prio` pull request overtakes it. The one in flight is not touched: its checks run on,
+   and once the `prio` pull request has landed, it is behind and gets rebased like any other.
 3. **Behind `main`:** `POST pulls/{n}/update?style=rebase`. A `409` flags `needs-fix` ("conflicts
    with main") and hands over. Otherwise the pass sets the carry-over on the new head and stops;
    the check runs on the new head wake the queue.
@@ -155,6 +157,8 @@ the flag removed, it queues again - an approval alone wakes no pass.
 - `needs-fix` is the queue's verdict, always with a comment that states the reason and what to do.
   Removing it queues the pull request again; the queue itself removes it only in step 0.
 - `keep-commits` makes the queue fast-forward the commits as they are instead of squashing them.
+- `prio` puts a queued pull request ahead of every other, even the one in flight - for a hotfix
+  that must reach `main` at once. It only orders: without `automerge` it queues nothing.
 
 ### Serialized passes
 
@@ -197,19 +201,20 @@ which names it worked with:
   queue lands on it, releases it and takes its branch protection; a pull request against another
   branch is not a candidate.
 - **The label names and the Renovate account** come from the environment variables
-  `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL` and
-  `MERGEWEASEL_RENOVATE_ACCOUNT`. The workflows fill them from the Actions variables of the same
-  names. An empty value is an unset one: `${{ vars.X }}` of an unset variable is the empty
-  string. An unset label keeps its default name; an unset Renovate account turns the Renovate rule
-  off, because a trusted account must never be a default.
+  `MERGEWEASEL_AUTOMERGE_LABEL`, `MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL`,
+  `MERGEWEASEL_PRIO_LABEL` and `MERGEWEASEL_RENOVATE_ACCOUNT`. The workflows fill them from the
+  Actions variables of the same names. An empty value is an unset one: `${{ vars.X }}` of an unset
+  variable is the empty string. An unset label keeps its default name; an unset Renovate account
+  turns the Renovate rule off, because a trusted account must never be a default.
 
 Two roles on one label are an error, since the queue could no longer tell a verdict from an intent.
 The pass then checks that the required labels exist, in the repository or in its organization,
 because a misspelt name would otherwise leave the queue idle without a word. A missing one fails
-the pass before the release. `automerge` and `needs-fix` are always required. `keep-commits` is only
-when its variable names it: a repository without it squashes every pull request, but a name someone
-set on purpose has to be right. If the organization's labels cannot be read - a user's repository, or a dry run
-with the run token - the pass says so and goes on unchecked.
+the pass before the release. `automerge` and `needs-fix` are always required. `keep-commits` and
+`prio` are only when their variable names them: a repository without them squashes every pull
+request and gives none priority, but a name someone set on purpose has to be right. If the
+organization's labels cannot be read - a user's repository, or a dry run with the run token - the
+pass says so and goes on unchecked.
 
 The workflows cannot filter on the default branch in `on:`, which takes no expressions; a
 `branches` filter would have to name the branch literally. Instead each job carries an `if:` that

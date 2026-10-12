@@ -14,7 +14,7 @@ PASSWORD = "e2e-password-1"
 # The merger's scopes from docs/onboarding.md; the other accounts get the same.
 TOKEN_SCOPES = ["write:repository", "write:issue", "read:user"]
 ORGANIZATION = "e2e"
-LABELS = ("automerge", "needs-fix", "keep-commits")
+LABELS = ("automerge", "needs-fix", "keep-commits", "prio")
 REQUIRED_CONTEXT = "ci/test"
 TIMEOUT_SECONDS = 30
 
@@ -64,7 +64,7 @@ def eventually(probe, timeout=TIMEOUT_SECONDS, interval=0.5):
 def create_repo(clients, name, required_approvals=1, branch="main", labels=LABELS):
     """A repository set up as docs/onboarding.md describes, with issue #1 for the titles to refer to.
 
-    branch: its default branch; labels: the automerge, needs-fix and keep-commits labels' names.
+    branch: its default branch; labels: the automerge, needs-fix, keep-commits and prio labels' names.
     """
     admin = clients[ADMIN]
     admin.call("POST", f"/orgs/{ORGANIZATION}/repos", {"name": name, "auto_init": True, "default_branch": branch})

@@ -60,17 +60,18 @@ whitelist if you use one ([branch protection](#branch-protection)).
 
 ## Labels
 
-Create the labels `automerge`, `needs-fix` and `keep-commits`, at organization or repository
-level. [Usage](usage.md#the-labels) explains what they mean. `keep-commits` is optional: without
-it, every pull request is squashed.
+Create the labels `automerge`, `needs-fix`, `keep-commits` and `prio`, at organization or
+repository level. [Usage](usage.md#the-labels) explains what they mean. `keep-commits` and `prio`
+are optional: without `keep-commits`, every pull request is squashed; without `prio`, the queue
+keeps its plain order.
 
 To use other names - because the organization already has labels for these roles, say - create
 those instead and set the Actions variables `MERGEWEASEL_AUTOMERGE_LABEL`,
-`MERGEWEASEL_NEEDS_FIX_LABEL` and `MERGEWEASEL_KEEP_COMMITS_LABEL` to their names
-([instance settings](configuration.md#instance-settings)). Set them at organization level to name
-the labels once for every repository. The pass fails with a message that names the label when
-`automerge` or `needs-fix` is missing, and when `keep-commits` is missing although its variable
-names it.
+`MERGEWEASEL_NEEDS_FIX_LABEL`, `MERGEWEASEL_KEEP_COMMITS_LABEL` and `MERGEWEASEL_PRIO_LABEL` to
+their names ([instance settings](configuration.md#instance-settings)). Set them at organization
+level to name the labels once for every repository. The pass fails with a message that names the
+label when `automerge` or `needs-fix` is missing, and when `keep-commits` or `prio` is missing
+although its variable names it.
 
 ## Renovate
 
@@ -216,7 +217,7 @@ do. Nothing changes.
   branch are queued. Check the label name against the `settings:` line of the log.
 - **"labels missing in the repository and its organization: ...".** A label the settings name does
   not exist. Create it, or correct the variable.
-- **"the label variables must name three different labels".** Two of the three label variables name
+- **"the label variables must name four different labels".** Two of the four label variables name
   the same label. Give each role a label of its own.
 - **"release failed: ...".** The pass ran, but the release did not; the message gives Gitea's
   reason. The next pass tries again, so nothing is lost.

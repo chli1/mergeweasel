@@ -23,8 +23,8 @@ BODY = ("Adds a.\n\n## Commit\n\n- adds a\n"
 RUN_URL = "https://ci.example.com/runs/1"
 
 
-@pytest.mark.needs_this_commit  # commits.types, commits.max_line and the release types
-@pytest.mark.instance(branch="trunk", labels=("merge-me", "broken", "no-squash"))
+@pytest.mark.needs_this_commit  # the prio label
+@pytest.mark.instance(branch="trunk", labels=("merge-me", "broken", "no-squash", "hotfix"))
 def test_the_queue_works_with_every_default_changed(repo, run_pass):
     repo.move_main({"mergeweasel.toml": CONFIG}, "[PROJ-1] ci(app): configure mergeweasel")
     repo.commit("author", "trunk", {"b.txt": "b\n"}, "add b", new_branch="add-b")
@@ -37,7 +37,7 @@ def test_the_queue_works_with_every_default_changed(repo, run_pass):
 
     output = run_pass(mergeable=number)
 
-    assert "settings: base branch trunk; labels merge-me, broken, no-squash; Renovate account renovate" in output
+    assert "settings: base branch trunk; labels merge-me, broken, no-squash, hotfix; Renovate account renovate" in output
     assert repo.labels(red_number) == {"merge-me", "broken"}
     assert "remove `broken`" in repo.comments_by("queue", red_number)[0]
     # no-squash fast-forwards: trunk's head is the pull request's own commit.
