@@ -2,11 +2,6 @@
 import fixtures
 
 
-def test_the_end_to_end_layer_adds_upgrade():
-    assert fixtures.variants(["image", "workflow_files"]) == ["built", "released", "upgrade"]
-    assert fixtures.variants(["image", "run_pass"]) == ["built", "released"]
-
-
 def test_a_marker_never_skips_built():
     assert fixtures.skip_reason("built", True, "not released") is None
 

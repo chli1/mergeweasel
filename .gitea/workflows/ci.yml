@@ -44,12 +44,23 @@ jobs:
         run: >-
           docker run --rm -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_TOKEN "$IMAGE"
           mergeweasel pass --dry-run
-  e2e:
+  # The Docker layers, one job per layer and variant, in parallel. Each job starts its own Gitea,
+  # named after its own run id.
+  layers:
+    name: ${{ matrix.layer }} (${{ matrix.variant }})
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        layer: [integration, e2e]
+        variant: [built, released, upgrade]
     env:
-      MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}
+      MERGEWEASEL_E2E_RUN_ID: ${{ github.run_id }}-${{ matrix.layer }}-${{ matrix.variant }}
+      MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}-${{ matrix.layer }}-${{ matrix.variant }}
+      LAYER: ${{ matrix.layer }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         # The variant markers look up their commit in the newest release's history.
@@ -57,14 +68,31 @@ jobs:
           fetch-depth: 0
       - name: Build the image
         run: docker build -t "$MERGEWEASEL_E2E_IMAGE" .
-      # The test starts its own Gitea and a runner next to it, runs passes of the built image and the
-      # newest release against it, and lets the runner run the workflows. -rs: the log names each
-      # skipped variant and why.
-      - name: End-to-end test
+      # The test starts its own Gitea and runs passes against it - in the end-to-end layer a runner next
+      # to it runs the workflows. [built] also takes the tests without a variant, such as the runner
+      # probe. -rs: the log names each skipped variant and why.
+      - name: Test the layer
         run: |
+          case "$VARIANT" in
+            built) select="not [released] and not [upgrade]" ;;
+            *) select="[$VARIANT]" ;;
+          esac
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r requirements-test.txt
-          .venv/bin/python -m pytest -rs tests/integration tests/e2e
+          .venv/bin/python -m pytest -rs "tests/$LAYER" -k "$select"
+  # The required check of the Docker layers, whatever jobs they run in. always(): a failed layer
+  # would skip a plain dependent job instead of failing it.
+  e2e:
+    if: always() && github.event_name == 'pull_request'
+    needs: [layers]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every Docker layer passed
+        env:
+          LAYERS: ${{ needs.layers.result }}
+        run: |
+          echo "layers: $LAYERS"
+          test "$LAYERS" = success
   # No tests here: main takes only up-to-date pull requests whose checks passed.
   release:
     if: github.event_name == 'push'

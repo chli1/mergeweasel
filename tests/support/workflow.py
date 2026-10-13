@@ -44,10 +44,14 @@ class QueueWorkflow:
 
 
 def read(path=QUEUE_WORKFLOW):
-    job = yaml.safe_load(path.read_text())["jobs"]["pass"]
+    return parse(path.read_text(), path.name)
+
+
+def parse(text, name=QUEUE_WORKFLOW.name):
+    job = yaml.safe_load(text)["jobs"]["pass"]
     steps = [step for step in job["steps"] if step.get("if") == PASS_STEP_CONDITION]
     if len(steps) != 1:
-        raise ValueError(f"{path.name}: expected one step with if: {PASS_STEP_CONDITION}, found {len(steps)}")
+        raise ValueError(f"{name}: expected one step with if: {PASS_STEP_CONDITION}, found {len(steps)}")
     step = steps[0]
     return QueueWorkflow(job["container"]["image"], {**job.get("env", {}), **step.get("env", {})},
                          shlex.split(step["run"]))

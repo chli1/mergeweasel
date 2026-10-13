@@ -13,5 +13,5 @@ jobs:
       BODY: ${{ github.event.pull_request.body }}
     steps:
       - run: |
-          case "$BODY" in *ci-slow*) sleep 30 ;; esac
+          case "$BODY" in *ci-slow*) sleep 10 ;; esac
           case "$BODY" in *ci-fail*) exit 1 ;; esac

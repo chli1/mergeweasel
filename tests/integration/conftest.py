@@ -4,6 +4,7 @@ import subprocess
 
 import pytest
 
+import workflow
 from driver import eventually
 from server import LABEL
 
@@ -11,7 +12,13 @@ PASS_TIMEOUT_SECONDS = 300
 
 
 @pytest.fixture
-def run_pass(server, image, queue_workflow, repo, instance):
+def pass_workflow(workflow_text):
+    """What mergeweasel-queue.yml hands a pass, as the variant runs it."""
+    return workflow.parse(workflow_text("mergeweasel-queue.yml"))
+
+
+@pytest.fixture
+def run_pass(server, image, pass_workflow, repo, instance):
     def run(mergeable=None, approvers=("queue",)):
         """One pass, with the environment and the command mergeweasel-queue.yml gives it.
 
@@ -31,11 +38,11 @@ def run_pass(server, image, queue_workflow, repo, instance):
                         "MERGEWEASEL_APPROVER_TOKENS": "\n".join(server.tokens[account] for account in approvers)},
         }
         # The runner's context, which the workflow does not spell out.
-        passed = {"GITHUB_SERVER_URL": server.url, "GITHUB_REPOSITORY": repo.name, **queue_workflow.resolve(contexts)}
+        passed = {"GITHUB_SERVER_URL": server.url, "GITHUB_REPOSITORY": repo.name, **pass_workflow.resolve(contexts)}
         # By name only: the tokens stay off the command line.
         options = [option for name in passed for option in ("--env", name)]
         result = subprocess.run(
-            ["docker", "run", "--rm", "--label", LABEL, *options, image, *queue_workflow.command],
+            ["docker", "run", "--rm", "--label", LABEL, *options, image, *pass_workflow.command],
             env={**os.environ, **passed}, capture_output=True, text=True, timeout=PASS_TIMEOUT_SECONDS)
         # pytest shows it with a failing test: what the pass decided.
         print(f"pass:\n{result.stdout}{result.stderr}")

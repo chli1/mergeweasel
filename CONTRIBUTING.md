@@ -37,10 +37,10 @@ Docker daemon through `/var/run/docker.sock`, where it starts each job as a cont
 Gitea. Run them on a Linux host, or in a container on the default bridge with the daemon's socket.
 Docker Desktop does not work, because its host cannot reach container IP addresses; neither does a
 CI job on a network of its own. Several runs can share one daemon: Gitea's and the runner's
-containers and images carry the run id (`GITHUB_RUN_ID` in CI), and each Gitea numbers its Actions
-tasks from a random offset, so the job containers and volumes the runner names after them differ
-too. A run that dies before its cleanup leaves them behind; the next run removes what is older
-than an hour.
+containers and images carry the run id (`MERGEWEASEL_E2E_RUN_ID`, a random one outside CI), and each
+Gitea numbers its Actions tasks from a random offset, so the job containers and volumes the runner
+names after them differ too. A run that dies before its cleanup leaves them behind; the next run
+removes what is older than an hour.
 
 In the integration layer each pass gets the environment and the command that `mergeweasel-queue.yml`
 gives it ([the image and its workflows](docs/design.md#the-image-and-its-workflows)): the job's and
@@ -54,9 +54,11 @@ Every scenario runs in several variants, each standing for a setup that exists o
 - `[released]` - this branch's workflow files with the newest release, the `latest` image: this
   repository itself between merging a change and its release, because it runs the files on `main`
   with `latest`.
-- `[upgrade]` (end-to-end layer only) - the newest release's workflow files, read from the git
-  history at the revision its image names, with the built image: a consumer after Renovate bumped
-  the image pin in their copies of the workflow files, which it leaves unchanged otherwise.
+- `[upgrade]` - the newest release's workflow files, read from the git history at the revision its
+  image names, with the built image: a consumer after Renovate bumped the image pin in their copies
+  of the workflow files, which it leaves unchanged otherwise. In the integration layer each pass
+  gets the environment and the command of the release's `mergeweasel-queue.yml`, so the scenarios
+  with their own label names or release settings test the old interface as well.
 
 Every run pulls the newest release from Docker Hub, because `latest` moves with each release.
 
@@ -129,7 +131,15 @@ CI (`ci.yml`) runs on every pull request:
 - `test` - the unit tests;
 - `image` - builds the image, which then checks the pull request itself and dry-runs a pass with
   the run token;
-- `e2e` - builds the image and runs the end-to-end test against it.
+- `layers` - one job per Docker layer and variant, such as `integration (built)` or
+  `e2e (upgrade)`: each builds the image and runs that variant of the layer against it. The
+  `[built]` jobs also run the tests without a variant, such as the runner probe of
+  `tests/e2e/test_runner.py`;
+- `e2e` - passes once every `layers` job passed. It is the one required check of the Docker
+  layers, so their jobs can change without touching the branch protection.
+
+The Docker layers' jobs run in parallel, on as many runners as are free. Each starts its own Gitea
+and names its containers and images `<run id>-<layer>-<variant>` (`MERGEWEASEL_E2E_RUN_ID`).
 
 A new push to a pull request cancels the run still going for its previous head. The runner skips
 every remaining step of a cancelled run, so `ci` cleans up nothing itself: `ci-cleanup.yml` runs

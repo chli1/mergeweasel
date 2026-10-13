@@ -1,14 +1,13 @@
 """The end-to-end layer: Gitea runs this repository's workflows on a real runner."""
 import pathlib
 import re
-import subprocess
 
 import pytest
 
 import runner as runners
 from actions import CHECK_CONTEXT, CI_CONTEXT
 from driver import ADMIN, create_repo
-from workflow import IMAGE, WORKFLOWS
+from workflow import IMAGE
 
 QUEUE_FILES = ("mergeweasel-queue.yml", "mergeweasel-commits.yml")
 
@@ -20,22 +19,10 @@ def runner(server, run_id, built_image):
 
 
 @pytest.fixture
-def workflow_files(request, image):
-    """The queue's and the commit check's workflow files, each with the image under test: this branch's,
-    or in [upgrade] the newest release's."""
-    if request.node.callspec.params["image"] == "upgrade":
-        # The image fixture has failed [upgrade] already if the image names no revision.
-        revision = request.getfixturevalue("released_revision")
-        texts = {}
-        for name in QUEUE_FILES:
-            shown = subprocess.run(["git", "show", f"{revision}:.gitea/workflows/{name}"], cwd=WORKFLOWS,
-                                   capture_output=True, text=True)
-            if shown.returncode != 0:
-                pytest.fail(f"[upgrade] cannot read {name} of the newest release {revision[:12]}: {shown.stderr.strip()}")
-            texts[name] = shown.stdout
-    else:
-        texts = {name: (WORKFLOWS / name).read_text() for name in QUEUE_FILES}
-    return {name: IMAGE.sub(lambda match: match.group(1) + image, text) for name, text in texts.items()}
+def workflow_files(workflow_text, image):
+    """The queue's and the commit check's workflow files as the variant runs them, each with the image
+    under test."""
+    return {name: IMAGE.sub(lambda match: match.group(1) + image, workflow_text(name)) for name in QUEUE_FILES}
 
 
 @pytest.fixture

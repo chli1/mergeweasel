@@ -5,6 +5,7 @@ Run: MERGEWEASEL_E2E_IMAGE=<image> .venv/bin/python -m pytest tests/integration 
 import os
 import re
 import secrets
+import subprocess
 
 import pytest
 
@@ -14,14 +15,9 @@ from driver import LABELS, create_repo
 from server import docker, start
 
 
-# The end-to-end layer adds [upgrade]: the newest release's workflow files with the built image -
-# a user's setup after Renovate bumped the image.
-VARIANTS = ["built", "released"]
-END_TO_END_VARIANTS = [*VARIANTS, "upgrade"]
-
-
-def variants(fixturenames):
-    return END_TO_END_VARIANTS if "workflow_files" in fixturenames else VARIANTS
+# [upgrade]: the newest release's workflow files with the built image - a user's setup after
+# Renovate bumped the image.
+VARIANTS = ["built", "released", "upgrade"]
 
 
 # The marker that holds a variant back until the newest release contains the marker's commit: the new
@@ -46,13 +42,14 @@ def missing_revision(variant, revision):
 def pytest_generate_tests(metafunc):
     # Every scenario also runs with the newest release: its image, and in [upgrade] its workflow files.
     if "image" in metafunc.fixturenames:
-        metafunc.parametrize("image", variants(metafunc.fixturenames), indirect=True)
+        metafunc.parametrize("image", VARIANTS, indirect=True)
 
 
 @pytest.fixture(scope="session")
 def run_id():
-    # Docker names carry the run id: the daemon may serve other runs at the same time.
-    return os.environ.get("GITHUB_RUN_ID") or f"local-{secrets.token_hex(3)}"
+    # Docker names carry the run id: the daemon may serve other runs at the same time, and the jobs
+    # of one CI run as well - CI sets <run id>-<job>.
+    return os.environ.get("MERGEWEASEL_E2E_RUN_ID") or f"local-{secrets.token_hex(3)}"
 
 
 @pytest.fixture(scope="session")
@@ -110,6 +107,23 @@ def image(request):
         if reason:
             pytest.skip(reason)
     return request.getfixturevalue("released_image" if request.param == "released" else "built_image")
+
+
+@pytest.fixture
+def workflow_text(request, image):
+    """Reads a workflow file as the variant runs it: this branch's, or in [upgrade] the newest release's."""
+    if request.node.callspec.params["image"] != "upgrade":
+        return lambda name: (workflow.WORKFLOWS / name).read_text()
+    # The image fixture has failed [upgrade] already if the image names no revision.
+    revision = request.getfixturevalue("released_revision")
+
+    def read(name):
+        shown = subprocess.run(["git", "show", f"{revision}:.gitea/workflows/{name}"], cwd=workflow.WORKFLOWS,
+                               capture_output=True, text=True)
+        if shown.returncode != 0:
+            pytest.fail(f"[upgrade] cannot read {name} of the newest release {revision[:12]}: {shown.stderr.strip()}")
+        return shown.stdout
+    return read
 
 
 @pytest.fixture
