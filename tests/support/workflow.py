@@ -6,7 +6,10 @@ import shlex
 
 import yaml
 
-QUEUE_WORKFLOW = pathlib.Path(__file__).parents[1] / ".gitea" / "workflows" / "mergeweasel-queue.yml"
+WORKFLOWS = pathlib.Path(__file__).parents[2] / ".gitea" / "workflows"
+QUEUE_WORKFLOW = WORKFLOWS / "mergeweasel-queue.yml"
+# A workflow's mergeweasel image; the end-to-end test puts the image under test in its place.
+IMAGE = re.compile(r"(image:\s*)docker\.io/chli1ro/mergeweasel\S*")
 # The step of job `pass` that runs the real pass; the other one is the dry run.
 PASS_STEP_CONDITION = "${{ !inputs.dry_run }}"
 EXPRESSION = re.compile(r"\$\{\{\s*(vars|secrets)\.(\w+)\s*\}\}")

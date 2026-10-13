@@ -61,10 +61,11 @@ def eventually(probe, timeout=TIMEOUT_SECONDS, interval=0.5):
         time.sleep(interval)
 
 
-def create_repo(clients, name, required_approvals=1, branch="main", labels=LABELS):
+def create_repo(clients, name, required_approvals=1, branch="main", labels=LABELS, contexts=(REQUIRED_CONTEXT,)):
     """A repository set up as docs/onboarding.md describes, with issue #1 for the titles to refer to.
 
-    branch: its default branch; labels: the automerge, needs-fix, keep-commits and prio labels' names.
+    branch: its default branch; labels: the automerge, needs-fix, keep-commits and prio labels' names;
+    contexts: the status checks its branch protection requires.
     """
     admin = clients[ADMIN]
     admin.call("POST", f"/orgs/{ORGANIZATION}/repos", {"name": name, "auto_init": True, "default_branch": branch})
@@ -78,7 +79,7 @@ def create_repo(clients, name, required_approvals=1, branch="main", labels=LABEL
     clients["author"].call("POST", f"{path}/issues", {"title": "The issue every title refers to"})
     admin.call("POST", f"{path}/branch_protections", {
         "rule_name": branch,
-        "enable_status_check": True, "status_check_contexts": [REQUIRED_CONTEXT],
+        "enable_status_check": True, "status_check_contexts": list(contexts),
         "required_approvals": required_approvals, "enable_approvals_whitelist": True,
         # Singular: Gitea ignores approvals_whitelist_usernames.
         "approvals_whitelist_username": ["reviewer", "reviewer2", "queue", "approver1", "approver2"],
@@ -191,6 +192,22 @@ class Repo:
 
     def statuses(self, sha):
         return self.read(f"/commits/{sha}/statuses")
+
+    def states(self, sha):
+        """The newest state per context: statuses() lists every change, newest first."""
+        states = {}
+        for status in self.statuses(sha):
+            states.setdefault(status["context"], status["status"])
+        return states
+
+    def runs(self):
+        """(workflow file, event, status) of each Actions task, newest first."""
+        return [(task["workflow_id"], task["event"], task["status"])
+                for task in self.read("/actions/tasks")["workflow_runs"]]
+
+    def task_ids(self):
+        """The id of each Actions task, newest first."""
+        return [task["id"] for task in self.read("/actions/tasks")["workflow_runs"]]
 
     def tags(self):
         return {tag["name"]: tag["commit"]["sha"] for tag in self.read("/tags")}

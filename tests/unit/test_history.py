@@ -1,11 +1,12 @@
-"""When a needs_this_commit test may run against the released image. No Gitea needed."""
+"""When a marked scenario may run with the newest release. No Gitea needed."""
 import importlib.util
 import subprocess
 
 import history
 
 SCENARIO = "import pytest\n\n\n{marker}def test_new():\n    pass\n"
-MARKED = SCENARIO.format(marker="@pytest.mark.needs_this_commit\n")
+MARKER = "needs_new_image"
+MARKED = SCENARIO.format(marker=f"@pytest.mark.{MARKER}\n")
 
 
 def git(path, *arguments):
@@ -37,34 +38,45 @@ def test_a_release_with_the_markers_commit_runs_it(tmp_path):
     commit(tmp_path, MARKED)
     later = commit(tmp_path, MARKED + "\n# later\n")
 
-    assert history.unreleased(scenario(tmp_path), later) is None
+    assert history.unreleased(scenario(tmp_path), later, MARKER) is None
 
 
 def test_a_release_before_the_markers_commit_skips_it(tmp_path):
     before = repository(tmp_path)
     marked = commit(tmp_path, MARKED)
 
-    assert marked[:12] in history.unreleased(scenario(tmp_path), before)
+    assert marked[:12] in history.unreleased(scenario(tmp_path), before, MARKER)
 
 
 def test_touching_the_marker_line_moves_the_key(tmp_path):
     repository(tmp_path)
     commit(tmp_path, MARKED)
     between = commit(tmp_path, MARKED + "\n# later\n")
-    commit(tmp_path, MARKED.replace("needs_this_commit", "needs_this_commit  # touched") + "\n# later\n")
+    commit(tmp_path, MARKED.replace(MARKER, f"{MARKER}  # touched") + "\n# later\n")
 
-    assert history.unreleased(scenario(tmp_path), between) is not None
+    assert history.unreleased(scenario(tmp_path), between, MARKER) is not None
 
 
 def test_an_uncommitted_marker_skips_it(tmp_path):
     revision = repository(tmp_path)
     (tmp_path / "test_scenario.py").write_text(MARKED)
 
-    assert "not committed" in history.unreleased(scenario(tmp_path), revision)
+    assert "not committed" in history.unreleased(scenario(tmp_path), revision, MARKER)
 
 
 def test_a_revision_outside_the_history_skips_it(tmp_path):
     repository(tmp_path)
     commit(tmp_path, MARKED)
 
-    assert "1234567890ab" in history.unreleased(scenario(tmp_path), "1234567890ab" * 3 + "1234")
+    assert "1234567890ab" in history.unreleased(scenario(tmp_path), "1234567890ab" * 3 + "1234", MARKER)
+
+
+def test_each_marker_counts_from_its_own_commit(tmp_path):
+    repository(tmp_path)
+    commit(tmp_path, MARKED)
+    released = commit(tmp_path, MARKED + "\n# later\n")
+    both = SCENARIO.format(marker=f"@pytest.mark.{MARKER}\n@pytest.mark.breaks_old_workflows\n")
+    commit(tmp_path, both + "\n# later\n")
+
+    assert history.unreleased(scenario(tmp_path), released, MARKER) is None
+    assert history.unreleased(scenario(tmp_path), released, "breaks_old_workflows") is not None

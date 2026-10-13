@@ -1,11 +1,11 @@
-"""When a needs_this_commit test may run against the released image: once the newest release contains the
-commit that added its marker line, it contains the feature the test needs too.
+"""When a marked scenario may run with the newest release: once the release contains the commit that
+added its marker line, it contains what the marker stands for too - the new image's feature, or the
+break with the old workflow files.
 """
 import inspect
 import pathlib
 import subprocess
 
-MARKER = "pytest.mark.needs_this_commit"
 UNCOMMITTED = "0" * 40
 
 
@@ -13,14 +13,14 @@ def git(directory, *arguments):
     return subprocess.run(["git", *arguments], cwd=directory, capture_output=True, text=True)
 
 
-def unreleased(test, revision):
-    """Why `test` may not run against the release built from `revision`, or None if it may.
+def unreleased(test, revision, marker):
+    """Why `test`, marked with `marker`, may not run with the release built from `revision`, or None if it may.
 
     Unknown counts as unreleased: a skip shows its reason, a false red would block every pull request.
     """
     path = pathlib.Path(inspect.getsourcefile(test))
     lines, start = inspect.getsourcelines(test)
-    number = start + next(offset for offset, line in enumerate(lines) if MARKER in line)
+    number = start + next(offset for offset, line in enumerate(lines) if f"pytest.mark.{marker}" in line)
     blame = git(path.parent, "blame", "--porcelain", "-L", f"{number},{number}", "--", path.name)
     if blame.returncode != 0:
         return f"no history for {path.name}:{number}: {blame.stderr.strip()}"

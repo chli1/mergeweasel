@@ -45,31 +45,33 @@ jobs:
   e2e:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        # needs_this_commit looks up its marker's commit in the newest release's history.
+        # The variant markers look up their commit in the newest release's history.
         with:
           fetch-depth: 0
       - name: Build the image
         run: docker build -t "$MERGEWEASEL_E2E_IMAGE" .
-      # The test starts its own Gitea and runs passes of the built image and the newest release against
-      # it. -rs: the log names each skipped [released] variant and why.
+      # The test starts its own Gitea and a runner next to it, runs passes of the built image and the
+      # newest release against it, and lets the runner run the workflows. -rs: the log names each
+      # skipped variant and why.
       - name: End-to-end test
         run: |
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r requirements-test.txt
-          .venv/bin/python -m pytest -rs e2e
-      # pytest removes its Gitea itself; this covers a pytest that died before its cleanup.
+          .venv/bin/python -m pytest -rs tests/integration tests/e2e
+      # pytest removes its Gitea and its runner itself; this covers a pytest that died before its
+      # cleanup.
       - name: Remove the containers and images
         if: always()
         run: |
-          docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" || true
-          if docker image inspect "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" > /dev/null 2>&1; then
-            docker rmi -f "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" || true
-          fi
+          docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" "mergeweasel-e2e-runner-$GITHUB_RUN_ID" || true
+          for tag in "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" "mergeweasel-e2e-runner:$GITHUB_RUN_ID"; do
+            if docker image inspect "$tag" > /dev/null 2>&1; then docker rmi -f "$tag" || true; fi
+          done
           docker rmi -f "$MERGEWEASEL_E2E_IMAGE" || true
       # The test pulls `latest` on every run, and each release leaves the previous one behind on the
       # daemon, so it keeps the newest `keep`.

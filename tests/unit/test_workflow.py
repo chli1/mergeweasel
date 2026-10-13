@@ -1,5 +1,6 @@
 """Reading mergeweasel-queue.yml: what it hands a pass. No Gitea needed."""
 import pytest
+import yaml
 
 import workflow
 
@@ -70,3 +71,9 @@ def test_not_exactly_one_real_pass_step_fails(tmp_path):
 
     with pytest.raises(ValueError, match="2"):
         workflow.read(path)
+
+
+def test_each_job_of_the_queue_workflows_names_the_image_once():
+    for name in ("mergeweasel-queue.yml", "mergeweasel-commits.yml"):
+        text = (workflow.WORKFLOWS / name).read_text()
+        assert len(workflow.IMAGE.findall(text)) == len(yaml.safe_load(text)["jobs"]), name

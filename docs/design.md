@@ -381,18 +381,21 @@ Renovate leaves the image alone.
 A change that needs consumers to update their copies of `mergeweasel-*.yml` is breaking (`!`),
 because Renovate bumps only the image pin. Such a change keeps the workflow files working with the
 previous release, because this repository runs the new files on the old image until the release
-is published. The end-to-end test checks it: every scenario runs against both the new image and
-the newest release, with what the workflow files pass. Consumers take files and pin together from
-the release. This repository's Renovate types its updates so that only an update of the image's
-base image releases (`fix(deps)`).
+is published. The tests check both directions: every scenario runs the new files with the newest
+release, and the end-to-end test also runs the newest release's files with the new image - what a
+consumer has after Renovate bumped the pin. Consumers take files and pin together from the release.
+This repository's Renovate types its updates so that only an update of the image's base image
+releases (`fix(deps)`).
 
 ## Gitea behaviour relied on
 
-Verified against the Gitea pinned in `e2e/gitea.Dockerfile`. The end-to-end test (`e2e/`)
-exercises stale approvals, the rebase, the squash, the refs and the refused self-approval against
-it, so a Gitea version that breaks one of them fails there first. Renovate bumps that pin for every
-Gitea release. A new major version is a release whose notes say "support Gitea vX"; a minor or patch
-version releases nothing, unless it needs a fix.
+Verified against the Gitea pinned in `tests/support/gitea.Dockerfile`. The integration test
+(`tests/integration/`) exercises stale approvals, the rebase, the squash, the refs and the refused
+self-approval against it, and the end-to-end test (`tests/e2e/`) runs the workflow files on the
+runner pinned in `tests/support/gitea-runner.Dockerfile`, so a Gitea version that breaks one of them
+fails there first. Renovate bumps the Gitea pin for every Gitea release. A new major version is a
+release whose notes say "support Gitea vX"; a minor or patch version releases nothing, unless it
+needs a fix.
 
 - **Stale approvals**: with `dismiss_stale_approvals`, a push dismisses approvals only if the pull
   request's diff against the new merge base changed. So a rebase dismisses them exactly when a file
@@ -404,11 +407,14 @@ version releases nothing, unless it needs a fix.
   workflow. A rebase pushed with the run token would never start checks, so the queue needs an
   account of its own.
 - **Triggers**: `workflow_run` supports `workflows` and `types` filters. On `pull_request_target`,
-  `workflow_run` and `workflow_dispatch`, Gitea takes the workflow from `main`.
+  `workflow_run` and `workflow_dispatch`, Gitea takes the workflow from `main`. The end-to-end test
+  runs `workflow_run` after `ci` and `mergeweasel-commits`, `pull_request_target` on a merge and the
+  `pull_request` label events; `workflow_dispatch` was checked on a Gitea v28 runner by hand.
 - **Workflow expressions**: `on:` takes none, so `branches: ['${{ vars.X }}']` matches nothing.
   `runs-on` evaluates `vars`, and `||` gives it a default when the variable is unset. A job-level
-  `if:` that is false skips the job without a runner ever taking it. The end-to-end test has no
-  runner, so these were checked on a Gitea v28 runner by hand.
+  `if:` that is false skips the job without a runner ever taking it. The end-to-end test runs
+  `runs-on` with the variable unset and the job-level `if:` that is true; the rest was checked on a
+  Gitea v28 runner by hand.
 - **Default branch**: `GET repos/{owner}/{repo}` reports `default_branch` to any account that can
   read the repository.
 - **Labels**: `GET labels` lists only the repository's own labels; an organization's labels come

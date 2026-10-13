@@ -16,5 +16,14 @@ requires-python = ">=3.12"
 mergeweasel = "mergeweasel.cli:main"
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
+# importlib: tests/unit and tests/integration both have a test_queue.py.
+addopts = "--import-mode=importlib"
+pythonpath = ["src", "tests/support"]
+# The default run needs no Docker; CI names tests/integration and tests/e2e.
+testpaths = ["tests/unit"]
+markers = [
+    "required_approvals(n): the repository's required approvals, 1 by default",
+    "instance(branch, labels): the default branch and the automerge, needs-fix, keep-commits and prio labels' names, set as the passes' variables",
+    "needs_new_image: the new workflow files need what the newest release's image lacks - [released] does not run until the newest release contains the commit that added this marker; a comment on its line names what",
+    "breaks_old_workflows: the new image breaks the newest release's workflow files, a deliberate breaking change - [upgrade] does not run until the newest release contains the commit that added this marker; a comment on its line names what consumers change",
+]

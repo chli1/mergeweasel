@@ -20,7 +20,6 @@ def changed(line, text):
     return "".join(lines)
 
 
-@pytest.mark.needs_this_commit
 def test_squash_merge(repo, run_pass):
     repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
     repo.commit("author", "add-a", {"b.txt": "b\n"}, "wip")
@@ -40,7 +39,6 @@ def test_squash_merge(repo, run_pass):
     assert not [review for review in repo.reviews(number) if review["user"]["login"] == "queue"]
 
 
-@pytest.mark.needs_this_commit
 def test_keep_commits_fast_forwards(repo, run_pass):
     first = repo.commit("author", "main", {"a.txt": "a\n"}, "feat: add a", new_branch="add-a")
     second = repo.commit("author", "add-a", {"a.txt": "a\nb\n"}, "test: cover a")
@@ -57,7 +55,6 @@ def test_keep_commits_fast_forwards(repo, run_pass):
     assert "automerge" not in repo.labels(number)
 
 
-@pytest.mark.needs_this_commit  # the prio label
 def test_prio_overtakes_the_pull_in_flight(repo, run_pass):
     repo.commit("author", "main", {"fix.txt": "fix\n"}, "fix production", new_branch="hotfix")
     repo.move_main({"a.txt": "a\n"}, "feat: add a (#1)")

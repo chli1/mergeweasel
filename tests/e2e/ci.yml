@@ -1,0 +1,17 @@
+# The CI of the end-to-end test's repository; __IMAGE__ stands for the image under test. The pull
+# request body steers it: ci-slow makes the test finish after the pull request is queued, ci-fail
+# fails it.
+name: ci
+on:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: __IMAGE__
+    env:
+      BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - run: |
+          case "$BODY" in *ci-slow*) sleep 30 ;; esac
+          case "$BODY" in *ci-fail*) exit 1 ;; esac
