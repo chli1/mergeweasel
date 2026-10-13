@@ -58,8 +58,7 @@ Every scenario runs in several variants, each standing for a setup that exists o
   history at the revision its image names, with the built image: a consumer after Renovate bumped
   the image pin in their copies of the workflow files, which it leaves unchanged otherwise.
 
-Every run pulls the newest release from Docker Hub, because `latest` moves with each release; the CI
-job keeps the five newest release images on the runners' Docker daemon.
+Every run pulls the newest release from Docker Hub, because `latest` moves with each release.
 
 A failing variant tells which side of a change is ahead of the other, and each side has its own
 marker. Both skip only their own variant, only until the newest release contains the commit that
@@ -104,8 +103,8 @@ untested.
 - `tests/unit/`: pytest, one suite per module, on constructed state and a client faked with
   `mock.create_autospec`; only `test_gitea.py` fakes HTTP.
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
-  `mergeweasel-commits.yml`), which each release also publishes as the template, `ci.yml` and
-  `mirror.yml`.
+  `mergeweasel-commits.yml`), which each release also publishes as the template, `ci.yml`,
+  `ci-cleanup.yml` and `mirror.yml`.
 - `tests/integration/`: one pass at a time against a throwaway Gitea - `test_queue.py`,
   `test_instance.py` and `test_release.py` (the scenarios).
 - `tests/e2e/`: the workflows on a real runner - `ci.yml` (the test repository's CI, steered by
@@ -131,6 +130,11 @@ CI (`ci.yml`) runs on every pull request:
 - `image` - builds the image, which then checks the pull request itself and dry-runs a pass with
   the run token;
 - `e2e` - builds the image and runs the end-to-end test against it.
+
+A new push to a pull request cancels the run still going for its previous head. The runner skips
+every remaining step of a cancelled run, so `ci` cleans up nothing itself: `ci-cleanup.yml` runs
+after each finished `ci` run, cancelled or not, and removes the Docker containers and images
+named after its run id.
 
 The required checks are `ci / test (pull_request)`, `ci / image (pull_request)`,
 `ci / e2e (pull_request)` and `mergeweasel-commits / check (pull_request)`.

@@ -1,0 +1,25 @@
+name: ci-cleanup
+on:
+  # Every finished run of ci, a cancelled one included: the runner skips a cancelled run's
+  # remaining steps, `if: always()` ones as well, so ci cleans up nothing itself.
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      # The names ci and the end-to-end test give their containers and images; the daemon serves
+      # other runs at the same time, so nothing but this run's. The job containers and volumes of the
+      # test's runner carry no run id: the next end-to-end test removes those older than an hour.
+      - name: Remove the run's containers and images
+        run: |
+          test -n "$RUN_ID"
+          echo "ci run $RUN_ID"
+          docker rm -f "mergeweasel-e2e-gitea-$RUN_ID" "mergeweasel-e2e-runner-$RUN_ID" || true
+          for tag in "mergeweasel:ci-$RUN_ID" "mergeweasel:e2e-$RUN_ID" "mergeweasel:release-$RUN_ID" \
+              "mergeweasel-e2e-gitea:$RUN_ID" "mergeweasel-e2e-runner:$RUN_ID"; do
+            if docker image inspect "$tag" > /dev/null 2>&1; then docker rmi -f "$tag" || true; fi
+          done

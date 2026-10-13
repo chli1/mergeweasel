@@ -4,6 +4,11 @@ on:
     branches: [main]
   push:
     tags: ['v*']
+# A new push to a pull request cancels its older run; the cancelled run's commit is no longer the head.
+# ci-cleanup removes each run's containers and images, a cancelled run's as well.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
     if: github.event_name == 'pull_request'
@@ -39,9 +44,6 @@ jobs:
         run: >-
           docker run --rm -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_TOKEN "$IMAGE"
           mergeweasel pass --dry-run
-      - name: Remove the image
-        if: always()
-        run: docker rmi -f "$IMAGE"
   e2e:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -63,31 +65,6 @@ jobs:
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r requirements-test.txt
           .venv/bin/python -m pytest -rs tests/integration tests/e2e
-      # pytest removes its Gitea and its runner itself; this covers a pytest that died before its
-      # cleanup.
-      - name: Remove the containers and images
-        if: always()
-        run: |
-          docker rm -f "mergeweasel-e2e-gitea-$GITHUB_RUN_ID" "mergeweasel-e2e-runner-$GITHUB_RUN_ID" || true
-          for tag in "mergeweasel-e2e-gitea:$GITHUB_RUN_ID" "mergeweasel-e2e-runner:$GITHUB_RUN_ID"; do
-            if docker image inspect "$tag" > /dev/null 2>&1; then docker rmi -f "$tag" || true; fi
-          done
-          docker rmi -f "$MERGEWEASEL_E2E_IMAGE" || true
-      # The test pulls `latest` on every run, and each release leaves the previous one behind on the
-      # daemon, so it keeps the newest `keep`.
-      # Without -f: an image a concurrent run still uses stays.
-      - name: Remove all but the newest release images
-        if: always()
-        run: |
-          keep=5
-          for id in $(docker image ls --all --quiet --filter label=org.opencontainers.image.title=mergeweasel \
-              --filter label=org.opencontainers.image.version | sort -u); do
-            docker image inspect --format \
-              '{{index .Config.Labels "org.opencontainers.image.version"}} {{.Id}} {{json .RepoTags}}{{json .RepoDigests}}' "$id"
-          done | grep '"chli1ro/mergeweasel[:@]' | sort -rV | tail -n "+$((keep + 1))" |
-            while read -r version id references; do
-              docker rmi "$id" || true
-            done
   # No tests here: main takes only up-to-date pull requests whose checks passed.
   release:
     if: github.event_name == 'push'
@@ -194,8 +171,6 @@ jobs:
             curl -fsS -X POST -H "$auth" -H "Content-Type: application/yaml" --data-binary "@templates/$file" \
               "https://uploads.github.com/repos/chli1/mergeweasel/releases/$release/assets?name=$file" > /dev/null
           done
-      - name: Log out and remove the image
+      - name: Log out
         if: always()
-        run: |
-          docker logout || true
-          docker rmi -f "$IMAGE" || true
+        run: docker logout || true
