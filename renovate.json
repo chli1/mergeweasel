@@ -19,7 +19,7 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "Test dependencies, and the Gitea and the runner the tests run against.",
+      "description": "Test dependencies, and the forges and the runner the tests run against.",
       "matchFileNames": ["requirements-test.txt", "tests/**"],
       "semanticCommitType": "test"
     },
@@ -35,8 +35,8 @@
       "commitMessageLowerCase": "never"
     },
     {
-      "description": "Test compatibility with a new Gitea release as early as possible.",
-      "matchPackageNames": ["gitea/gitea"],
+      "description": "Test compatibility with a new Gitea or Forgejo release as early as possible.",
+      "matchPackageNames": ["gitea/gitea", "codeberg.org/forgejo/forgejo"],
       "minimumReleaseAge": "1 day"
     },
     {

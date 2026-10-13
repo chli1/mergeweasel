@@ -1,4 +1,4 @@
-"""Real passes of the image under test against a throwaway Gitea.
+"""Real passes of the image under test against a throwaway forge.
 
 The test plays the author, the reviewer, CI and Renovate; the pass does the rest. Comment texts are
 asserted only for the cause they name - their wording is the unit tests' business.
@@ -20,7 +20,7 @@ def changed(line, text):
     return "".join(lines)
 
 
-def test_squash_merge(repo, run_pass):
+def test_squash_merge(server, repo, run_pass):
     repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
     repo.commit("author", "add-a", {"b.txt": "b\n"}, "wip")
     number = repo.open_pull("author", "add-a", "feat: add a", BODY)
@@ -31,8 +31,9 @@ def test_squash_merge(repo, run_pass):
 
     landed = repo.git_commit(repo.main_sha())
     assert [parent["sha"] for parent in landed["parents"]] == [before]
-    # The branch's own commits never land; Gitea's default appends the trailer.
-    assert landed["commit"]["message"] == f"feat: add a (#{number})\n\n- adds a\n\nCo-authored-by: author <author@example.com>\n"
+    # The branch's own commits never land.
+    assert landed["commit"]["message"] == server.forge.squash_message(f"feat: add a (#{number})\n\n- adds a\n",
+                                                                      "author <author@example.com>")
     assert (landed["author"]["login"], landed["committer"]["login"]) == ("author", "queue")
     assert repo.pull(number)["merged"]
     assert "automerge" not in repo.labels(number)

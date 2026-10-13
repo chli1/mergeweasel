@@ -1,4 +1,4 @@
-"""The integration layer: one pass at a time, started by the test, against a real Gitea."""
+"""The integration layer: one pass at a time, started by the test, against a real forge."""
 import os
 import subprocess
 

@@ -1,4 +1,4 @@
-"""The throwaway Gitea both Docker layers run against."""
+"""The throwaway forge both Docker layers run against: Gitea, or Forgejo (forge.py)."""
 import contextlib
 import dataclasses
 import datetime
@@ -11,8 +11,9 @@ import urllib.request
 import pytest
 
 from driver import ACCOUNTS, ADMIN, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, eventually
+from forge import Forge
 
-GITEA_START_SECONDS = 120
+START_SECONDS = 120
 # Every container of the suite carries it; one older than ORPHAN_AGE outlived a run - longer than
 # the CI job may take - that died before its cleanup.
 LABEL = "mergeweasel-e2e"
@@ -31,13 +32,14 @@ class Names:
     runner_tag: str
 
 
-def names(run_id):
-    return Names(f"mergeweasel-e2e-gitea-{run_id}", f"mergeweasel-e2e-gitea:{run_id}",
+def names(forge, run_id):
+    return Names(f"mergeweasel-e2e-{forge.name}-{run_id}", f"mergeweasel-e2e-{forge.name}:{run_id}",
                  f"mergeweasel-e2e-runner-{run_id}", f"mergeweasel-e2e-runner:{run_id}")
 
 
 @dataclasses.dataclass(frozen=True)
 class Server:
+    forge: Forge
     url: str
     ip: str
     container: str
@@ -115,26 +117,26 @@ def accounts(url):
 
 
 @contextlib.contextmanager
-def start(run_id):
-    named = names(run_id)
+def start(forge, run_id):
+    named = names(forge, run_id)
     remove_orphans()
     # A re-run of a CI job keeps its run id, and with it the name.
     subprocess.run(["docker", "rm", "--force", named.server], capture_output=True)
     try:
-        build("gitea.Dockerfile", named.server_tag)
+        build(forge.dockerfile, named.server_tag)
         docker("run", "--detach", "--name", named.server, "--label", LABEL, named.server_tag)
         ip = docker("inspect", "--format", "{{.NetworkSettings.Networks.bridge.IPAddress}}", named.server)
         url = f"http://{ip}:3000"
         try:
-            eventually(lambda: healthy(url), timeout=GITEA_START_SECONDS)
+            eventually(lambda: healthy(url), timeout=START_SECONDS)
         except AssertionError:
             logs = subprocess.run(["docker", "logs", "--tail", "20", named.server], capture_output=True, text=True)
-            pytest.fail(f"Gitea does not answer at {url} - it did not start, or this host is not on Docker's "
+            pytest.fail(f"{forge.title} does not answer at {url} - it did not start, or this host is not on Docker's "
                         f"default bridge. Its log:\n{logs.stdout}{logs.stderr}")
         docker("exec", "--user", "git", named.server, "gitea", "admin", "user", "create", "--admin",
                "--username", ADMIN, "--password", PASSWORD, "--email", f"{ADMIN}@example.com",
                "--must-change-password=false")
-        yield Server(url, ip, named.server, *accounts(url), task_offset(named.server))
+        yield Server(forge, url, ip, named.server, *accounts(url), task_offset(named.server))
     finally:
         subprocess.run(["docker", "rm", "--force", named.server], capture_output=True)
         subprocess.run(["docker", "rmi", "--force", named.server_tag], capture_output=True)

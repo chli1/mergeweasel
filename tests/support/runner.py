@@ -29,7 +29,7 @@ class Runner:
 @contextlib.contextmanager
 def start(server, run_id, image):
     """image: the default job image, ubuntu-latest - the built image, which exists only locally."""
-    named = names(run_id)
+    named = names(server.forge, run_id)
     subprocess.run(["docker", "rm", "--force", named.runner], capture_output=True)
     token = docker("exec", "--user", "git", server.container, "gitea", "actions",
                    "generate-runner-token").splitlines()[-1]

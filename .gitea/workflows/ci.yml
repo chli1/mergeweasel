@@ -44,10 +44,10 @@ jobs:
         run: >-
           docker run --rm -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_TOKEN "$IMAGE"
           mergeweasel pass --dry-run
-  # The Docker layers, one job per layer and variant, in parallel. Each job starts its own Gitea,
-  # named after its own run id.
+  # The Docker layers, one job per layer, variant and forge, in parallel. Each job starts its own
+  # forge, named after its own run id. Forgejo runs the integration layer's [built] variant only.
   layers:
-    name: ${{ matrix.layer }} (${{ matrix.variant }})
+    name: ${{ matrix.layer }} (${{ matrix.variant }}, ${{ matrix.forge }})
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -56,9 +56,15 @@ jobs:
       matrix:
         layer: [integration, e2e]
         variant: [built, released, upgrade]
+        forge: [gitea]
+        include:
+          - layer: integration
+            variant: built
+            forge: forgejo
     env:
-      MERGEWEASEL_E2E_RUN_ID: ${{ github.run_id }}-${{ matrix.layer }}-${{ matrix.variant }}
-      MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}-${{ matrix.layer }}-${{ matrix.variant }}
+      MERGEWEASEL_E2E_RUN_ID: ${{ github.run_id }}-${{ matrix.layer }}-${{ matrix.variant }}-${{ matrix.forge }}
+      MERGEWEASEL_E2E_IMAGE: mergeweasel:e2e-${{ github.run_id }}-${{ matrix.layer }}-${{ matrix.variant }}-${{ matrix.forge }}
+      MERGEWEASEL_E2E_FORGE: ${{ matrix.forge }}
       LAYER: ${{ matrix.layer }}
       VARIANT: ${{ matrix.variant }}
     steps:
@@ -68,7 +74,7 @@ jobs:
           fetch-depth: 0
       - name: Build the image
         run: docker build -t "$MERGEWEASEL_E2E_IMAGE" .
-      # The test starts its own Gitea and runs passes against it - in the end-to-end layer a runner next
+      # The test starts its own forge and runs passes against it - in the end-to-end layer a runner next
       # to it runs the workflows. [built] also takes the tests without a variant, such as the runner
       # probe. -rs: the log names each skipped variant and why.
       - name: Test the layer

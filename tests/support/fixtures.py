@@ -1,4 +1,4 @@
-"""The shared hooks and fixtures of both Docker layers: the throwaway Gitea, the images, the repository.
+"""The shared hooks and fixtures of both Docker layers: the throwaway forge, the images, the repository.
 
 Run: MERGEWEASEL_E2E_IMAGE=<image> .venv/bin/python -m pytest tests/integration tests/e2e
 """
@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 
+import forge
 import history
 import workflow
 from driver import LABELS, create_repo
@@ -63,7 +64,7 @@ def built_image():
 
 @pytest.fixture(scope="session")
 def server(built_image, run_id):
-    with start(run_id) as running:
+    with start(forge.selected(), run_id) as running:
         yield running
 
 
