@@ -12,7 +12,7 @@ ADMIN = "root"
 ACCOUNTS = ("queue", "reviewer", "reviewer2", "approver1", "approver2", "author", "ci", "renovate")
 PASSWORD = "e2e-password-1"
 # The merger's scopes from docs/onboarding.md; the other accounts get the same.
-TOKEN_SCOPES = ["write:repository", "write:issue", "read:user"]
+TOKEN_SCOPES = ["write:repository", "write:issue", "read:user", "read:organization"]
 ORGANIZATION = "e2e"
 LABELS = ("automerge", "needs-fix", "keep-commits", "prio")
 REQUIRED_CONTEXT = "ci/test"

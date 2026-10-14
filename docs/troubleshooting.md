@@ -42,7 +42,8 @@ changing anything ([onboarding](onboarding.md#verify)).
 - **"the label variables must name four different labels, not ..."**. Two of the four label
   variables name the same label. Give each role a label of its own.
 - **"cannot read the organization's labels - not checked whether the labels exist"**. Not an error:
-  the repository belongs to a user, or a dry run used the run token. The pass goes on.
+  the repository belongs to a user, the merger's token lacks `read:organization`, or a dry run used
+  the run token. The pass goes on.
 - **"merge deferred: Please try again later"**. Gitea was still checking whether the pull request
   can be merged; the next pass retries.
 - **"mergeweasel: too few approver accounts to restore the approvals"**, as a `needs-fix` comment.

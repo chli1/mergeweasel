@@ -55,6 +55,7 @@ whitelist if you use one ([branch protection](#branch-protection)).
 | `write:repository` | yes | yes | everything on code, pull requests, releases and actions |
 | `write:issue` | yes | - | labels and comments on pull requests |
 | `read:user` | yes | yes | every pass reads each account's login at its start |
+| `read:organization` | yes | - | the merger checks that the labels exist, when they are the organization's |
 
 ## Labels
 
@@ -115,20 +116,6 @@ In the repository settings, allow squash and fast-forward-only merges. The queue
 default and fast-forwards pull requests labelled `keep-commits`. Also turn on *Delete pull request
 branch after merge by default*, so Gitea deletes the branch of every pull request the queue merges.
 
-## Branch protection
-
-Protect `main` with these settings:
-
-- **Required status checks:** on, listing the checks of your CI plus
-  `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing
-  ([why](design.md#definitions)).
-- **Required approvals:** any number, 0 included. If you use an approvals whitelist, it must include
-  the approver accounts; without one, any approval by an account with write access counts.
-- **Merge whitelist:** only the merger.
-- **Block merge on outdated branch:** on.
-- **Dismiss stale approvals:** recommended. The approver accounts restore the approvals a rebase
-  dismissed.
-
 ## The workflows
 
 Every mergeweasel release carries the two workflows as assets: `mergeweasel-queue.yml` and
@@ -150,6 +137,10 @@ this is also how a label change reaches the queue.
 Keep the file names and workflow names as they are: the pass finds its own runs and statuses by
 them.
 
+Land the two files with a pull request and merge it by hand: the queue runs from `main`, so it is
+not there yet to merge the pull request that brings it. The `mergeweasel-commits` check already
+runs on that pull request.
+
 Nothing in the workflows names your Gitea's labels, accounts, runners or default branch: they read
 them from [Actions variables](configuration.md#actions-variables). The jobs run on runners labelled
 `ubuntu-latest`; if yours carry another label, set the Actions variable `MERGEWEASEL_RUNNER_LABEL`
@@ -160,6 +151,25 @@ release says in its notes which workflow change it requires, and its image may n
 old files, so do not land Renovate's pin bump for it on its own. Take both files from the new
 release instead; they carry the new pin as well. Adapt the `workflow_run` list again and land
 them. Renovate then closes its pull request, because the pin is already current.
+
+## Branch protection
+
+Protect `main` once the workflows are on it, with these settings:
+
+- **Required status checks:** on, listing the checks of your CI plus
+  `mergeweasel-commits / check (pull_request)`. Without required checks the queue merges nothing
+  ([why](design.md#definitions)).
+- **Required approvals:** any number, 0 included. If you use an approvals whitelist, it must include
+  the approver accounts; without one, any approval by an account with write access counts.
+- **Merge whitelist:** only the merger.
+- **Block merge on outdated branch:** on.
+- **Dismiss stale approvals:** recommended. The approver accounts restore the approvals a rebase
+  dismissed.
+
+If `main` is protected already, its merge whitelist keeps you from merging the pull request that
+adds the workflows. Lift the protection for that one merge: in the branch protection rule, change
+the protected branch name pattern to one that matches no branch, merge the pull request, then set
+the pattern back to `main`.
 
 ## Server setting
 
