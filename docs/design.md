@@ -97,7 +97,9 @@ or `GITHUB_REPOSITORY` the CLI exits with an error.
 Each pass reads the current state, takes at most one step on one candidate, and ends. If the
 candidate gets flagged `needs-fix`, the pass hands over to the next candidate within the same pass.
 
-Every merge, label change and finished check run wakes the queue, so no schedule is needed. An
+Every merge, label change and finished check run wakes the queue, so no schedule is needed. On
+Forgejo, which has no `workflow_run`, a schedule takes the place of the finished check run (see
+[Forgejo behaviour relied on](#forgejo-behaviour-relied-on)). An
 approval wakes nothing: the label `automerge` comes after it. Before its step, a pass releases
 `main` if the repository has switched the release on (see [Releases](#releases)).
 
@@ -441,6 +443,32 @@ needs a fix.
   `<sha>` as `X-Total-Count`.
 - **Contents**: `GET contents/<path>?ref=main` answers a file base64-encoded, and `404` without it.
 - **Tag names** with `+` pass `POST releases` unchanged.
+
+## Forgejo behaviour relied on
+
+Forgejo support is experimental. Forgejo serves Gitea's API, and everything in
+[Gitea behaviour relied on](#gitea-behaviour-relied-on) holds there as well, except for what this
+section lists. Verified against the Forgejo pinned in `tests/support/forgejo.Dockerfile`, with the
+runner pinned in `tests/support/forgejo-runner.Dockerfile`: the integration and end-to-end tests
+run against it too.
+
+- **Telling the forges apart**: `GET /api/forgejo/v1/version` names a version on Forgejo; Gitea
+  answers `404`, or a proxy in front of it a page of its own. Each command asks once and prints
+  the forge it found.
+- **No `workflow_run`** (forgejo#7722): nothing wakes the queue when a check finishes. Forgejo's
+  queue workflow, which the release ships as `mergeweasel-queue-forgejo.yml`, is Gitea's with a
+  `schedule` that polls in place of `workflow_run`; Forgejo starts a scheduled run at most about once a minute. A
+  merge still wakes the next pass through `pull_request_target`.
+- **Workflow directory**: Forgejo reads `.forgejo/workflows/`, and `.gitea/workflows/` only in a
+  repository without the former.
+- **Workflow runs**: the run listing has no `conclusion`; its `status` is final once a run is done.
+  Its `event` is the webhook's - `push` for a scheduled run, empty for a dispatch - so the trigger
+  is read from `trigger_event`. Without `page`, the listing ignores `limit` and returns the
+  workflow's whole history.
+- **Removing a label**: `DELETE issues/{n}/labels/{label}` resolves an id among the repository's
+  labels only, so an organization label's id answers `422`. A name resolves in the repository,
+  then in the organization; the queue removes labels by name.
+- **Squash**: Forgejo appends no `Co-authored-by` trailer.
 
 ## Security model
 

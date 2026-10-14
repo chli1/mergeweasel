@@ -7,6 +7,8 @@ mergeweasel lands on whichever branch the repository's settings name as its defa
 ## Requirements
 
 - Gitea with Actions enabled, and a runner that runs jobs in containers (`container:` in a job).
+  Forgejo works too, as experimental support: see [Forgejo](#forgejo-experimental) for what
+  differs.
 - The runner can pull the public image `docker.io/chli1ro/mergeweasel`.
 
 ## The accounts
@@ -118,17 +120,21 @@ branch after merge by default*, so Gitea deletes the branch of every pull reques
 
 ## The workflows
 
-Every mergeweasel release carries the two workflows as assets: `mergeweasel-queue.yml` and
-`mergeweasel-commits.yml`, each already pinned to that release's image by version and digest. Take
-them from the release whose image you are going to run - not from this repository's `main`
-branch, whose files serve its own installation and can be ahead of the latest release. For
-release `vX.Y.Z`, in your repository:
+Every mergeweasel release carries the workflows as assets, each already pinned to that release's
+image by version and digest: the queue as `mergeweasel-queue-gitea.yml` and
+`mergeweasel-queue-forgejo.yml`, one per forge, and the commit check as `mergeweasel-commits.yml`,
+which both forges share. Take them from the release whose image you are going to run - not from
+this repository's `main` branch, whose files serve its own installation and can be ahead of the
+latest release. For release `vX.Y.Z`, in your repository on Gitea:
 
 ```sh
 releases=<this repository's URL>/releases/download/vX.Y.Z
-curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue.yml"
+curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue-gitea.yml"
 curl -fsSL -o .gitea/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
 ```
+
+On Forgejo, take Forgejo's queue instead, into Forgejo's directory - see
+[Forgejo](#forgejo-experimental).
 
 Leave them unchanged except for the `workflow_run` list in `mergeweasel-queue.yml`: it names the
 workflows of your CI plus `mergeweasel-commits`. When one of them completes, the queue wakes up -
@@ -181,6 +187,45 @@ mergeweasel works either way. To keep the commit messages exactly as written, se
 [repository.pull-request]
 ADD_CO_COMMITTER_TRAILERS = false
 ```
+
+## Forgejo (experimental)
+
+mergeweasel runs on Forgejo as well. Forgejo serves the same API and runs the same workflows, so
+everything above applies, with these differences:
+
+- **The workflow files.** Take Forgejo's queue from the release, and put both files into
+  `.forgejo/workflows/`:
+
+  ```sh
+  releases=<this repository's URL>/releases/download/vX.Y.Z
+  curl -fsSL -o .forgejo/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue-forgejo.yml"
+  curl -fsSL -o .forgejo/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
+  ```
+
+  Forgejo reads `.gitea/workflows/` only when a repository has no `.forgejo/workflows/`, so a
+  repository whose CI is in `.forgejo/workflows/` would never run files in `.gitea/workflows/`.
+  The files go in unchanged: Forgejo's queue has no `workflow_run` list to adapt.
+- **The queue polls.** Forgejo has no `workflow_run`, the trigger that wakes the queue on Gitea when
+  a check finishes. Forgejo's queue carries a schedule instead, every 5 minutes. A merge still wakes
+  the next pass at once; only a finished check waits for the schedule. So an approved pull request
+  whose checks have passed merges up to one interval after its last check or its label. Forgejo
+  starts a schedule at most about once a minute, whatever the cron line says. Each interval adds
+  one run of `mergeweasel-queue` to the Actions history, most of them passes of a few seconds that
+  find nothing to do.
+- **Teams grant the lowest unit.** On Forgejo, a team with custom unit access gets as its
+  repository permission the lowest unit it does not set to *No access*: a single unit on *Read*
+  makes the whole team a reader, and a reader cannot be put into the merge or approvals whitelist.
+  *No access* on a unit also holds on public repositories - with Actions on *No access*, the
+  merger cannot list the queue's runs. So the per-unit table under
+  [permissions](#permissions) does not work as it stands: give a team for mergeweasel's accounts
+  *Write* on code, pull requests, issues, releases and actions, or add the accounts as
+  collaborators with *Write*.
+- **No co-author trailer.** Forgejo appends no `Co-authored-by` trailer to squash commits, so the
+  [server setting](#server-setting) is not needed.
+
+To update, the same holds as on Gitea: Renovate bumps the image pin, and for a major release you
+take both files from the new release. Which Forgejo and runner versions mergeweasel is tested with:
+[design](design.md#forgejo-behaviour-relied-on).
 
 ## Verify
 

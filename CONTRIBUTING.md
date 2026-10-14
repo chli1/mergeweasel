@@ -126,8 +126,11 @@ untested.
   `mock.create_autospec`; only the client suites (`test_api.py`, `test_gitea.py`, `test_forgejo.py`)
   fake HTTP, through `tests/support/fake_http.py`.
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
-  `mergeweasel-commits.yml`), which each release also publishes as the template, `ci.yml`,
+  `mergeweasel-commits.yml`), which each release also publishes for Gitea, `ci.yml`,
   `ci-cleanup.yml` and `mirror.yml`.
+- `templates/forgejo/mergeweasel-queue.yml`: the queue workflow each release publishes for
+  Forgejo - Gitea's with a `schedule` in place of `workflow_run`, which
+  `tests/unit/test_workflow.py` holds it to.
 - `tests/integration/`: one pass at a time against a throwaway Gitea - `test_queue.py`,
   `test_instance.py` and `test_release.py` (the scenarios).
 - `tests/e2e/`: the workflows on a real runner - `ci.yml` (the test repository's CI, steered by the
@@ -177,7 +180,7 @@ The required checks are `ci / test (pull_request)`, `ci / image (pull_request)`,
 The queue sets the tags: every merge with a releasing commit gets the next version
 ([design](docs/design.md#releases)). A tag `vX.Y.Z` on `main` starts the `release` job of `ci.yml`,
 which builds the image and pushes it to `docker.io/chli1ro/mergeweasel` as `X.Y.Z` and `latest`,
-attaches the workflow templates to the release, and publishes the same release on the GitHub
+attaches the workflow files to the release (its `ASSETS` list), and publishes the same release on the GitHub
 mirror. Every push to `main` starts `mirror.yml`, which pushes `main` and the release tags to
 [github.com/chli1/mergeweasel](https://github.com/chli1/mergeweasel). Both GitHub steps do nothing
 in a repository without the token secret they read.

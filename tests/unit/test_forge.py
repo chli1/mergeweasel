@@ -41,13 +41,13 @@ def test_gitea_runs_the_queue_workflow_as_published():
     assert forge.FORGES["gitea"].queue_workflow(text) == text
 
 
-def test_forgejo_adds_the_schedule_and_keeps_every_trigger():
-    text = workflow.QUEUE_WORKFLOW.read_text()
+def test_forgejo_runs_its_queue_workflow_with_the_test_schedule():
+    text = workflow.FORGEJO_QUEUE_WORKFLOW.read_text()
     triggers = queue_triggers(forge.FORGES["forgejo"].queue_workflow(text))
     assert triggers["schedule"] == [{"cron": "@every 5s"}]
-    assert {name for name in triggers if name != "schedule"} == set(queue_triggers(text))
+    assert set(triggers) == set(queue_triggers(text))
 
 
-def test_forgejo_fails_on_a_file_without_an_on_block():
-    with pytest.raises(pytest.fail.Exception, match="no on: block"):
-        forge.FORGES["forgejo"].queue_workflow("name: x\njobs: {}\n")
+def test_forgejo_fails_on_a_file_without_one_cron_line():
+    with pytest.raises(pytest.fail.Exception, match="needs one cron line to replace, has 0"):
+        forge.FORGES["forgejo"].queue_workflow(workflow.QUEUE_WORKFLOW.read_text())

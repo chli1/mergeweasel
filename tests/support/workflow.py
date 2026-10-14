@@ -6,8 +6,12 @@ import shlex
 
 import yaml
 
-WORKFLOWS = pathlib.Path(__file__).parents[2] / ".gitea" / "workflows"
+ROOT = pathlib.Path(__file__).parents[2]
+WORKFLOWS = ROOT / ".gitea" / "workflows"
 QUEUE_WORKFLOW = WORKFLOWS / "mergeweasel-queue.yml"
+COMMITS_WORKFLOW = WORKFLOWS / "mergeweasel-commits.yml"
+# Forgejo's mergeweasel-queue.yml, as the release ships it.
+FORGEJO_QUEUE_WORKFLOW = ROOT / "templates" / "forgejo" / "mergeweasel-queue.yml"
 # A workflow's mergeweasel image; the end-to-end test puts the image under test in its place.
 IMAGE = re.compile(r"(image:\s*)docker\.io/chli1ro/mergeweasel\S*")
 # The step of job `pass` that runs the real pass; the other one is the dry run.

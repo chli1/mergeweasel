@@ -136,7 +136,7 @@ def queue_pass(server, repository, dry_run):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="mergeweasel", description="A merge queue for Gitea.")
+    parser = argparse.ArgumentParser(prog="mergeweasel", description="A merge queue for Gitea and Forgejo.")
     commands = parser.add_subparsers(dest="command", required=True)
     pass_parser = commands.add_parser("pass", help="run one queue pass")
     pass_parser.add_argument("--dry-run", action="store_true", help="decide and report, change nothing")

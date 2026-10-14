@@ -12,9 +12,9 @@ PASS_TIMEOUT_SECONDS = 300
 
 
 @pytest.fixture
-def pass_workflow(workflow_text):
-    """What mergeweasel-queue.yml hands a pass, as the variant runs it."""
-    return workflow.parse(workflow_text("mergeweasel-queue.yml"))
+def pass_workflow(workflow_text, server):
+    """What the forge's mergeweasel-queue.yml hands a pass, as the variant runs it."""
+    return workflow.parse(workflow_text(server.forge.queue_source))
 
 
 @pytest.fixture

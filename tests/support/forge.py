@@ -1,15 +1,20 @@
 """The forges the Docker layers run against: each forge's own behaviour, in its own class."""
 import abc
 import os
+import pathlib
+import re
 
 import pytest
 
+import workflow
+
 # Picks the forge; Gitea when unset.
 FORGE_VARIABLE = "MERGEWEASEL_E2E_FORGE"
-# What a Forgejo user adds to mergeweasel-queue.yml: Forgejo has no workflow_run, a schedule wakes
-# the queue. Forgejo fires it about 60 s after the previous run at the earliest; with the schedule
-# checker forgejo.Dockerfile sets, every 5 s plus that.
-SCHEDULE = '  schedule:\n    - cron: "@every 5s"\n'
+# The schedule the test gives Forgejo's queue in place of the shipped one: Forgejo fires it about 60 s
+# after the previous run at the earliest; with the schedule checker forgejo.Dockerfile sets, every 5 s
+# plus that.
+TEST_CRON = '- cron: "@every 5s"'
+CRON = re.compile(r'^(\s*)- cron: .*$', re.M)
 
 
 class Forge(abc.ABC):
@@ -26,6 +31,10 @@ class Forge(abc.ABC):
     # How long the test repository's CI runs on ci-slow: longer than a pass takes to come, so one
     # finds CI still running.
     ci_slow_seconds: int
+    # The mergeweasel-queue.yml a user of this forge takes from the release.
+    queue_source: pathlib.Path
+    # Where a user of this forge puts the workflow files.
+    workflow_directory: str
 
     @abc.abstractmethod
     def squash_message(self, message, co_author):
@@ -33,7 +42,7 @@ class Forge(abc.ABC):
 
     @abc.abstractmethod
     def queue_workflow(self, text):
-        """mergeweasel-queue.yml as a user of this forge sets it up."""
+        """The queue_source text as the test runs it."""
 
 
 class Gitea(Forge):
@@ -46,6 +55,8 @@ class Gitea(Forge):
     # The label's commit check wakes the queue on completion, within seconds - more of them when
     # several CI runs share the host.
     ci_slow_seconds = 30
+    queue_source = workflow.QUEUE_WORKFLOW
+    workflow_directory = ".gitea/workflows"
 
     def squash_message(self, message, co_author):
         # ADD_CO_COMMITTER_TRAILERS, on by default.
@@ -64,14 +75,17 @@ class Forgejo(Forge):
     job_prefix = "FORGEJO-ACTIONS-TASK"
     # Only the schedule wakes the queue, every 65 s.
     ci_slow_seconds = 90
+    queue_source = workflow.FORGEJO_QUEUE_WORKFLOW
+    workflow_directory = ".forgejo/workflows"
 
     def squash_message(self, message, co_author):
         return message
 
     def queue_workflow(self, text):
-        if "\non:\n" not in text:
-            pytest.fail("mergeweasel-queue.yml has no on: block to add the schedule to")
-        return text.replace("\non:\n", f"\non:\n{SCHEDULE}", 1)
+        crons = CRON.findall(text)
+        if len(crons) != 1:
+            pytest.fail(f"Forgejo's mergeweasel-queue.yml needs one cron line to replace, has {len(crons)}")
+        return CRON.sub(lambda match: match.group(1) + TEST_CRON, text)
 
 
 FORGES = {forge.name: forge for forge in (Gitea(), Forgejo())}

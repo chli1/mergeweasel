@@ -74,6 +74,18 @@ def test_not_exactly_one_real_pass_step_fails(tmp_path):
 
 
 def test_each_job_of_the_queue_workflows_names_the_image_once():
-    for name in ("mergeweasel-queue.yml", "mergeweasel-commits.yml"):
-        text = (workflow.WORKFLOWS / name).read_text()
-        assert len(workflow.IMAGE.findall(text)) == len(yaml.safe_load(text)["jobs"]), name
+    for path in (workflow.QUEUE_WORKFLOW, workflow.COMMITS_WORKFLOW, workflow.FORGEJO_QUEUE_WORKFLOW):
+        text = path.read_text()
+        assert len(workflow.IMAGE.findall(text)) == len(yaml.safe_load(text)["jobs"]), path.name
+
+
+def test_forgejos_queue_is_giteas_polling_instead_of_workflow_run():
+    gitea = yaml.safe_load(workflow.QUEUE_WORKFLOW.read_text())
+    forgejo = yaml.safe_load(workflow.FORGEJO_QUEUE_WORKFLOW.read_text())
+    # YAML 1.1 reads the key on as True.
+    gitea_triggers, forgejo_triggers = gitea.pop(True), forgejo.pop(True)
+    assert forgejo == gitea
+    assert forgejo_triggers.pop("schedule") == [{"cron": "*/5 * * * *"}]
+    assert "workflow_run" in gitea_triggers
+    del gitea_triggers["workflow_run"]
+    assert forgejo_triggers == gitea_triggers

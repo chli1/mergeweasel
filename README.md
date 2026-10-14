@@ -4,7 +4,8 @@ No more weaseling around a broken main: mergeweasel takes your pull request from
 check to merge and a fresh release.
 
 mergeweasel is a merge queue for [Gitea](https://about.gitea.com/) that releases what it lands. It
-ships as a container image.
+ships as a container image. It runs on [Forgejo](https://forgejo.org/) too, as experimental
+support: [onboarding](docs/onboarding.md#forgejo-experimental) lists what differs there.
 
 Label an approved pull request `automerge`, and mergeweasel takes it from there. It rebases the
 pull request when `main` has moved on, waits for the required checks, and lands it, one pull
@@ -95,7 +96,7 @@ all of mergeweasel's work here; [onboarding](docs/onboarding.md) covers the full
 
    ```sh
    releases=https://github.com/chli1/mergeweasel/releases/download/vX.Y.Z
-   curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue.yml"
+   curl -fsSL -o .gitea/workflows/mergeweasel-queue.yml "$releases/mergeweasel-queue-gitea.yml"
    curl -fsSL -o .gitea/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
    ```
 

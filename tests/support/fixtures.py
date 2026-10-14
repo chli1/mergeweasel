@@ -112,15 +112,20 @@ def image(request):
 
 @pytest.fixture
 def workflow_text(request, image):
-    """Reads a workflow file as the variant runs it: this branch's, or in [upgrade] the newest release's."""
+    """Reads a workflow file, given by its path, as the variant runs it: this branch's, or in [upgrade] the
+    newest release's."""
     if request.node.callspec.params["image"] != "upgrade":
-        return lambda name: (workflow.WORKFLOWS / name).read_text()
+        return lambda path: path.read_text()
     # The image fixture has failed [upgrade] already if the image names no revision.
     revision = request.getfixturevalue("released_revision")
 
-    def read(name):
-        shown = subprocess.run(["git", "show", f"{revision}:.gitea/workflows/{name}"], cwd=workflow.WORKFLOWS,
-                               capture_output=True, text=True)
+    def read(path):
+        name = path.relative_to(workflow.ROOT).as_posix()
+        exists = subprocess.run(["git", "cat-file", "-e", revision], cwd=workflow.ROOT, capture_output=True)
+        if exists.returncode == 0 and subprocess.run(["git", "cat-file", "-e", f"{revision}:{name}"],
+                                                     cwd=workflow.ROOT, capture_output=True).returncode != 0:
+            pytest.skip(f"[upgrade]: the newest release {revision[:12]} ships no {name} yet")
+        shown = subprocess.run(["git", "show", f"{revision}:{name}"], cwd=workflow.ROOT, capture_output=True, text=True)
         if shown.returncode != 0:
             pytest.fail(f"[upgrade] cannot read {name} of the newest release {revision[:12]}: {shown.stderr.strip()}")
         return shown.stdout
