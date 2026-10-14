@@ -1,11 +1,11 @@
-"""A runner next to Gitea: it runs Gitea's workflows, each job in a sibling container."""
+"""A runner next to the forge: it runs the forge's workflows, each job in a sibling container."""
 import contextlib
 import dataclasses
 import subprocess
 
 from server import LABEL, build, docker, names
 
-# Jobs on the default bridge reach Gitea as http://gitea:3000, its root URL. The label lets the orphan
+# Jobs on the default bridge reach the forge as http://gitea:3000, its root URL. The label lets the orphan
 # sweep find a job container that outlived its run.
 CONFIG = """runner:
   capacity: 4
@@ -33,12 +33,13 @@ def start(server, run_id, image):
     subprocess.run(["docker", "rm", "--force", named.runner], capture_output=True)
     token = docker("exec", "--user", "git", server.container, "gitea", "actions",
                    "generate-runner-token").splitlines()[-1]
-    script = ('printf "%s" "$CONFIG" > /tmp/config.yaml && cd /tmp && act_runner register --no-interactive '
+    script = ('printf "%s" "$CONFIG" > /tmp/config.yaml && cd /tmp && '
+              f'{server.forge.runner_command} register --no-interactive '
               f'--instance {server.url} --token "$TOKEN" --name {named.runner} '
               f'--labels ubuntu-latest:docker://{image} --config /tmp/config.yaml '
-              '&& exec act_runner daemon --config /tmp/config.yaml')
+              f'&& exec {server.forge.runner_command} daemon --config /tmp/config.yaml')
     try:
-        build("gitea-runner.Dockerfile", named.runner_tag)
+        build(server.forge.runner_dockerfile, named.runner_tag)
         # Root: the Docker socket belongs to root.
         docker("run", "--detach", "--name", named.runner, "--label", LABEL, "--user", "0",
                "--volume", "/var/run/docker.sock:/var/run/docker.sock",
@@ -49,7 +50,7 @@ def start(server, run_id, image):
         subprocess.run(["docker", "rm", "--force", named.runner], capture_output=True)
         subprocess.run(["docker", "rmi", "--force", named.runner_tag], capture_output=True)
         # This server's job containers and volumes: a runner removed mid-job leaves them.
-        task = f"name=GITEA-ACTIONS-TASK-{server.task_prefix}"
+        task = f"name={server.forge.job_prefix}-{server.task_prefix}"
         listings = {"container": ["docker", "container", "ls", "--all", "--quiet", "--filter", task],
                     "volume": ["docker", "volume", "ls", "--quiet", "--filter", task]}
         for kind, listing in listings.items():

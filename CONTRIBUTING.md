@@ -18,12 +18,12 @@ The tests come in three layers, one directory each under `tests/`:
 - `tests/integration/` runs one queue pass at a time against a throwaway Gitea in Docker. The test
   itself starts each pass, at the moment it chooses, so every scenario can check exactly what one
   pass decided: the rebase, the stale approval, `needs-fix`, `prio`, `keep-commits`, the release.
-- `tests/e2e/` lets that Gitea run this repository's workflow files on a real runner
-  (`act_runner`, next to Gitea in Docker). Nobody starts a pass: the scenarios open, approve and
-  label pull requests the way people do, and check that the workflows land them - the label added
-  last, CI finishing last, a moved `main`, red CI, two pull requests in a row. This layer is the
-  one that proves the triggers (`workflow_run`, `pull_request_target`), the jobs' `if:` and the
-  runner's view of the workflow files.
+- `tests/e2e/` lets that forge run this repository's workflow files on a real runner (`act_runner`
+  or `forgejo-runner`, next to the forge in Docker). Nobody starts a pass: the scenarios open,
+  approve and label pull requests the way people do, and check that the workflows land them - the
+  label added last, CI finishing last, a moved `main`, red CI, two pull requests in a row. This
+  layer is the one that proves the triggers (`workflow_run`, `pull_request_target`), the jobs' `if:`
+  and the runner's view of the workflow files.
 
 Both Docker layers run against an image built from the working tree:
 
@@ -32,29 +32,33 @@ docker build -t mergeweasel:dev .
 MERGEWEASEL_E2E_IMAGE=mergeweasel:dev .venv/bin/python -m pytest tests/integration tests/e2e
 ```
 
-They run against Gitea by default. `MERGEWEASEL_E2E_FORGE=forgejo` runs the integration layer
-against Forgejo instead:
+They run against Gitea by default. `MERGEWEASEL_E2E_FORGE=forgejo` runs both layers against
+Forgejo instead:
 
 ```sh
-MERGEWEASEL_E2E_FORGE=forgejo MERGEWEASEL_E2E_IMAGE=mergeweasel:dev .venv/bin/python -m pytest tests/integration
+MERGEWEASEL_E2E_FORGE=forgejo MERGEWEASEL_E2E_IMAGE=mergeweasel:dev .venv/bin/python -m pytest tests/integration tests/e2e
 ```
 
 What tells the two forges apart lives in `tests/support/forge.py`: one class per server, `Gitea`
 and `Forgejo`, each implementing the abstract `Forge`. A class names its Dockerfile and implements
 the behaviour the scenarios see differently, such as `squash_message()`: Gitea appends a
 `Co-authored-by` trailer to a squash commit, Forgejo does not. A scenario calls the forge's method
-instead of branching on its name, and a new difference becomes a new method on `Forge`. The end-to-end layer needs `workflow_run`, which Forgejo
-lacks, so it runs against Gitea only.
+instead of branching on its name, and a new difference becomes a new method on `Forge`. Each
+forge brings its own runner, `act_runner` or `forgejo-runner`. Forgejo has no `workflow_run`: its
+`queue_workflow()` adds a `schedule` to `mergeweasel-queue.yml`, the way a Forgejo user sets it
+up. Forgejo fires a schedule about a minute after its previous run at the earliest, so each
+wake-up there takes about 65 s, and the test repository's CI runs longer on `ci-slow`
+(`ci_slow_seconds`) so that a pass still finds it running.
 
-They reach Gitea by its IP address on Docker's default bridge network, and the runner reaches the
-Docker daemon through `/var/run/docker.sock`, where it starts each job as a container next to
-Gitea. Run them on a Linux host, or in a container on the default bridge with the daemon's socket.
-Docker Desktop does not work, because its host cannot reach container IP addresses; neither does a
-CI job on a network of its own. Several runs can share one daemon: Gitea's and the runner's
-containers and images carry the run id (`MERGEWEASEL_E2E_RUN_ID`, a random one outside CI), and each
-Gitea numbers its Actions tasks from a random offset, so the job containers and volumes the runner
-names after them differ too. A run that dies before its cleanup leaves them behind; the next run
-removes what is older than an hour.
+They reach the forge by its IP address on Docker's default bridge network, and the runner reaches
+the Docker daemon through `/var/run/docker.sock`, where it starts each job as a container next to
+the forge. Run them on a Linux host, or in a container on the default bridge with the daemon's
+socket. Docker Desktop does not work, because its host cannot reach container IP addresses; neither
+does a CI job on a network of its own. Several runs can share one daemon: the forge's and the
+runner's containers and images carry the run id (`MERGEWEASEL_E2E_RUN_ID`, a random one outside CI),
+and each forge numbers its Actions tasks from a random offset, so the job containers and volumes the
+runner names after them differ too. A run that dies before its cleanup leaves them behind; the next
+run removes what is older than an hour.
 
 In the integration layer each pass gets the environment and the command that `mergeweasel-queue.yml`
 gives it ([the image and its workflows](docs/design.md#the-image-and-its-workflows)): the job's and
@@ -126,14 +130,15 @@ untested.
   `ci-cleanup.yml` and `mirror.yml`.
 - `tests/integration/`: one pass at a time against a throwaway Gitea - `test_queue.py`,
   `test_instance.py` and `test_release.py` (the scenarios).
-- `tests/e2e/`: the workflows on a real runner - `ci.yml` (the test repository's CI, steered by
-  the pull request body), `test_queue.py` (the scenarios), `test_runner.py` (a job reaches Gitea).
-- `tests/support/`: what the Docker layers share - `gitea.Dockerfile`, `forgejo.Dockerfile` and
-  `gitea-runner.Dockerfile` (the pinned forges and runner), `forge.py` (what tells the forges
-  apart), `server.py` (starting the forge), `runner.py` (starting the runner),
-  `fixtures.py` (the shared fixtures and variants), `driver.py` (the people and systems around the
-  queue), `actions.py` (waiting for the workflows), `workflow.py` (what the workflow files hand a
-  pass), `history.py` (when a marked scenario may run with the newest release).
+- `tests/e2e/`: the workflows on a real runner - `ci.yml` (the test repository's CI, steered by the
+  pull request body), `test_queue.py` (the scenarios), `test_runner.py` (a job reaches the forge and
+  knows its run).
+- `tests/support/`: what the Docker layers share - `gitea.Dockerfile`, `forgejo.Dockerfile`,
+  `gitea-runner.Dockerfile` and `forgejo-runner.Dockerfile` (the pinned forges and runners),
+  `forge.py` (what tells the forges apart), `server.py` (starting the forge), `runner.py` (starting
+  the runner), `fixtures.py` (the shared fixtures and variants), `driver.py` (the people and systems
+  around the queue), `actions.py` (waiting for the workflows), `workflow.py` (what the workflow
+  files hand a pass), `history.py` (when a marked scenario may run with the newest release).
 - `docs/`: the user documentation, listed in the [README](README.md#documentation);
   [design](docs/design.md) explains how a pass works and why.
 
@@ -151,7 +156,7 @@ CI (`ci.yml`) runs on every pull request:
   the run token;
 - `layers` - one job per Docker layer, variant and forge, such as `integration (built, gitea)`
   or `e2e (upgrade, gitea)`: each builds the image and runs that variant of the layer against
-  that forge. Forgejo runs the integration layer's `[built]` variant only. The
+  that forge. Forgejo runs each layer's `[built]` variant only. The
   `[built]` jobs also run the tests without a variant, such as the runner probe of
   `tests/e2e/test_runner.py`;
 - `e2e` - passes once every `layers` job passed. It is the one required check of the Docker

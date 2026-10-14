@@ -1,6 +1,6 @@
-# The CI of the end-to-end test's repository; __IMAGE__ stands for the image under test. The pull
-# request body steers it: ci-slow makes the test finish after the pull request is queued, ci-fail
-# fails it.
+# The CI of the end-to-end test's repository; __IMAGE__ stands for the image under test,
+# __CI_SLOW_SECONDS__ for the forge's ci_slow_seconds. The pull request body steers it: ci-slow makes
+# the test finish after a pass found it running, ci-fail fails it.
 name: ci
 on:
   pull_request:
@@ -13,5 +13,5 @@ jobs:
       BODY: ${{ github.event.pull_request.body }}
     steps:
       - run: |
-          case "$BODY" in *ci-slow*) sleep 10 ;; esac
+          case "$BODY" in *ci-slow*) sleep __CI_SLOW_SECONDS__ ;; esac
           case "$BODY" in *ci-fail*) exit 1 ;; esac

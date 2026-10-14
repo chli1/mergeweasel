@@ -194,11 +194,12 @@ class Repo:
         return self.read(f"/commits/{sha}/statuses")
 
     def states(self, sha):
-        """The newest state per context: statuses() lists every change, newest first."""
-        states = {}
-        for status in self.statuses(sha):
-            states.setdefault(status["context"], status["status"])
-        return states
+        """The latest state per context, as the forge combines them - the queue reads the same.
+
+        Not from statuses(): Forgejo lists changes within one second oldest first.
+        """
+        return {status["context"]: status["status"]
+                for status in self.read(f"/commits/{sha}/status?limit=50&page=1")["statuses"] or ()}
 
     def runs(self):
         """(workflow file, event, status) of each Actions task, newest first."""

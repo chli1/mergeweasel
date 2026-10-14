@@ -1,4 +1,4 @@
-"""Waiting for what Gitea's workflows do, and saying what they did when it does not happen."""
+"""Waiting for what the forge's workflows do, and saying what they did when it does not happen."""
 from driver import eventually
 
 CI_CONTEXT = "ci / test (pull_request)"

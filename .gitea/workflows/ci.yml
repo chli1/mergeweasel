@@ -45,7 +45,7 @@ jobs:
           docker run --rm -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_TOKEN "$IMAGE"
           mergeweasel pass --dry-run
   # The Docker layers, one job per layer, variant and forge, in parallel. Each job starts its own
-  # forge, named after its own run id. Forgejo runs the integration layer's [built] variant only.
+  # forge, named after its own run id. Forgejo runs each layer's [built] variant only.
   layers:
     name: ${{ matrix.layer }} (${{ matrix.variant }}, ${{ matrix.forge }})
     if: github.event_name == 'pull_request'
@@ -59,6 +59,9 @@ jobs:
         forge: [gitea]
         include:
           - layer: integration
+            variant: built
+            forge: forgejo
+          - layer: e2e
             variant: built
             forge: forgejo
     env:

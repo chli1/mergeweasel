@@ -1,4 +1,4 @@
-"""The queue on a real runner: Gitea starts the workflows, nobody dispatches a pass. End states only."""
+"""The queue on a real runner: the forge starts the workflows, nobody dispatches a pass. End states only."""
 from actions import CI_CONTEXT, settle
 
 BODY = "Adds {name}.{marker}\n\n## Commit\n\n- adds {name}\n"
@@ -30,14 +30,20 @@ def test_the_label_comes_last(actions_repo, runner):
     settle(repo, runner, lambda: merged(repo, number))
 
 
+def finished_passes(repo):
+    return sum(workflow == "mergeweasel-queue.yml" and status in ("success", "failure")
+               for workflow, _, status in repo.runs())
+
+
 def test_ci_comes_last(actions_repo, runner):
     repo = actions_repo
     number = open_approved(repo, "b", marker=" ci-slow")
+    before = finished_passes(repo)
     repo.add_label("author", number, repo.automerge)
 
-    # The label's pass finds CI still running and leaves the pull request: CI finishing has to wake the queue.
-    settle(repo, runner, lambda: any(workflow == "mergeweasel-queue.yml" and status in ("success", "failure")
-                                     for workflow, _, status in repo.runs()))
+    # A pass after the label - woken by the label's commit check, or by the forge's schedule - finds CI
+    # still running and leaves the pull request: a later one, after CI finished, has to merge it.
+    settle(repo, runner, lambda: finished_passes(repo) > before)
     assert ci_state(repo, number) != "success", "CI finished before a pass ran - the scenario tests nothing"
 
     settle(repo, runner, lambda: merged(repo, number))

@@ -1,4 +1,4 @@
-"""The end-to-end layer: Gitea runs this repository's workflows on a real runner."""
+"""The end-to-end layer: the forge runs this repository's workflows on a real runner."""
 import pathlib
 import re
 
@@ -19,10 +19,12 @@ def runner(server, run_id, built_image):
 
 
 @pytest.fixture
-def workflow_files(workflow_text, image):
+def workflow_files(workflow_text, image, server):
     """The queue's and the commit check's workflow files as the variant runs them, each with the image
-    under test."""
-    return {name: IMAGE.sub(lambda match: match.group(1) + image, workflow_text(name)) for name in QUEUE_FILES}
+    under test, the queue's as a user of the forge sets it up."""
+    files = {name: IMAGE.sub(lambda match: match.group(1) + image, workflow_text(name)) for name in QUEUE_FILES}
+    files["mergeweasel-queue.yml"] = server.forge.queue_workflow(files["mergeweasel-queue.yml"])
+    return files
 
 
 @pytest.fixture
@@ -35,6 +37,8 @@ def actions_repo(server, runner, image, workflow_files, request):
                           "MERGEWEASEL_APPROVER_TOKENS": server.tokens["approver1"]}.items():
         admin.call("PUT", f"{repo.path}/actions/secrets/{secret}", {"data": value})
     files = {f".gitea/workflows/{name}": text for name, text in workflow_files.items()}
-    files[".gitea/workflows/ci.yml"] = pathlib.Path(__file__).with_name("ci.yml").read_text().replace("__IMAGE__", image)
+    ci = pathlib.Path(__file__).with_name("ci.yml").read_text()
+    files[".gitea/workflows/ci.yml"] = (ci.replace("__IMAGE__", image)
+                                        .replace("__CI_SLOW_SECONDS__", str(server.forge.ci_slow_seconds)))
     repo.move_main(files, "ci: the queue")
     return repo
