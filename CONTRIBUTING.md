@@ -156,9 +156,8 @@ CI (`ci.yml`) runs on every pull request:
   the run token;
 - `layers` - one job per Docker layer, variant and forge, such as `integration (built, gitea)`
   or `e2e (upgrade, gitea)`: each builds the image and runs that variant of the layer against
-  that forge. Forgejo runs each layer's `[built]` variant only. The
-  `[built]` jobs also run the tests without a variant, such as the runner probe of
-  `tests/e2e/test_runner.py`;
+  that forge. The `[built]` jobs also run the tests without a variant, such as the runner probe
+  of `tests/e2e/test_runner.py`;
 - `e2e` - passes once every `layers` job passed. It is the one required check of the Docker
   layers, so their jobs can change without touching the branch protection.
 
