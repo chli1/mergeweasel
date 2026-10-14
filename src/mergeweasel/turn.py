@@ -5,6 +5,10 @@ import time
 QUEUE_WORKFLOW_FILE = "mergeweasel-queue.yml"
 # A manual dispatch can be a dry run, which must neither replace an event's pass nor be replaced.
 DISPATCH_EVENT = "workflow_dispatch"
+# The runs that never replace an older pass: a dispatch, and a schedule's tick - Forgejo creates the next
+# tick when it is due, even while the previous one still waits for a runner, so ticks replacing each
+# other would leave no pass to run as long as the runner is busy.
+NO_REPLACING = frozenset({DISPATCH_EVENT, "schedule"})
 TURN_POLL_SECONDS = 5
 
 
@@ -28,7 +32,7 @@ def turn(runs, own_id, own_event):
     it waits until every older pass has finished.
     """
     unfinished = [run for run in runs if not run.finished and run.id != own_id]
-    newer = [run.id for run in unfinished if run.id > own_id and run.event != DISPATCH_EVENT]
+    newer = [run.id for run in unfinished if run.id > own_id and run.event not in NO_REPLACING]
     if newer and own_event != DISPATCH_EVENT:
         return Superseded(max(newer))
     older = [run.id for run in unfinished if run.id < own_id]

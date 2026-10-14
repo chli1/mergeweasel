@@ -204,6 +204,9 @@ the unfinished runs of `mergeweasel-queue.yml` and finds itself by `GITHUB_RUN_I
 - If older runs are unfinished, this pass waits for them.
 - A manual dispatch (`GITHUB_EVENT_NAME` = `workflow_dispatch`), possibly a dry run, neither
   replaces another run nor is replaced.
+- A schedule's tick (`schedule`, on Forgejo) replaces no other run, but is replaced like any pass.
+  Forgejo creates the next tick when it is due, even while the previous one still waits for a
+  runner: ticks replacing each other would leave no pass to run while the runner is busy.
 - Without `GITHUB_RUN_ID`, as in a local run, the pass does not wait.
 
 ### The merger and the approver accounts

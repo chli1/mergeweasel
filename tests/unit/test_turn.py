@@ -34,9 +34,16 @@ def test_a_finished_newer_pass_supersedes_nothing():
     assert turn.turn([run(8, finished=True), run(7)], 7, "workflow_run") == turn.OwnTurn()
 
 
-def test_a_scheduled_pass_supersedes_and_is_superseded_like_any_event():
-    assert turn.turn([run(8, event="schedule"), run(7)], 7, "workflow_run") == turn.Superseded(8)
+def test_a_scheduled_pass_supersedes_nothing_and_leaves_to_a_newer_event():
+    assert turn.turn([run(8, event="schedule"), run(7)], 7, "workflow_run") == turn.OwnTurn()
     assert turn.turn([run(8), run(7, event="schedule")], 7, "schedule") == turn.Superseded(8)
+
+
+def test_ticks_piling_up_behind_a_busy_runner_each_take_their_turn():
+    # Forgejo creates a scheduled run when it is due, whether or not the previous one has run yet.
+    ticks = [run(9, event="schedule"), run(8, event="schedule"), run(7, event="schedule")]
+    assert turn.turn(ticks, 7, "schedule") == turn.OwnTurn()
+    assert turn.turn(ticks, 8, "schedule") == turn.AfterOlder(7)
 
 
 def test_a_dispatch_neither_supersedes_nor_is_superseded():
