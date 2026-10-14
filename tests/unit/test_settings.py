@@ -3,7 +3,8 @@ from unittest import mock
 import pytest
 
 from mergeweasel import settings
-from mergeweasel.gitea import ApiError, Gitea
+from mergeweasel.api import ApiError
+from mergeweasel.gitea import Gitea
 
 
 def gitea_with(default_branch="trunk", repo_labels=(), org_labels=()):

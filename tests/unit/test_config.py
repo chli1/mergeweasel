@@ -3,7 +3,8 @@ from unittest import mock
 import pytest
 
 from mergeweasel import commit_rule, config
-from mergeweasel.gitea import ApiError, Gitea, NotAFile
+from mergeweasel.api import ApiError, NotAFile
+from mergeweasel.gitea import Gitea
 
 
 def gitea_with(answer):

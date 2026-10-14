@@ -8,7 +8,7 @@ import json
 import sys
 
 from mergeweasel import commit_rule, config
-from mergeweasel.gitea import ApiError, Unreachable
+from mergeweasel.api import ApiError, Unreachable
 
 
 def run(gitea, event_path, settings):
@@ -36,11 +36,11 @@ def run(gitea, event_path, settings):
                     else [commit_rule.squash_subject(pull.title, number, rules)])
         issues = commit_rule.known_issues(subjects, gitea.is_issue, rules)
     except Unreachable as error:
-        print(f"could not reach the Gitea API: {error.message}", file=sys.stderr)
+        print(f"could not reach the API: {error.message}", file=sys.stderr)
         return 1
     except ApiError as error:
         status = f"HTTP {error.status} " if error.status else ""
-        print(f"could not read from the Gitea API: {status}{error.message} ({error.url})", file=sys.stderr)
+        print(f"could not read from the API: {status}{error.message} ({error.url})", file=sys.stderr)
         # Only Gitea's refusal can be a missing token; a malformed answer is none.
         if error.status:
             print("hint: a private repository needs GITHUB_TOKEN (the run token) in the step's environment",

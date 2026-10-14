@@ -1,10 +1,11 @@
-"""The `mergeweasel` command. Everything it needs comes from the Gitea Actions environment."""
+"""The `mergeweasel` command. Everything it needs comes from the Actions environment of Gitea or Forgejo."""
 import argparse
 import os
 import sys
 
 from mergeweasel import accounts, check, queue, release, settings as instance, turn
-from mergeweasel.gitea import ApiError, Gitea
+from mergeweasel.api import ApiError
+from mergeweasel.forgejo import detect
 
 MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
 APPROVER_TOKENS = "MERGEWEASEL_APPROVER_TOKENS"
@@ -19,7 +20,7 @@ class EnvironmentMissing(Exception):
 def required(name):
     value = os.environ.get(name, "")
     if not value:
-        raise EnvironmentMissing(f"{name} is not set - mergeweasel runs in Gitea Actions, which sets it")
+        raise EnvironmentMissing(f"{name} is not set - mergeweasel runs in Actions, which sets it")
     return value
 
 
@@ -40,16 +41,27 @@ def account_login(client, source):
     return login
 
 
-def approver_clients(server, repository, text):
+def forge_at(server, token):
+    """The client class for the forge at server, printed; None after an error, which it prints."""
+    try:
+        forge = detect(server, token)
+    except ApiError as error:
+        print(f"cannot detect the forge at {server}: {error.message}", file=sys.stderr)
+        return None
+    print(f"forge: {forge.__name__}")
+    return forge
+
+
+def approver_clients(forge, server, repository, text):
     """One client per approver token, keyed by its login, in the secret's order."""
     clients = {}
     tokens = [line.strip() for line in text.splitlines() if line.strip()]
     for position, token in enumerate(tokens, start=1):
         source = f"token {position} of {APPROVER_TOKENS}"
-        client = Gitea(server, repository, token)
+        client = forge(server, repository, token)
         login = account_login(client, source)
         if login in clients:
-            raise TokenProblem(f"{source} belongs to {login} again - Gitea counts one approval per account")
+            raise TokenProblem(f"{source} belongs to {login} again - the server counts one approval per account")
         clients[login] = client
     return clients
 
@@ -87,20 +99,23 @@ def labels_exist(gitea, settings):
 def queue_pass(server, repository, dry_run):
     token = os.environ.get(MERGER_TOKEN, "").strip()
     approver_tokens = os.environ.get(APPROVER_TOKENS, "")
+    if not token and not dry_run:
+        print(f"{MERGER_TOKEN} is not set", file=sys.stderr)
+        return 1
+    # CI's dry run has only the run token, which belongs to no account.
+    forge = forge_at(server, token or os.environ.get("GITHUB_TOKEN", ""))
+    if forge is None:
+        return 1
     try:
         if token:
-            gitea = Gitea(server, repository, token)
+            gitea = forge(server, repository, token)
             merger = accounts.Merger(account_login(gitea, MERGER_TOKEN))
-        elif dry_run:
-            # CI's dry run has only the run token, which belongs to no account.
-            gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))
+        else:
+            gitea = forge(server, repository, os.environ.get("GITHUB_TOKEN", ""))
             merger = accounts.DryRunMerger()
             print(UNKNOWN_MERGER)
-        else:
-            print(f"{MERGER_TOKEN} is not set", file=sys.stderr)
-            return 1
         if approver_tokens.strip() or not dry_run:
-            approvers = accounts.Approvers(approver_clients(server, repository, approver_tokens))
+            approvers = accounts.Approvers(approver_clients(forge, server, repository, approver_tokens))
             print(f"approvers: {', '.join(approvers.logins()) or 'none'}")
         else:
             approvers = accounts.DryRunApprovers()
@@ -136,7 +151,11 @@ def main(argv=None):
         return 1
     if arguments.command == "pass":
         return queue_pass(server, repository, arguments.dry_run)
-    gitea = Gitea(server, repository, os.environ.get("GITHUB_TOKEN", ""))
+    run_token = os.environ.get("GITHUB_TOKEN", "")
+    forge = forge_at(server, run_token)
+    if forge is None:
+        return 1
+    gitea = forge(server, repository, run_token)
     settings = instance_settings(gitea)
     if settings is None:
         return 1

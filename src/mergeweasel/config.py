@@ -4,7 +4,7 @@ import re
 import tomllib
 
 from mergeweasel import commit_rule, subject_template, version_template
-from mergeweasel.gitea import NotAFile
+from mergeweasel.api import NotAFile
 
 CONFIG_FILE = "mergeweasel.toml"
 DEFAULT_TAG = "v{major}.{minor}.{patch}"

@@ -9,7 +9,7 @@ import fnmatch
 import re
 
 from mergeweasel import commit_rule, config
-from mergeweasel.gitea import LABEL_ADDED, PUSH, Conflict, MergeDeferred, MergeRefused, retried
+from mergeweasel.api import LABEL_ADDED, PUSH, Conflict, MergeDeferred, MergeRefused, retried
 
 # The workflow's name: Gitea prefixes its job statuses with it.
 QUEUE_WORKFLOW = "mergeweasel-queue"
@@ -216,7 +216,7 @@ def conflict_comment(settings):
 
 
 def refused_comment(message, settings):
-    return f"mergeweasel: Gitea refused the merge: {message}\n\n{text(REFUSED_HINT, settings)}"
+    return f"mergeweasel: the server refused the merge: {message}\n\n{text(REFUSED_HINT, settings)}"
 
 
 def shortfall_comment(settings):

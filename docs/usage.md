@@ -128,7 +128,7 @@ other runs by hand in the repository's *Actions* tab.
 - **Required checks failed:** re-run the failed jobs or push a fix.
 - **Rebasing onto `main` failed with a conflict:** rebase onto `main` (the default branch the
   comment names) yourself and resolve the conflict.
-- **Gitea refused the merge:** fix the cause Gitea names.
+- **The server refused the merge:** fix the cause it names.
 - **What this pull request would land on main is invalid:** fix the title or the `## Commit`
   section, or with `keep-commits` the commits. An unknown scope shows up here too: use one of the
   scopes the message lists, or leave the scope out.

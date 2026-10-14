@@ -105,8 +105,10 @@ untested.
 
 - `src/mergeweasel/`:
   - `cli.py` - the commands and the environment;
-  - `gitea.py` - the API client: one method per operation, typed values, domain exceptions,
-    paging and retries; the only module that knows the Gitea API;
+  - `api.py` - what the API clients share: one method per operation, typed values, domain
+    exceptions, paging and retries;
+  - `gitea.py`, `forgejo.py` - one client per forge, implementing what differs; `forgejo.py` also
+    tells the forges apart. Only these three modules know the API;
   - `commit_rule.py` - what may land on `main`;
   - `queue.py` - the queue pass;
   - `accounts.py` - the merger and the approver accounts, and their dry-run stand-ins;
@@ -117,7 +119,8 @@ untested.
   - `subject_template.py` - the subject templates;
   - `config.py` - reading `mergeweasel.toml`.
 - `tests/unit/`: pytest, one suite per module, on constructed state and a client faked with
-  `mock.create_autospec`; only `test_gitea.py` fakes HTTP.
+  `mock.create_autospec`; only the client suites (`test_api.py`, `test_gitea.py`, `test_forgejo.py`)
+  fake HTTP, through `tests/support/fake_http.py`.
 - `.gitea/workflows/`: the two workflows this repository runs on (`mergeweasel-queue.yml`,
   `mergeweasel-commits.yml`), which each release also publishes as the template, `ci.yml`,
   `ci-cleanup.yml` and `mirror.yml`.

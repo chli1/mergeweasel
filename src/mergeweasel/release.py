@@ -10,7 +10,7 @@ import sys
 import traceback
 
 from mergeweasel import commit_rule, config
-from mergeweasel.gitea import ApiError, ReleaseExists
+from mergeweasel.api import ApiError, ReleaseExists
 
 BREAKING, FEATURE, FIX = "breaking", "feature", "fix"
 SECTIONS = ((BREAKING, "Breaking changes"), (FEATURE, "Features"), (FIX, "Fixes"))

@@ -27,7 +27,7 @@ def turn(runs, own_id, own_event):
     """A newer pass reads a newer state, so an event's pass leaves to a newer event's pass; otherwise
     it waits until every older pass has finished.
     """
-    unfinished = [run for run in runs if run.status != "completed" and run.id != own_id]
+    unfinished = [run for run in runs if not run.finished and run.id != own_id]
     newer = [run.id for run in unfinished if run.id > own_id and run.event != DISPATCH_EVENT]
     if newer and own_event != DISPATCH_EVENT:
         return Superseded(max(newer))

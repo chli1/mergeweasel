@@ -5,8 +5,9 @@ import pytest
 
 from mergeweasel import cli
 from mergeweasel.accounts import Approvers, DryRunApprovers, DryRunMerger, Merger
-from mergeweasel import gitea as gitea_module
-from mergeweasel.gitea import ApiError, Gitea
+from mergeweasel import api
+from mergeweasel.api import ApiError
+from mergeweasel.gitea import Gitea
 from mergeweasel.settings import VARIABLES, Settings
 
 ENVIRONMENT = ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "MERGEWEASEL_MERGER_TOKEN", "MERGEWEASEL_APPROVER_TOKENS",
@@ -31,6 +32,8 @@ class Fake:
     logins: dict
     run_pass: mock.Mock
     release: mock.Mock
+    # cli.detect, answering with the mock factory.
+    detect: mock.Mock = None
     # The labels the repository has.
     labels: list = dataclasses.field(default_factory=lambda: ["automerge", "needs-fix", "keep-commits"])
     # The labels its organization has, None if they are unreadable.
@@ -66,7 +69,9 @@ def fake(monkeypatch):
         fake.clients[token] = client
         return client
 
-    monkeypatch.setattr(cli, "Gitea", factory)
+    factory.__name__ = "Forgejo"
+    fake.detect = mock.Mock(return_value=factory)
+    monkeypatch.setattr(cli, "detect", fake.detect)
     monkeypatch.setattr(cli.queue, "run_pass", fake.run_pass)
     monkeypatch.setattr(cli.release, "run", fake.release)
     return fake
@@ -94,6 +99,36 @@ def test_pass_without_the_merger_token_exits_1(env, fake, capsys):
     assert cli.main(["pass"]) == 1
     assert "MERGEWEASEL_MERGER_TOKEN is not set" in capsys.readouterr().err
     fake.run_pass.assert_not_called()
+    fake.detect.assert_not_called()
+
+
+def test_pass_detects_the_forge_with_the_merger_token(env, fake, capsys):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    env.setenv("MERGEWEASEL_APPROVER_TOKENS", "a-1")
+    assert cli.main(["pass"]) == 0
+    fake.detect.assert_called_once_with(SERVER, "pat")
+    # The detected class builds the merger's and every approver's client.
+    assert fake.clients["pat"].built == (SERVER, "org/repo", "pat")
+    assert fake.clients["a-1"].built == (SERVER, "org/repo", "a-1")
+    assert "forge: Forgejo" in capsys.readouterr().out
+
+
+def test_dry_run_detects_the_forge_with_the_run_token(env, fake):
+    env.setenv("GITHUB_TOKEN", "run-token")
+    assert cli.main(["pass", "--dry-run"]) == 0
+    fake.detect.assert_called_once_with(SERVER, "run-token")
+
+
+def test_an_unreachable_forge_fails_the_pass_and_the_check(env, fake, capsys, monkeypatch):
+    env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
+    check_run = mock.Mock()
+    monkeypatch.setattr(cli.check, "run", check_run)
+    fake.detect.side_effect = api.Unreachable("connection refused", None, f"{SERVER}/api/forgejo/v1/version")
+    assert cli.main(["pass"]) == 1
+    assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
+    assert capsys.readouterr().err.count(f"cannot detect the forge at {SERVER}: connection refused") == 2
+    fake.run_pass.assert_not_called()
+    check_run.assert_not_called()
 
 
 def test_pass_derives_the_merger_and_the_approvers(env, fake, capsys):
@@ -232,6 +267,7 @@ def test_check_commits_runs_the_check_with_the_run_token(env, fake, monkeypatch)
     monkeypatch.setattr(cli.check, "run", check_run)
     assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
     check_run.assert_called_once_with(fake.clients["run-token"], "/tmp/event.json", Settings("trunk"))
+    fake.detect.assert_called_once_with(SERVER, "run-token")
 
 
 def test_the_merger_token_tolerates_a_trailing_newline(env, fake):
@@ -242,10 +278,10 @@ def test_the_merger_token_tolerates_a_trailing_newline(env, fake):
 
 def test_a_malformed_token_is_not_printed(env, fake, capsys):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
-    fake.logins["pat"] = ApiError(gitea_module.MALFORMED)
+    fake.logins["pat"] = ApiError(api.MALFORMED)
     assert cli.main(["pass"]) == 1
     err = capsys.readouterr().err
-    assert gitea_module.MALFORMED in err and "MERGEWEASEL_MERGER_TOKEN" in err
+    assert api.MALFORMED in err and "MERGEWEASEL_MERGER_TOKEN" in err
 
 
 def test_pass_releases_before_it_runs(env, fake):
@@ -313,14 +349,14 @@ def test_one_label_for_two_roles_fails_both_commands(env, fake, capsys):
 def test_an_unreadable_repository_fails_the_check(env, fake, capsys, monkeypatch):
     check_run = mock.Mock()
     monkeypatch.setattr(cli.check, "run", check_run)
-    factory = cli.Gitea
+    factory = fake.detect.return_value
 
     def failing(*arguments):
         client = factory(*arguments)
         client.default_branch.side_effect = unauthorized()
         return client
 
-    monkeypatch.setattr(cli, "Gitea", failing)
+    fake.detect.return_value = failing
     assert cli.main(["check-commits", "--event", "/tmp/event.json"]) == 1
     assert "cannot read the repository: token is expired" in capsys.readouterr().err
     check_run.assert_not_called()

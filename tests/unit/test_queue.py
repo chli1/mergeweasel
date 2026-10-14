@@ -2,11 +2,12 @@ from unittest import mock
 
 import pytest
 
-from mergeweasel import gitea as gitea_module, queue
+from mergeweasel import api, queue
 from mergeweasel.accounts import DRY_RUN_APPROVER, Approvers, DryRunApprovers, DryRunMerger, Merger
+from mergeweasel.api import (LABEL_ADDED, LABEL_REMOVED, PUSH, ApiError, Branch, CommitStatus, Conflict, MergeDeferred,
+                             MergeRefused, NotFound, PullRequest, Review, TimelineEvent, Unreachable)
 from mergeweasel.commit_rule import Commit, SquashMessage
-from mergeweasel.gitea import (LABEL_ADDED, LABEL_REMOVED, PUSH, ApiError, Branch, CommitStatus, Conflict, Gitea,
-                               MergeDeferred, MergeRefused, NotFound, PullRequest, Review, TimelineEvent, Unreachable)
+from mergeweasel.gitea import Gitea
 from mergeweasel.settings import Settings
 
 QUEUE = "weasel-bot"
@@ -431,7 +432,7 @@ def test_every_candidate_failing_ends_the_pass(monkeypatch, gitea):
 
 
 def test_carry_over_survives_a_transient_failure(monkeypatch, gitea):
-    monkeypatch.setattr(gitea_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(api.time, "sleep", lambda seconds: None)
     given(monkeypatch, [pull(3, behind=True)])
     gitea.branch_head.side_effect = [Unreachable("timed out"), "a" * 40]
     run_pass(gitea, "https://gitea", dry_run=False)
@@ -440,7 +441,7 @@ def test_carry_over_survives_a_transient_failure(monkeypatch, gitea):
 
 def test_carry_over_gives_up_at_once_on_a_missing_branch(monkeypatch, gitea):
     sleeps = []
-    monkeypatch.setattr(gitea_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(api.time, "sleep", sleeps.append)
     given(monkeypatch, [pull(3, behind=True)])
     gitea.branch_head.side_effect = NotFound("refs/heads/branch-3 not found")
     with pytest.raises(NotFound):

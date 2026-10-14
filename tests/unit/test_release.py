@@ -4,7 +4,8 @@ from unittest import mock
 import pytest
 
 from mergeweasel import config, release
-from mergeweasel.gitea import ApiError, Gitea, HistoryCommit, ReleaseExists, TagRef
+from mergeweasel.api import ApiError, HistoryCommit, ReleaseExists, TagRef
+from mergeweasel.gitea import Gitea
 
 
 @pytest.mark.parametrize("message, kind, line", [

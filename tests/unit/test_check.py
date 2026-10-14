@@ -6,7 +6,8 @@ import pytest
 from mergeweasel import check
 from mergeweasel.settings import Settings
 from mergeweasel.commit_rule import Commit
-from mergeweasel.gitea import ApiError, Gitea, NotFound, PullRequest, Unreachable
+from mergeweasel.api import ApiError, NotFound, PullRequest, Unreachable
+from mergeweasel.gitea import Gitea
 
 def raw_commit(sha, subject, parents=1):
     return Commit(sha, subject, parents)
@@ -225,10 +226,10 @@ def test_fails_loudly_when_the_pull_request_cannot_be_read(tmp_path, capsys):
 
 def test_an_answer_without_a_status_names_no_status_and_no_token_hint(tmp_path, capsys):
     gitea = api()
-    gitea.is_issue.side_effect = ApiError("Gitea's answer is not JSON", None, "https://git.example/x")
+    gitea.is_issue.side_effect = ApiError("the server's answer is not JSON", None, "https://git.example/x")
     assert run(gitea, event(tmp_path)) == 1
     err = capsys.readouterr().err
-    assert "could not read from the Gitea API: Gitea's answer is not JSON (https://git.example/x)" in err
+    assert "could not read from the API: the server's answer is not JSON (https://git.example/x)" in err
     assert "None" not in err and "GITHUB_TOKEN" not in err
 
 
@@ -236,7 +237,7 @@ def test_fails_clearly_when_gitea_is_unreachable(tmp_path, capsys):
     gitea = api()
     gitea.file.side_effect = Unreachable("connection refused", None, "https://git.example/x")
     assert run(gitea, event(tmp_path)) == 1
-    assert "could not reach the Gitea API: connection refused" in capsys.readouterr().err
+    assert "could not reach the API: connection refused" in capsys.readouterr().err
 
 
 def test_not_a_pull_request_event_fails_clearly(tmp_path, capsys):
