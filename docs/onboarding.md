@@ -202,8 +202,11 @@ everything above applies, with these differences:
   curl -fsSL -o .forgejo/workflows/mergeweasel-commits.yml "$releases/mergeweasel-commits.yml"
   ```
 
-  Forgejo reads `.gitea/workflows/` only when a repository has no `.forgejo/workflows/`, so a
-  repository whose CI is in `.forgejo/workflows/` would never run files in `.gitea/workflows/`.
+  Forgejo reads workflows from one directory only: `.forgejo/workflows/` if the repository has
+  it, else `.gitea/workflows/`. So put the files next to your CI's workflows. If your CI is in
+  `.gitea/workflows/`, either use that directory in the commands above, or move your CI's
+  workflows into `.forgejo/workflows/` in the same pull request - creating `.forgejo/workflows/`
+  for mergeweasel alone would stop your CI from running.
   The files go in unchanged: Forgejo's queue has no `workflow_run` list to adapt.
 - **The queue polls.** Forgejo has no `workflow_run`, the trigger that wakes the queue on Gitea when
   a check finishes. Forgejo's queue carries a schedule instead, every 5 minutes. A merge still wakes
