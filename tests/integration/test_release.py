@@ -2,6 +2,8 @@
 import datetime
 import re
 
+import pytest
+
 TITLE = "fix: repair a"
 RELEASE_ON = "[release]\nenabled = true\n"
 
@@ -20,6 +22,7 @@ def switch_on(repo, text=RELEASE_ON):
     repo.move_main({"mergeweasel.toml": text}, "ci: release (#1)")
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_a_fix_releases_the_next_patch(repo, run_pass):
     repo.tag("v1.0.0")
     switch_on(repo)
@@ -35,6 +38,7 @@ def test_a_fix_releases_the_next_patch(repo, run_pass):
     assert "released v1.0.1" in output
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_docs_release_nothing(repo, run_pass):
     repo.tag("v1.0.0")
     switch_on(repo)
@@ -46,6 +50,7 @@ def test_docs_release_nothing(repo, run_pass):
     assert "nothing to release since v1.0.0" in output
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_without_a_version_tag_nothing_is_released(repo, run_pass):
     switch_on(repo)
     merge_through_the_queue(repo, run_pass, TITLE)
@@ -82,6 +87,7 @@ def commit_count(repo, sha):
     return len(repo.read(f"/commits?sha={sha}&stat=false&verification=false&files=false&limit=50"))
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_calver_releases_from_the_first_releasing_merge(repo, run_pass):
     before = datetime.datetime.now(datetime.timezone.utc)
     switch_on(repo, CALVER)
@@ -103,6 +109,7 @@ def test_calver_releases_from_the_first_releasing_merge(repo, run_pass):
     assert repo.release(following)["body"] == f"## Features\n\n- add b (#{number})\n"
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_by_default_a_tagged_repository_gets_no_release(repo, run_pass):
     repo.tag("v1.0.0")
     merge_through_the_queue(repo, run_pass, TITLE)

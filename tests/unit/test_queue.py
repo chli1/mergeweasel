@@ -489,7 +489,7 @@ def test_merge_removes_the_automerge_label(monkeypatch, gitea):
     given(monkeypatch, [pull(6)])
     answer_pull(gitea, 6)
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert writes(gitea) == [("merge", (6, f"{6:040x}", squash(6))), ("remove_label", (6, 13))]
+    assert writes(gitea) == [("merge", (6, f"{6:040x}", squash(6))), ("remove_label", (6, "automerge", 13))]
 
 
 def test_keep_commits_label_reaches_the_merge_action():
@@ -612,7 +612,7 @@ def test_transient_merge_refusal_ends_the_pass_quietly(monkeypatch, gitea, capsy
 def test_renovate_push_clears_needs_fix_and_waits_for_the_rerun_checks(monkeypatch, gitea):
     given(monkeypatch, [pull(9, labels=("automerge", "needs-fix"), renovate_retried=True)])
     action = run_pass(gitea, "https://gitea", dry_run=False)
-    assert writes(gitea) == [("remove_label", (9, 14))]
+    assert writes(gitea) == [("remove_label", (9, "needs-fix", 14))]
     assert action == queue.Wait(9)
 
 
@@ -624,7 +624,7 @@ def test_each_pull_loses_its_own_labels_id(monkeypatch, gitea):
     monkeypatch.setattr(queue, "read_state", lambda gitea, server, merger, settings:
                         queue.State("f" * 40, tuple(REQUIRED), 1, pulls, label_ids))
     run_pass(gitea, "https://gitea", dry_run=False)
-    assert writes(gitea) == [("remove_label", (8, 14)), ("remove_label", (9, 100))]
+    assert writes(gitea) == [("remove_label", (8, "needs-fix", 14)), ("remove_label", (9, "needs-fix", 100))]
 
 
 def test_cleared_pull_behind_main_is_rebased(monkeypatch, gitea):

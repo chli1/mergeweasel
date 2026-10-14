@@ -74,7 +74,12 @@ def create_repo(clients, name, required_approvals=1, branch="main", labels=LABEL
     admin.call("PATCH", path, {"allow_squash_merge": True, "allow_fast_forward_only_merge": True})
     for account in ACCOUNTS:
         admin.call("PUT", f"{path}/collaborators/{account}", {"permission": "write"})
-    for label in labels:
+    # The automerge label is the organization's, the others the repository's: each label removal the
+    # queue makes - automerge after a merge, needs-fix on Renovate's retry - meets one of the two kinds.
+    automerge, *others = labels
+    if automerge not in {label["name"] for label in admin.call("GET", f"/orgs/{ORGANIZATION}/labels?limit=50")}:
+        admin.call("POST", f"/orgs/{ORGANIZATION}/labels", {"name": automerge, "color": "#888888"})
+    for label in others:
         admin.call("POST", f"{path}/labels", {"name": label, "color": "#888888"})
     clients["author"].call("POST", f"{path}/issues", {"title": "The issue every title refers to"})
     admin.call("POST", f"{path}/branch_protections", {
@@ -130,7 +135,8 @@ class Repo:
 
     def open_pull(self, account, branch, title, body="", labels=()):
         """labels: set in the creating call itself, as Renovate does."""
-        ids = [label["id"] for label in self.read("/labels") if label["name"] in labels]
+        known = self.read("/labels") + self.clients[ADMIN].call("GET", f"/orgs/{ORGANIZATION}/labels?limit=50")
+        ids = [label["id"] for label in known if label["name"] in labels]
         return self.call(account, "POST", "/pulls", {"head": branch, "base": self.branch, "title": title, "body": body,
                                                      "labels": ids})["number"]
 

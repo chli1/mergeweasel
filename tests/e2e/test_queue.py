@@ -1,4 +1,6 @@
 """The queue on a real runner: the forge starts the workflows, nobody dispatches a pass. End states only."""
+import pytest
+
 from actions import CI_CONTEXT, settle
 
 BODY = "Adds {name}.{marker}\n\n## Commit\n\n- adds {name}\n"
@@ -20,6 +22,7 @@ def merged(repo, number):
     return repo.pull(number)["merged"]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_the_label_comes_last(actions_repo, runner):
     repo = actions_repo
     number = open_approved(repo, "a")
@@ -35,6 +38,7 @@ def finished_passes(repo):
                for workflow, _, status in repo.runs())
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_ci_comes_last(actions_repo, runner):
     repo = actions_repo
     number = open_approved(repo, "b", marker=" ci-slow")
@@ -49,6 +53,7 @@ def test_ci_comes_last(actions_repo, runner):
     settle(repo, runner, lambda: merged(repo, number))
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_a_moved_main_is_rebased_and_tested_again(actions_repo, runner):
     repo = actions_repo
     number = open_approved(repo, "c")
@@ -62,6 +67,7 @@ def test_a_moved_main_is_rebased_and_tested_again(actions_repo, runner):
     assert [parent["sha"] for parent in repo.git_commit(repo.main_sha())["parents"]] == [moved]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_red_ci_needs_a_fix(actions_repo, runner):
     repo = actions_repo
     number = open_approved(repo, "d", marker=" ci-fail")
@@ -73,6 +79,7 @@ def test_red_ci_needs_a_fix(actions_repo, runner):
     assert not merged(repo, number)
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_the_next_moves_up_after_a_merge(actions_repo, runner):
     repo = actions_repo
     first, second = open_approved(repo, "e"), open_approved(repo, "f")

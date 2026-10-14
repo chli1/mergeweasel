@@ -1,5 +1,6 @@
 """The Forgejo API client, and telling Forgejo from Gitea."""
 import json
+import urllib.parse
 
 from mergeweasel.api import PAGE_SIZE, Client, NotFound, WorkflowRun, exchange
 from mergeweasel.gitea import Gitea
@@ -17,6 +18,12 @@ class Forgejo(Client):
         # trigger_event: event is the webhook's - push for a scheduled run, empty for a dispatch.
         return [WorkflowRun(run["id"], run["status"] in FINISHED, run["trigger_event"])
                 for run in raw["workflow_runs"]]
+
+    def remove_label(self, number, name, label_id):
+        # By name: Forgejo looks a label's id up among the repository's labels only, so an
+        # organization label's id answers 422. A name resolves to the repository's label first,
+        # then the organization's.
+        self._json("DELETE", f"/issues/{number}/labels/{urllib.parse.quote(name, safe='')}")
 
 
 def detect(server, token):

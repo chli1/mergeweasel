@@ -23,6 +23,7 @@ BODY = ("Adds a.\n\n## Commit\n\n- adds a\n"
 RUN_URL = "https://ci.example.com/runs/1"
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 @pytest.mark.instance(branch="trunk", labels=("merge-me", "broken", "no-squash", "hotfix"))
 def test_the_queue_works_with_every_default_changed(repo, run_pass):
     repo.move_main({"mergeweasel.toml": CONFIG}, "[PROJ-1] ci(app): configure mergeweasel")

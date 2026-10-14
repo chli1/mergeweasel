@@ -384,7 +384,8 @@ class Client(abc.ABC):
     def add_label(self, number, name):
         self._json("POST", f"/issues/{number}/labels", {"labels": [name]})
 
-    def remove_label(self, number, label_id):
+    def remove_label(self, number, name, label_id):
+        """name and label_id: the same label; each forge identifies it by what it resolves."""
         self._json("DELETE", f"/issues/{number}/labels/{label_id}")
 
     def comment(self, number, body):

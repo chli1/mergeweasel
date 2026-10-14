@@ -20,6 +20,7 @@ def changed(line, text):
     return "".join(lines)
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_squash_merge(server, repo, run_pass):
     repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
     repo.commit("author", "add-a", {"b.txt": "b\n"}, "wip")
@@ -40,6 +41,7 @@ def test_squash_merge(server, repo, run_pass):
     assert not [review for review in repo.reviews(number) if review["user"]["login"] == "queue"]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_keep_commits_fast_forwards(repo, run_pass):
     first = repo.commit("author", "main", {"a.txt": "a\n"}, "feat: add a", new_branch="add-a")
     second = repo.commit("author", "add-a", {"a.txt": "a\nb\n"}, "test: cover a")
@@ -56,6 +58,7 @@ def test_keep_commits_fast_forwards(repo, run_pass):
     assert "automerge" not in repo.labels(number)
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_prio_overtakes_the_pull_in_flight(repo, run_pass):
     repo.commit("author", "main", {"fix.txt": "fix\n"}, "fix production", new_branch="hotfix")
     repo.move_main({"a.txt": "a\n"}, "feat: add a (#1)")
@@ -82,6 +85,7 @@ def test_prio_overtakes_the_pull_in_flight(repo, run_pass):
     assert not repo.pull(in_flight)["merged"]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_rebase_carries_the_approval_over(repo, run_pass):
     repo.move_main({"a.txt": LINES}, "feat: add a (#1)")
     repo.commit("author", "main", {"a.txt": changed(1, "first")}, "change the first line", new_branch="first-line")
@@ -172,6 +176,7 @@ def test_renovate_push_clears_needs_fix(repo, run_pass):
     assert not repo.pull(number)["merged"]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 @pytest.mark.required_approvals(2)
 def test_rebase_restores_two_approvals_through_two_approvers(repo, run_pass):
     approvers = ("approver1", "approver2")
@@ -212,6 +217,7 @@ def test_gitea_refuses_approving_ones_own_pull(repo):
     assert refusal.value.code == 422
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_renovates_own_update_is_approved_and_merged(repo, run_pass):
     number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"})
 
@@ -235,6 +241,7 @@ def test_renovate_update_someone_else_pushed_to_waits_for_a_human(repo, run_pass
     assert not [review for review in repo.reviews(number) if review["state"] == "APPROVED"]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_renovates_update_labelled_at_creation_is_approved_and_merged(repo, run_pass):
     # Gitea must record the label set in the creating call as renovate's, or no update is trusted.
     number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"}, label_at_creation=True)
@@ -245,6 +252,7 @@ def test_renovates_update_labelled_at_creation_is_approved_and_merged(repo, run_
     assert repo.pull(number)["merged"]
 
 
+@pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_renovates_update_stays_trusted_across_the_queues_rebase(repo, run_pass):
     number = repo.open_renovate_pull("renovate/a", {"a.txt": "a 1\n"})
     old_head = repo.head(number)

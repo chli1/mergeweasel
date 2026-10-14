@@ -29,6 +29,12 @@ def test_run_states(monkeypatch, status, finished):
     assert Forgejo(SERVER, "org/repo", "").workflow_runs("q.yml")[0].finished is finished
 
 
+def test_remove_label_names_the_label(monkeypatch):
+    # An organization label's id answers 422 on Forgejo; its name resolves.
+    seen = serve(monkeypatch, None)
+    Forgejo(SERVER, "org/repo", "secret").remove_label(3, "kind/needs fix", 12)
+    assert seen == [("DELETE", f"{API}/issues/3/labels/kind%2Fneeds%20fix", None)]
+
 def test_detect_finds_forgejo_by_its_version_endpoint(monkeypatch):
     seen = serve(monkeypatch, {"version": "16.0.6+gitea-1.22.0"})
     assert detect(SERVER, "secret") is Forgejo

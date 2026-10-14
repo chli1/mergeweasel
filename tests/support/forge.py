@@ -43,8 +43,9 @@ class Gitea(Forge):
     runner_dockerfile = "gitea-runner.Dockerfile"
     runner_command = "act_runner"
     job_prefix = "GITEA-ACTIONS-TASK"
-    # The label's commit check wakes the queue on completion, within seconds.
-    ci_slow_seconds = 10
+    # The label's commit check wakes the queue on completion, within seconds - more of them when
+    # several CI runs share the host.
+    ci_slow_seconds = 30
 
     def squash_message(self, message, co_author):
         # ADD_CO_COMMITTER_TRAILERS, on by default.

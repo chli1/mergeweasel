@@ -443,7 +443,7 @@ def merge(gitea, action, approvers, label_ids, settings):
         print(f"#{pull.number}: merge deferred: {deferred.message}")
         return
     # Only after the merge landed: a deferred or refused pull request stays queued.
-    gitea.remove_label(pull.number, label_ids[pull.number][settings.automerge])
+    gitea.remove_label(pull.number, settings.automerge, label_ids[pull.number][settings.automerge])
 
 
 def relabel(pulls, number, add=None, remove=None):
@@ -483,7 +483,7 @@ def run_pass(gitea, server, dry_run, merger, approvers, settings):
     for retry in needs_fix_to_clear(pulls, settings):
         print(f"#{retry.number}: {settings.renovate} pushed, removing {settings.needs_fix}")
         if not dry_run:
-            gitea.remove_label(retry.number, state.label_ids[retry.number][settings.needs_fix])
+            gitea.remove_label(retry.number, settings.needs_fix, state.label_ids[retry.number][settings.needs_fix])
         # The removal re-runs mergeweasel-commits, a required check: the statuses read above are
         # stale, so the pull request waits this pass out. That run's completion wakes the queue again.
         pulls = [dataclasses.replace(pull, statuses={}) if pull.number == retry.number else pull

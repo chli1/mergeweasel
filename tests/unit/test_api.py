@@ -291,7 +291,7 @@ def test_writes_send_their_request(monkeypatch):
     gitea.rebase(3)
     gitea.approve(3, "h" * 40, "Approval of chli1.")
     gitea.add_label(3, "needs-fix")
-    gitea.remove_label(3, 14)
+    gitea.remove_label(3, "needs-fix", 14)
     gitea.comment(3, "mergeweasel: red")
     gitea.set_status("a" * 40, "mergeweasel/approval", "success", "approved at abc")
     gitea.create_release("v1.0.1", "c" * 40, "## Fixes")
