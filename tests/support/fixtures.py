@@ -2,19 +2,18 @@
 
 Run: MERGEWEASEL_E2E_IMAGE=<image> .venv/bin/python -m pytest tests/integration tests/e2e
 """
+
 import os
 import re
 import secrets
 import subprocess
 
-import pytest
-
 import forge
 import history
+import pytest
 import workflow
 from driver import LABELS, create_repo
 from server import docker, start
-
 
 # [upgrade]: the newest release's workflow files with the built image - a user's setup after
 # Renovate bumped the image.
@@ -86,8 +85,9 @@ def released_image(queue_workflow):
 @pytest.fixture(scope="session")
 def released_revision(released_image):
     """The commit the newest release was built from, or "" if its image does not say."""
-    return docker("image", "inspect", "--format", '{{index .Config.Labels "org.opencontainers.image.revision"}}',
-                  released_image)
+    return docker(
+        "image", "inspect", "--format", '{{index .Config.Labels "org.opencontainers.image.revision"}}', released_image
+    )
 
 
 @pytest.fixture
@@ -102,8 +102,11 @@ def image(request):
     marked = marker is not None and request.node.get_closest_marker(marker) is not None
     if marked:
         revision = request.getfixturevalue("released_revision")
-        unreleased = (history.unreleased(request.function, revision, marker) if revision
-                      else "the released image names no revision")
+        unreleased = (
+            history.unreleased(request.function, revision, marker)
+            if revision
+            else "the released image names no revision"
+        )
         reason = skip_reason(request.param, marked, unreleased)
         if reason:
             pytest.skip(reason)
@@ -122,13 +125,19 @@ def workflow_text(request, image):
     def read(path):
         name = path.relative_to(workflow.ROOT).as_posix()
         exists = subprocess.run(["git", "cat-file", "-e", revision], cwd=workflow.ROOT, capture_output=True)
-        if exists.returncode == 0 and subprocess.run(["git", "cat-file", "-e", f"{revision}:{name}"],
-                                                     cwd=workflow.ROOT, capture_output=True).returncode != 0:
+        if (
+            exists.returncode == 0
+            and subprocess.run(
+                ["git", "cat-file", "-e", f"{revision}:{name}"], cwd=workflow.ROOT, capture_output=True
+            ).returncode
+            != 0
+        ):
             pytest.skip(f"[upgrade]: the newest release {revision[:12]} ships no {name} yet")
         shown = subprocess.run(["git", "show", f"{revision}:{name}"], cwd=workflow.ROOT, capture_output=True, text=True)
         if shown.returncode != 0:
             pytest.fail(f"[upgrade] cannot read {name} of the newest release {revision[:12]}: {shown.stderr.strip()}")
         return shown.stdout
+
     return read
 
 
@@ -145,5 +154,6 @@ def repo(server, request, instance):
     branch, labels = instance
     # A parametrized test's name carries brackets, which a repository name may not.
     name = re.sub(r"[^\w.-]+", "-", request.node.name).strip("-")
-    return create_repo(server.clients, name, required_approvals=marker.args[0] if marker else 1,
-                       branch=branch, labels=labels)
+    return create_repo(
+        server.clients, name, required_approvals=marker.args[0] if marker else 1, branch=branch, labels=labels
+    )

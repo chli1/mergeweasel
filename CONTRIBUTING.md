@@ -105,6 +105,23 @@ The one exception is `[upgrade]` with a released image that names no revision: i
 release's workflow files at all, so it fails, marked or not, instead of turning CI green
 untested.
 
+## Lint and format
+
+[Ruff](https://docs.astral.sh/ruff/) lints and formats the code, configured under `[tool.ruff]` in
+`pyproject.toml`. CI fails on a finding or on code the formatter would change. Before pushing, let
+ruff fix what it can and format the rest:
+
+```sh
+.venv/bin/pip install -r requirements-lint.txt
+.venv/bin/ruff check --fix .
+.venv/bin/ruff format .
+```
+
+`ruff check` lists what it cannot fix itself, such as a blind `except Exception`. Fix the code
+where the rule has a point; where the code is deliberate, silence the one line with
+`# noqa: <rule>` and a comment that says why, as `release.py` does for the release step's
+catch-all.
+
 ## Layout
 
 - `src/mergeweasel/`:
@@ -154,7 +171,7 @@ ends in its issue, `(#N)`, or in its own number, `(PR #N)`, and nothing is appen
 
 CI (`ci.yml`) runs on every pull request:
 
-- `test` - the unit tests;
+- `test` - the unit tests, `ruff check` and `ruff format --check`;
 - `image` - builds the image, which then checks the pull request itself and dry-runs a pass with
   the run token;
 - `layers` - one job per Docker layer, variant and forge, such as `integration (built, gitea)`

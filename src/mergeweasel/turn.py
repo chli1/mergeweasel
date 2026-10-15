@@ -1,4 +1,5 @@
 """Serializing the queue passes without a concurrency group, whose replaced runs Gitea reports as failed."""
+
 import dataclasses
 import time
 

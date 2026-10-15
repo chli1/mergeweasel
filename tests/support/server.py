@@ -1,4 +1,5 @@
 """The throwaway forge both Docker layers run against: Gitea, or Forgejo (forge.py)."""
+
 import contextlib
 import dataclasses
 import datetime
@@ -9,7 +10,6 @@ import subprocess
 import urllib.request
 
 import pytest
-
 from driver import ACCOUNTS, ADMIN, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, eventually
 from forge import Forge
 
@@ -26,6 +26,7 @@ JOB_VOLUME = re.compile(r"^GITEA-ACTIONS-TASK-\d{13}-")
 @dataclasses.dataclass(frozen=True)
 class Names:
     """The Docker names of one run: the daemon may serve other runs at the same time."""
+
     server: str
     server_tag: str
     runner: str
@@ -33,8 +34,12 @@ class Names:
 
 
 def names(forge, run_id):
-    return Names(f"mergeweasel-e2e-{forge.name}-{run_id}", f"mergeweasel-e2e-{forge.name}:{run_id}",
-                 f"mergeweasel-e2e-runner-{run_id}", f"mergeweasel-e2e-runner:{run_id}")
+    return Names(
+        f"mergeweasel-e2e-{forge.name}-{run_id}",
+        f"mergeweasel-e2e-{forge.name}:{run_id}",
+        f"mergeweasel-e2e-runner-{run_id}",
+        f"mergeweasel-e2e-runner:{run_id}",
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -70,28 +75,37 @@ def task_offset(container):
     count from 1 would remove each other's jobs.
     """
     prefix = secrets.randbelow(9 * 10**6) + 10**6
-    docker("exec", "--user", "git", container, "sqlite3", DATABASE,
-           f"INSERT INTO sqlite_sequence (name, seq) VALUES ('action_task', {prefix * 10**6})")
+    docker(
+        "exec",
+        "--user",
+        "git",
+        container,
+        "sqlite3",
+        DATABASE,
+        f"INSERT INTO sqlite_sequence (name, seq) VALUES ('action_task', {prefix * 10**6})",
+    )
     return str(prefix)
 
 
 def remove_orphans():
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     for container in docker("ps", "--all", "--quiet", "--filter", f"label={LABEL}").split():
-        created = subprocess.run(["docker", "inspect", "--format", "{{.Created}}", container],
-                                 capture_output=True, text=True).stdout.strip()
+        created = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Created}}", container], capture_output=True, text=True
+        ).stdout.strip()
         if not created:
             continue
-        started = datetime.datetime.fromisoformat(created[:19]).replace(tzinfo=datetime.timezone.utc)
+        started = datetime.datetime.fromisoformat(created[:19]).replace(tzinfo=datetime.UTC)
         if now - started > ORPHAN_AGE:
             subprocess.run(["docker", "rm", "--force", container], capture_output=True)
     # Job volumes carry no label; their names tell them apart.
     for volume in docker("volume", "ls", "--quiet", "--filter", "name=GITEA-ACTIONS-TASK-").split():
         if not JOB_VOLUME.match(volume):
             continue
-        created = subprocess.run(["docker", "volume", "inspect", "--format", "{{.CreatedAt}}", volume],
-                                 capture_output=True, text=True).stdout.strip()
-        if created and now - datetime.datetime.fromisoformat(created[:19]).replace(tzinfo=datetime.timezone.utc) > ORPHAN_AGE:
+        created = subprocess.run(
+            ["docker", "volume", "inspect", "--format", "{{.CreatedAt}}", volume], capture_output=True, text=True
+        ).stdout.strip()
+        if created and now - datetime.datetime.fromisoformat(created[:19]).replace(tzinfo=datetime.UTC) > ORPHAN_AGE:
             subprocess.run(["docker", "volume", "rm", "--force", volume], capture_output=True)
 
 
@@ -107,8 +121,16 @@ def accounts(url):
     admin = Client(url, basic=f"{ADMIN}:{PASSWORD}")
     tokens = {ADMIN: admin.call("POST", f"/users/{ADMIN}/tokens", {"name": "e2e", "scopes": ["all"]})["sha1"]}
     for account in ACCOUNTS:
-        admin.call("POST", "/admin/users", {"username": account, "email": f"{account}@example.com",
-                                            "password": PASSWORD, "must_change_password": False})
+        admin.call(
+            "POST",
+            "/admin/users",
+            {
+                "username": account,
+                "email": f"{account}@example.com",
+                "password": PASSWORD,
+                "must_change_password": False,
+            },
+        )
         own = Client(url, basic=f"{account}:{PASSWORD}")
         tokens[account] = own.call("POST", f"/users/{account}/tokens", {"name": "e2e", "scopes": TOKEN_SCOPES})["sha1"]
     clients = {account: Client(url, token=token) for account, token in tokens.items()}
@@ -131,11 +153,28 @@ def start(forge, run_id):
             eventually(lambda: healthy(url), timeout=START_SECONDS)
         except AssertionError:
             logs = subprocess.run(["docker", "logs", "--tail", "20", named.server], capture_output=True, text=True)
-            pytest.fail(f"{forge.title} does not answer at {url} - it did not start, or this host is not on Docker's "
-                        f"default bridge. Its log:\n{logs.stdout}{logs.stderr}")
-        docker("exec", "--user", "git", named.server, "gitea", "admin", "user", "create", "--admin",
-               "--username", ADMIN, "--password", PASSWORD, "--email", f"{ADMIN}@example.com",
-               "--must-change-password=false")
+            pytest.fail(
+                f"{forge.title} does not answer at {url} - it did not start, or this host is not on Docker's "
+                f"default bridge. Its log:\n{logs.stdout}{logs.stderr}"
+            )
+        docker(
+            "exec",
+            "--user",
+            "git",
+            named.server,
+            "gitea",
+            "admin",
+            "user",
+            "create",
+            "--admin",
+            "--username",
+            ADMIN,
+            "--password",
+            PASSWORD,
+            "--email",
+            f"{ADMIN}@example.com",
+            "--must-change-password=false",
+        )
         yield Server(forge, url, ip, named.server, *accounts(url), task_offset(named.server))
     finally:
         subprocess.run(["docker", "rm", "--force", named.server], capture_output=True)

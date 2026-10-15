@@ -4,6 +4,7 @@ Without `keep-commits` the queue squashes: the title and the `## Commit` section
 and the branch's own commits never land, so they are not checked. With `keep-commits` every commit
 lands as it is and is checked one by one. The rule lives in commit_rule, shared with the queue.
 """
+
 import json
 import sys
 
@@ -32,8 +33,11 @@ def run(gitea, event_path, settings):
         # Strict: this check runs the pull request's own workflow, and with it its image.
         rules = config.load(gitea, pull.head_sha, strict=True).commits
         commits = gitea.pull_commits(number) if keep_commits else []
-        subjects = ([commit.subject for commit in commits] if keep_commits
-                    else [commit_rule.squash_subject(pull.title, number, rules)])
+        subjects = (
+            [commit.subject for commit in commits]
+            if keep_commits
+            else [commit_rule.squash_subject(pull.title, number, rules)]
+        )
         issues = commit_rule.known_issues(subjects, gitea.is_issue, rules)
     except Unreachable as error:
         print(f"could not reach the API: {error.message}", file=sys.stderr)
@@ -43,8 +47,10 @@ def run(gitea, event_path, settings):
         print(f"could not read from the API: {status}{error.message} ({error.url})", file=sys.stderr)
         # Only Gitea's refusal can be a missing token; a malformed answer is none.
         if error.status:
-            print("hint: a private repository needs GITHUB_TOKEN (the run token) in the step's environment",
-                  file=sys.stderr)
+            print(
+                "hint: a private repository needs GITHUB_TOKEN (the run token) in the step's environment",
+                file=sys.stderr,
+            )
         return 1
     except config.ConfigError as error:
         print(error)

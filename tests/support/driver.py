@@ -1,5 +1,6 @@
 """The test's side of the throwaway Gitea: API calls as any account, and the actions of the people
 and systems around the queue - the author, the reviewer, CI and Renovate."""
+
 import base64
 import json
 import time
@@ -82,17 +83,27 @@ def create_repo(clients, name, required_approvals=1, branch="main", labels=LABEL
     for label in others:
         admin.call("POST", f"{path}/labels", {"name": label, "color": "#888888"})
     clients["author"].call("POST", f"{path}/issues", {"title": "The issue every title refers to"})
-    admin.call("POST", f"{path}/branch_protections", {
-        "rule_name": branch,
-        "enable_status_check": True, "status_check_contexts": list(contexts),
-        "required_approvals": required_approvals, "enable_approvals_whitelist": True,
-        # Singular: Gitea ignores approvals_whitelist_usernames.
-        "approvals_whitelist_username": ["reviewer", "reviewer2", "queue", "approver1", "approver2"],
-        "dismiss_stale_approvals": True, "block_on_outdated_branch": True,
-        "enable_merge_whitelist": True, "merge_whitelist_usernames": ["queue"],
-        # The admin moves the branch in the scenarios; everyone else lands through the queue.
-        "enable_push": True, "enable_push_whitelist": True, "push_whitelist_usernames": [ADMIN],
-    })
+    admin.call(
+        "POST",
+        f"{path}/branch_protections",
+        {
+            "rule_name": branch,
+            "enable_status_check": True,
+            "status_check_contexts": list(contexts),
+            "required_approvals": required_approvals,
+            "enable_approvals_whitelist": True,
+            # Singular: Gitea ignores approvals_whitelist_usernames.
+            "approvals_whitelist_username": ["reviewer", "reviewer2", "queue", "approver1", "approver2"],
+            "dismiss_stale_approvals": True,
+            "block_on_outdated_branch": True,
+            "enable_merge_whitelist": True,
+            "merge_whitelist_usernames": ["queue"],
+            # The admin moves the branch in the scenarios; everyone else lands through the queue.
+            "enable_push": True,
+            "enable_push_whitelist": True,
+            "push_whitelist_usernames": [ADMIN],
+        },
+    )
     return Repo(clients, full_name, branch, labels[0])
 
 
@@ -137,11 +148,17 @@ class Repo:
         """labels: set in the creating call itself, as Renovate does."""
         known = self.read("/labels") + self.clients[ADMIN].call("GET", f"/orgs/{ORGANIZATION}/labels?limit=50")
         ids = [label["id"] for label in known if label["name"] in labels]
-        return self.call(account, "POST", "/pulls", {"head": branch, "base": self.branch, "title": title, "body": body,
-                                                     "labels": ids})["number"]
+        return self.call(
+            account,
+            "POST",
+            "/pulls",
+            {"head": branch, "base": self.branch, "title": title, "body": body, "labels": ids},
+        )["number"]
 
     def post_status(self, sha, state, target_url=""):
-        self.call("ci", "POST", f"/statuses/{sha}", {"state": state, "context": REQUIRED_CONTEXT, "target_url": target_url})
+        self.call(
+            "ci", "POST", f"/statuses/{sha}", {"state": state, "context": REQUIRED_CONTEXT, "target_url": target_url}
+        )
 
     def approve(self, number, account="reviewer"):
         self.call(account, "POST", f"/pulls/{number}/reviews", {"event": "APPROVED", "body": "Looks good."})
@@ -190,8 +207,11 @@ class Repo:
         return {label["name"] for label in self.read(f"/issues/{number}/labels")}
 
     def comments_by(self, account, number):
-        return [comment["body"] for comment in self.read(f"/issues/{number}/comments")
-                if comment["user"]["login"] == account]
+        return [
+            comment["body"]
+            for comment in self.read(f"/issues/{number}/comments")
+            if comment["user"]["login"] == account
+        ]
 
     def reviews(self, number):
         return self.read(f"/pulls/{number}/reviews")
@@ -204,13 +224,17 @@ class Repo:
 
         Not from statuses(): Forgejo lists changes within one second oldest first.
         """
-        return {status["context"]: status["status"]
-                for status in self.read(f"/commits/{sha}/status?limit=50&page=1")["statuses"] or ()}
+        return {
+            status["context"]: status["status"]
+            for status in self.read(f"/commits/{sha}/status?limit=50&page=1")["statuses"] or ()
+        }
 
     def runs(self):
         """(workflow file, event, status) of each Actions task, newest first."""
-        return [(task["workflow_id"], task["event"], task["status"])
-                for task in self.read("/actions/tasks")["workflow_runs"]]
+        return [
+            (task["workflow_id"], task["event"], task["status"])
+            for task in self.read("/actions/tasks")["workflow_runs"]
+        ]
 
     def task_ids(self):
         """The id of each Actions task, newest first."""
@@ -229,8 +253,14 @@ class Repo:
 
     def pusher(self, number, sha):
         """Who pushed the commit, as the pull request's timeline records it; None if not recorded."""
-        return next((entry["user"]["login"] for entry in self.read(f"/issues/{number}/timeline")
-                     if entry["type"] == "pull_push" and sha in json.loads(entry["body"])["commit_ids"]), None)
+        return next(
+            (
+                entry["user"]["login"]
+                for entry in self.read(f"/issues/{number}/timeline")
+                if entry["type"] == "pull_push" and sha in json.loads(entry["body"])["commit_ids"]
+            ),
+            None,
+        )
 
     def _file_sha(self, branch, path):
         try:

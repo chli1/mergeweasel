@@ -1,4 +1,5 @@
 """When a marked scenario may run with the newest release. No Gitea needed."""
+
 import importlib.util
 import subprocess
 
@@ -10,8 +11,13 @@ MARKED = SCENARIO.format(marker=f"@pytest.mark.{MARKER}\n")
 
 
 def git(path, *arguments):
-    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *arguments], cwd=path,
-                          check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *arguments],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def commit(path, text):

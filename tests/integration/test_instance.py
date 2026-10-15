@@ -1,5 +1,6 @@
 """Every default changed: the instance's names - a default branch other than main, labels named
 otherwise - and the repository's mergeweasel.toml."""
+
 import pytest
 
 CONFIG = """[release]
@@ -18,8 +19,10 @@ max_line = 100
 """
 TITLE = "[PROJ-1] feature(app): add a"
 # The second line is longer than the default limit and within max_line.
-BODY = ("Adds a.\n\n## Commit\n\n- adds a\n"
-        "- adds a, with a line longer than the default limit of 72 characters, kept by max_line\n")
+BODY = (
+    "Adds a.\n\n## Commit\n\n- adds a\n"
+    "- adds a, with a line longer than the default limit of 72 characters, kept by max_line\n"
+)
 RUN_URL = "https://ci.example.com/runs/1"
 
 
@@ -37,7 +40,9 @@ def test_the_queue_works_with_every_default_changed(repo, run_pass):
 
     output = run_pass(mergeable=number)
 
-    assert "settings: base branch trunk; labels merge-me, broken, no-squash, hotfix; Renovate account renovate" in output
+    assert (
+        "settings: base branch trunk; labels merge-me, broken, no-squash, hotfix; Renovate account renovate" in output
+    )
     assert repo.labels(red_number) == {"merge-me", "broken"}
     assert "remove `broken`" in repo.comments_by("queue", red_number)[0]
     # no-squash fast-forwards: trunk's head is the pull request's own commit.

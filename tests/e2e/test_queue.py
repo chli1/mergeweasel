@@ -1,6 +1,6 @@
 """The queue on a real runner: the forge starts the workflows, nobody dispatches a pass. End states only."""
-import pytest
 
+import pytest
 from actions import CI_CONTEXT, settle
 
 BODY = "Adds {name}.{marker}\n\n## Commit\n\n- adds {name}\n"
@@ -34,8 +34,9 @@ def test_the_label_comes_last(actions_repo, runner):
 
 
 def finished_passes(repo):
-    return sum(workflow == "mergeweasel-queue.yml" and status in ("success", "failure")
-               for workflow, _, status in repo.runs())
+    return sum(
+        workflow == "mergeweasel-queue.yml" and status in ("success", "failure") for workflow, _, status in repo.runs()
+    )
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name

@@ -3,6 +3,7 @@
 Shared by `mergeweasel check-commits` and the queue pass, so the two cannot disagree. The rule:
 docs/design.md, "What lands on main".
 """
+
 import dataclasses
 import re
 
@@ -38,6 +39,7 @@ ATTRIBUTION = re.compile(r"^co-authored-by:|^\W*generated with\b", re.IGNORECASE
 @dataclasses.dataclass(frozen=True)
 class CommitRules:
     """The rule every subject is held to: the forms it may take and what its parts may name."""
+
     # The subject templates, in the configured order: the first that matches decides.
     templates: tuple
     # None: any scope passes; empty: none does.
@@ -125,8 +127,11 @@ def check_reference(subject, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES
         return f"#{parts.issue} is not an issue of this repository, or the token cannot read its issues"
     if parts.pull is not None and int(parts.pull) != int(pr_number):
         return f"PR #{parts.pull} is not this pull request (#{pr_number})"
-    if (parts.pull_or_issue is not None and int(parts.pull_or_issue) != int(pr_number)
-            and int(parts.pull_or_issue) not in known_issues):
+    if (
+        parts.pull_or_issue is not None
+        and int(parts.pull_or_issue) != int(pr_number)
+        and int(parts.pull_or_issue) not in known_issues
+    ):
         return f"#{parts.pull_or_issue} is neither this pull request nor an issue of this repository"
     return None
 
@@ -163,8 +168,7 @@ def commit_section(pr_body, max_line=MAX_LINE):
         if FENCE.match(line):
             in_fence = not in_fence
         outside_fences.append(not in_fence and not FENCE.match(line))
-    headings = [index for index, line in enumerate(lines)
-                if outside_fences[index] and SECTION_HEADING.match(line)]
+    headings = [index for index, line in enumerate(lines) if outside_fences[index] and SECTION_HEADING.match(line)]
     if len(headings) > 1:
         return "", [f"the PR body has {len(headings)} '## Commit' sections, expected at most one"]
     if not headings:

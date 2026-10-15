@@ -3,8 +3,8 @@ import urllib.error
 from unittest import mock
 
 import pytest
-
 from fake_http import API, SERVER, Response, http_error, serve
+
 from mergeweasel import api
 from mergeweasel.commit_rule import Commit, SquashMessage
 from mergeweasel.gitea import Gitea
@@ -44,8 +44,9 @@ def test_retried_returns_once_a_retry_succeeds(no_sleep):
     assert no_sleep == [api.RETRY_DELAY_SECONDS]
 
 
-@pytest.mark.parametrize("error", [api.ApiError("forbidden", 403), api.NotFound("gone", 404),
-                                   KeyError("sha"), TypeError("bug")])
+@pytest.mark.parametrize(
+    "error", [api.ApiError("forbidden", 403), api.NotFound("gone", 404), KeyError("sha"), TypeError("bug")]
+)
 def test_retried_gives_up_at_once_on_a_4xx_or_a_bug(no_sleep, error):
     operation = mock.Mock(side_effect=error)
     with pytest.raises(type(error)):
@@ -73,6 +74,7 @@ def test_lists_are_read_page_by_page(monkeypatch):
 
 
 # --- errors ---
+
 
 def test_an_http_error_carries_giteas_message_status_and_url(monkeypatch):
     serve(monkeypatch, http_error(403, "token does not have scope"))
@@ -114,12 +116,14 @@ def test_an_answer_that_is_not_json_is_an_api_error(monkeypatch):
     class Garbage(Response):
         def read(self):
             return b"<html>"
+
     serve(monkeypatch, Garbage(None))
     with pytest.raises(api.ApiError, match="not JSON"):
         client().default_branch()
 
 
 # --- reads ---
+
 
 def test_default_branch(monkeypatch):
     seen = serve(monkeypatch, {"default_branch": "trunk"})
@@ -136,8 +140,13 @@ def test_branch_with_and_without_status_checks(monkeypatch):
 
 
 def test_branch_head_takes_the_exact_ref_among_prefix_matches(monkeypatch):
-    seen = serve(monkeypatch, [{"ref": "refs/heads/renovate/gradle-8.x", "object": {"sha": "b" * 40}},
-                               {"ref": "refs/heads/renovate/gradle", "object": {"sha": "c" * 40}}])
+    seen = serve(
+        monkeypatch,
+        [
+            {"ref": "refs/heads/renovate/gradle-8.x", "object": {"sha": "b" * 40}},
+            {"ref": "refs/heads/renovate/gradle", "object": {"sha": "c" * 40}},
+        ],
+    )
     assert client().branch_head("renovate/gradle") == "c" * 40
     assert seen[0][1] == f"{API}/git/refs/heads/renovate/gradle"
 
@@ -148,11 +157,18 @@ def test_branch_head_without_an_exact_ref_is_not_found(monkeypatch):
         client().branch_head("feature")
 
 
-RAW_PULL = {"number": 5, "base": {"ref": "main"}, "head": {"ref": "feature", "sha": "5" * 40},
-            "labels": [{"name": "automerge", "id": 13}], "draft": True, "user": {"login": "author"},
-            "title": "feat: x (#1)", "body": None, "merged": False}
-PULL = api.PullRequest(5, "main", "feature", "5" * 40, {"automerge": 13}, True, "author", "feat: x (#1)", "",
-                                False)
+RAW_PULL = {
+    "number": 5,
+    "base": {"ref": "main"},
+    "head": {"ref": "feature", "sha": "5" * 40},
+    "labels": [{"name": "automerge", "id": 13}],
+    "draft": True,
+    "user": {"login": "author"},
+    "title": "feat: x (#1)",
+    "body": None,
+    "merged": False,
+}
+PULL = api.PullRequest(5, "main", "feature", "5" * 40, {"automerge": 13}, True, "author", "feat: x (#1)", "", False)
 
 
 def test_open_pulls_and_pull(monkeypatch):
@@ -163,12 +179,26 @@ def test_open_pulls_and_pull(monkeypatch):
 
 
 def test_statuses(monkeypatch):
-    seen = serve(monkeypatch, {"statuses": [
-        {"context": "ci", "status": "success", "target_url": "/run/1", "description": "ok", "creator": {"login": "bot"}},
-        {"context": "x", "status": "pending", "target_url": None, "description": None, "creator": None}]},
-        {"statuses": None})
-    assert client().statuses("a" * 40) == [api.CommitStatus("ci", "success", "/run/1", "ok", "bot"),
-                                           api.CommitStatus("x", "pending", "", "", None)]
+    seen = serve(
+        monkeypatch,
+        {
+            "statuses": [
+                {
+                    "context": "ci",
+                    "status": "success",
+                    "target_url": "/run/1",
+                    "description": "ok",
+                    "creator": {"login": "bot"},
+                },
+                {"context": "x", "status": "pending", "target_url": None, "description": None, "creator": None},
+            ]
+        },
+        {"statuses": None},
+    )
+    assert client().statuses("a" * 40) == [
+        api.CommitStatus("ci", "success", "/run/1", "ok", "bot"),
+        api.CommitStatus("x", "pending", "", "", None),
+    ]
     assert client().statuses("a" * 40) == []
     assert seen[0][1] == f"{API}/commits/{'a' * 40}/status?limit=50&page=1"
 
@@ -180,22 +210,38 @@ def test_is_behind(monkeypatch):
 
 
 def test_reviews(monkeypatch):
-    serve(monkeypatch, [{"user": {"login": "chli1"}, "state": "APPROVED", "official": True, "dismissed": False,
-                         "stale": False, "commit_id": "c" * 40}])
+    serve(
+        monkeypatch,
+        [
+            {
+                "user": {"login": "chli1"},
+                "state": "APPROVED",
+                "official": True,
+                "dismissed": False,
+                "stale": False,
+                "commit_id": "c" * 40,
+            }
+        ],
+    )
     assert client().reviews(5) == [api.Review("chli1", "APPROVED", True, False, False, "c" * 40)]
 
 
 def test_timeline_decodes_pushes_and_label_events(monkeypatch):
-    serve(monkeypatch, [
-        {"id": 1, "type": "pull_push", "user": {"login": "renovate"}},
-        {"id": 2, "type": "label", "body": "1", "user": {"login": "chli1"}, "label": {"name": "automerge"}},
-        {"id": 3, "type": "label", "body": "", "user": {"login": "chli1"}, "label": {"name": "automerge"}},
-        {"id": 4, "type": "comment", "user": {"login": "chli1"}}])
+    serve(
+        monkeypatch,
+        [
+            {"id": 1, "type": "pull_push", "user": {"login": "renovate"}},
+            {"id": 2, "type": "label", "body": "1", "user": {"login": "chli1"}, "label": {"name": "automerge"}},
+            {"id": 3, "type": "label", "body": "", "user": {"login": "chli1"}, "label": {"name": "automerge"}},
+            {"id": 4, "type": "comment", "user": {"login": "chli1"}},
+        ],
+    )
     assert client().timeline(5) == [
         api.TimelineEvent(1, api.PUSH, "renovate", None),
         api.TimelineEvent(2, api.LABEL_ADDED, "chli1", "automerge"),
         api.TimelineEvent(3, api.LABEL_REMOVED, "chli1", "automerge"),
-        api.TimelineEvent(4, api.OTHER, "chli1", None)]
+        api.TimelineEvent(4, api.OTHER, "chli1", None),
+    ]
 
 
 def test_pull_commits(monkeypatch):
@@ -205,8 +251,13 @@ def test_pull_commits(monkeypatch):
 
 
 def test_is_issue_rejects_a_pull_request_and_a_missing_number(monkeypatch):
-    seen = serve(monkeypatch, {"number": 4, "pull_request": None}, {"number": 5, "pull_request": {"merged": False}},
-                 http_error(404), http_error(403, "Forbidden"))
+    seen = serve(
+        monkeypatch,
+        {"number": 4, "pull_request": None},
+        {"number": 5, "pull_request": {"merged": False}},
+        http_error(404),
+        http_error(403, "Forbidden"),
+    )
     assert client().is_issue(4) is True
     assert client().is_issue(5) is False
     assert client().is_issue(6) is False
@@ -216,8 +267,14 @@ def test_is_issue_rejects_a_pull_request_and_a_missing_number(monkeypatch):
 
 
 def test_file(monkeypatch):
-    seen = serve(monkeypatch, {"type": "file", "content": base64.b64encode(b"x = 1\n").decode()},
-                 http_error(404), {"type": "dir"}, [{"type": "file"}], {"type": "symlink", "content": None})
+    seen = serve(
+        monkeypatch,
+        {"type": "file", "content": base64.b64encode(b"x = 1\n").decode()},
+        http_error(404),
+        {"type": "dir"},
+        [{"type": "file"}],
+        {"type": "symlink", "content": None},
+    )
     assert client().file("mergeweasel.toml", "main") == b"x = 1\n"
     assert client().file("mergeweasel.toml", "main") is None
     for _ in range(3):
@@ -234,11 +291,16 @@ def test_a_file_without_readable_content_is_not_a_file(monkeypatch, content):
 
 
 def test_tag_refs_and_tag_commit(monkeypatch):
-    seen = serve(monkeypatch, [{"ref": "refs/tags/v1.0.0", "object": {"type": "commit", "sha": "a" * 40}},
-                               {"ref": "refs/tags/v2.0.0", "object": {"type": "tag", "sha": "b" * 40}}],
-                 http_error(404), {"object": {"sha": "c" * 40}})
-    assert client().tag_refs() == [api.TagRef("v1.0.0", "a" * 40, False),
-                                   api.TagRef("v2.0.0", "b" * 40, True)]
+    seen = serve(
+        monkeypatch,
+        [
+            {"ref": "refs/tags/v1.0.0", "object": {"type": "commit", "sha": "a" * 40}},
+            {"ref": "refs/tags/v2.0.0", "object": {"type": "tag", "sha": "b" * 40}},
+        ],
+        http_error(404),
+        {"object": {"sha": "c" * 40}},
+    )
+    assert client().tag_refs() == [api.TagRef("v1.0.0", "a" * 40, False), api.TagRef("v2.0.0", "b" * 40, True)]
     assert client().tag_refs() == []
     assert client().tag_commit("b" * 40) == "c" * 40
     assert [url for _, url, _ in seen] == [f"{API}/git/refs/tags", f"{API}/git/refs/tags", f"{API}/git/tags/{'b' * 40}"]
@@ -252,7 +314,8 @@ def test_commits_reads_the_next_page_only_when_needed(monkeypatch):
     assert len(seen) == 1
     assert len(list(commits)) == 50
     assert [url for _, url, _ in seen] == [
-        f"{API}/commits?sha=main&stat=false&verification=false&files=false&limit=50&page={n}" for n in (1, 2)]
+        f"{API}/commits?sha=main&stat=false&verification=false&files=false&limit=50&page={n}" for n in (1, 2)
+    ]
 
 
 def test_commit_count_reads_giteas_count_header(monkeypatch):
@@ -267,8 +330,10 @@ def test_labels_and_org_labels(monkeypatch):
     seen = serve(monkeypatch, [{"name": "automerge"}], [{"name": "needs-fix"}])
     assert client().labels() == ["automerge"]
     assert client().org_labels() == ["needs-fix"]
-    assert [url for _, url, _ in seen] == [f"{API}/labels?limit=50&page=1",
-                                           f"{SERVER}/api/v1/orgs/org/labels?limit=50&page=1"]
+    assert [url for _, url, _ in seen] == [
+        f"{API}/labels?limit=50&page=1",
+        f"{SERVER}/api/v1/orgs/org/labels?limit=50&page=1",
+    ]
 
 
 @pytest.mark.parametrize("code", [403, 404])
@@ -284,6 +349,7 @@ def test_org_labels_other_errors_raise(monkeypatch):
 
 
 # --- writes ---
+
 
 def test_writes_send_their_request(monkeypatch):
     seen = serve(monkeypatch, *[None] * 7)
@@ -301,10 +367,17 @@ def test_writes_send_their_request(monkeypatch):
         ("POST", f"{API}/issues/3/labels", {"labels": ["needs-fix"]}),
         ("DELETE", f"{API}/issues/3/labels/14", None),
         ("POST", f"{API}/issues/3/comments", {"body": "mergeweasel: red"}),
-        ("POST", f"{API}/statuses/{'a' * 40}", {"state": "success", "context": "mergeweasel/approval",
-                                                "description": "approved at abc"}),
-        ("POST", f"{API}/releases", {"tag_name": "v1.0.1", "target_commitish": "c" * 40, "name": "v1.0.1",
-                                     "body": "## Fixes"})]
+        (
+            "POST",
+            f"{API}/statuses/{'a' * 40}",
+            {"state": "success", "context": "mergeweasel/approval", "description": "approved at abc"},
+        ),
+        (
+            "POST",
+            f"{API}/releases",
+            {"tag_name": "v1.0.1", "target_commitish": "c" * 40, "name": "v1.0.1", "body": "## Fixes"},
+        ),
+    ]
 
 
 def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch):
@@ -312,17 +385,29 @@ def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch):
     client().merge(6, "h" * 40, SquashMessage("ci: land (#1)", "Why.", ()))
     client().merge(6, "h" * 40, None)
     assert seen == [
-        ("POST", f"{API}/pulls/6/merge", {"Do": "squash", "MergeTitleField": "ci: land (#1)",
-                                          "MergeMessageField": "Why.", "head_commit_id": "h" * 40}),
-        ("POST", f"{API}/pulls/6/merge", {"Do": "fast-forward-only", "head_commit_id": "h" * 40})]
+        (
+            "POST",
+            f"{API}/pulls/6/merge",
+            {
+                "Do": "squash",
+                "MergeTitleField": "ci: land (#1)",
+                "MergeMessageField": "Why.",
+                "head_commit_id": "h" * 40,
+            },
+        ),
+        ("POST", f"{API}/pulls/6/merge", {"Do": "fast-forward-only", "head_commit_id": "h" * 40}),
+    ]
 
 
-@pytest.mark.parametrize("code, message, kind", [
-    (405, "not mergeable", api.MergeRefused),
-    (405, "Please try again later", api.MergeDeferred),
-    (409, "head moved", api.MergeDeferred),
-    (500, "boom", api.ApiError),
-])
+@pytest.mark.parametrize(
+    "code, message, kind",
+    [
+        (405, "not mergeable", api.MergeRefused),
+        (405, "Please try again later", api.MergeDeferred),
+        (409, "head moved", api.MergeDeferred),
+        (500, "boom", api.ApiError),
+    ],
+)
 def test_merge_errors(monkeypatch, code, message, kind):
     serve(monkeypatch, http_error(code, message))
     with pytest.raises(kind) as raised:

@@ -1,9 +1,11 @@
 """The `mergeweasel` command. Everything it needs comes from the Actions environment of Gitea or Forgejo."""
+
 import argparse
 import os
 import sys
 
-from mergeweasel import accounts, check, queue, release, settings as instance, turn
+from mergeweasel import accounts, check, queue, release, turn
+from mergeweasel import settings as instance
 from mergeweasel.api import ApiError
 from mergeweasel.forgejo import detect
 
@@ -33,8 +35,9 @@ def account_login(client, source):
     try:
         login = client.own_login()
     except ApiError as error:
-        raise TokenProblem(f"cannot read the account of {source}: {error.message} - check the token, "
-                           "e.g. missing scope read:user") from error
+        raise TokenProblem(
+            f"cannot read the account of {source}: {error.message} - check the token, e.g. missing scope read:user"
+        ) from error
     # Without a login the pass could not tell the merger's carry-over or an approver's approval.
     if not login:
         raise TokenProblem(f"the account of {source} has no login")
@@ -90,8 +93,11 @@ def labels_exist(gitea, settings):
         print("cannot read the organization's labels - not checked whether the labels exist")
         return True
     if missing:
-        print(f"labels missing in the repository and its organization: {', '.join(missing)} - "
-              "create them, or set the label variables to existing ones", file=sys.stderr)
+        print(
+            f"labels missing in the repository and its organization: {', '.join(missing)} - "
+            "create them, or set the label variables to existing ones",
+            file=sys.stderr,
+        )
         return False
     return True
 

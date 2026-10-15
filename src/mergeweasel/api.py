@@ -1,5 +1,6 @@
 """What the API clients share - Gitea's API, which Forgejo serves too: one method per operation, typed values,
 domain exceptions; paging and retries. Each forge's client implements the rest (gitea.py, forgejo.py)."""
+
 import abc
 import base64
 import dataclasses
@@ -153,10 +154,17 @@ class WorkflowRun:
 
 def pull_request(raw):
     return PullRequest(
-        number=raw["number"], base_ref=raw["base"]["ref"], head_ref=raw["head"]["ref"], head_sha=raw["head"]["sha"],
-        labels={label["name"]: label["id"] for label in raw["labels"]}, draft=raw.get("draft", False),
-        poster=raw["user"]["login"], title=raw["title"], body=raw.get("body") or "",
-        merged=raw["merged"])
+        number=raw["number"],
+        base_ref=raw["base"]["ref"],
+        head_ref=raw["head"]["ref"],
+        head_sha=raw["head"]["sha"],
+        labels={label["name"]: label["id"] for label in raw["labels"]},
+        draft=raw.get("draft", False),
+        poster=raw["user"]["login"],
+        title=raw["title"],
+        body=raw.get("body") or "",
+        merged=raw["merged"],
+    )
 
 
 def timeline_event(raw):
@@ -269,9 +277,16 @@ class Client(abc.ABC):
     def statuses(self, sha):
         """The latest status per context on sha."""
         raw = self._json("GET", f"/commits/{sha}/status?limit={PAGE_SIZE}&page=1")
-        return [CommitStatus(status["context"], status["status"], status.get("target_url") or "",
-                             status.get("description") or "", (status.get("creator") or {}).get("login"))
-                for status in raw["statuses"] or ()]
+        return [
+            CommitStatus(
+                status["context"],
+                status["status"],
+                status.get("target_url") or "",
+                status.get("description") or "",
+                (status.get("creator") or {}).get("login"),
+            )
+            for status in raw["statuses"] or ()
+        ]
 
     def is_behind(self, head, base):
         """True if base holds commits head lacks."""
@@ -279,15 +294,21 @@ class Client(abc.ABC):
         return self._json("GET", f"/compare/{head}...{base}")["total_commits"] > 0
 
     def reviews(self, number):
-        return [Review(raw["user"]["login"], raw["state"], raw["official"], raw["dismissed"], raw["stale"],
-                       raw["commit_id"]) for raw in self._pages(f"/pulls/{number}/reviews")]
+        return [
+            Review(
+                raw["user"]["login"], raw["state"], raw["official"], raw["dismissed"], raw["stale"], raw["commit_id"]
+            )
+            for raw in self._pages(f"/pulls/{number}/reviews")
+        ]
 
     def timeline(self, number):
         return [timeline_event(raw) for raw in self._pages(f"/issues/{number}/timeline")]
 
     def pull_commits(self, number):
-        return [Commit(raw["sha"], raw["commit"]["message"].split("\n", 1)[0], len(raw.get("parents") or []))
-                for raw in self._pages(f"/pulls/{number}/commits?{COMMIT_QUERY}")]
+        return [
+            Commit(raw["sha"], raw["commit"]["message"].split("\n", 1)[0], len(raw.get("parents") or []))
+            for raw in self._pages(f"/pulls/{number}/commits?{COMMIT_QUERY}")
+        ]
 
     def is_issue(self, number):
         """False for a pull request, which Gitea also serves as an issue, and for a missing number."""
@@ -317,8 +338,10 @@ class Client(abc.ABC):
         except NotFound:
             # Gitea's answer when no tag exists.
             return []
-        return [TagRef(ref["ref"].removeprefix("refs/tags/"), ref["object"]["sha"], ref["object"]["type"] == "tag")
-                for ref in refs]
+        return [
+            TagRef(ref["ref"].removeprefix("refs/tags/"), ref["object"]["sha"], ref["object"]["type"] == "tag")
+            for ref in refs
+        ]
 
     def tag_commit(self, sha):
         """The commit an annotated tag object points at."""
@@ -326,8 +349,10 @@ class Client(abc.ABC):
 
     def commits(self, ref):
         """ref's history, newest first."""
-        return (HistoryCommit(raw["sha"], raw["commit"]["message"])
-                for raw in self._pages(f"/commits?sha={ref}&{COMMIT_QUERY}"))
+        return (
+            HistoryCommit(raw["sha"], raw["commit"]["message"])
+            for raw in self._pages(f"/commits?sha={ref}&{COMMIT_QUERY}")
+        )
 
     def commit_count(self, sha):
         """The commits in sha's history, from Gitea's X-Total-Count header."""
@@ -367,8 +392,12 @@ class Client(abc.ABC):
         if message is None:
             request = {"Do": "fast-forward-only", "head_commit_id": head_sha}
         else:
-            request = {"Do": "squash", "MergeTitleField": message.subject, "MergeMessageField": message.body,
-                       "head_commit_id": head_sha}
+            request = {
+                "Do": "squash",
+                "MergeTitleField": message.subject,
+                "MergeMessageField": message.body,
+                "head_commit_id": head_sha,
+            }
         try:
             self._json("POST", f"/pulls/{number}/merge", request)
         except ApiError as error:

@@ -3,8 +3,8 @@
 The test plays the author, the reviewer, CI and Renovate; the pass does the rest. Comment texts are
 asserted only for the cause they name - their wording is the unit tests' business.
 """
-import pytest
 
+import pytest
 from driver import ApiError, eventually
 
 TITLE = "feat: add a (#1)"
@@ -33,8 +33,9 @@ def test_squash_merge(server, repo, run_pass):
     landed = repo.git_commit(repo.main_sha())
     assert [parent["sha"] for parent in landed["parents"]] == [before]
     # The branch's own commits never land.
-    assert landed["commit"]["message"] == server.forge.squash_message(f"feat: add a (#{number})\n\n- adds a\n",
-                                                                      "author <author@example.com>")
+    assert landed["commit"]["message"] == server.forge.squash_message(
+        f"feat: add a (#{number})\n\n- adds a\n", "author <author@example.com>"
+    )
     assert (landed["author"]["login"], landed["committer"]["login"]) == ("author", "queue")
     assert repo.pull(number)["merged"]
     assert "automerge" not in repo.labels(number)
@@ -99,10 +100,16 @@ def test_rebase_carries_the_approval_over(repo, run_pass):
 
     new_head = eventually(lambda: (head := repo.head(number)) != old_head and head)
     assert [parent["sha"] for parent in repo.git_commit(new_head)["parents"]] == [repo.main_sha()]
-    eventually(lambda: [review for review in repo.reviews(number)
-                        if review["user"]["login"] == "reviewer" and review["dismissed"]])
-    carry_over = [(status["status"], status["creator"]["login"], status["description"])
-                  for status in repo.statuses(new_head) if status["context"] == "mergeweasel/approval"]
+    eventually(
+        lambda: [
+            review for review in repo.reviews(number) if review["user"]["login"] == "reviewer" and review["dismissed"]
+        ]
+    )
+    carry_over = [
+        (status["status"], status["creator"]["login"], status["description"])
+        for status in repo.statuses(new_head)
+        if status["context"] == "mergeweasel/approval"
+    ]
     assert carry_over == [("success", "queue", f"approved at {old_head[:7]}\napproved by reviewer")]
     assert not repo.pull(number)["merged"]
 
@@ -112,8 +119,11 @@ def test_rebase_carries_the_approval_over(repo, run_pass):
     run_pass(mergeable=number)
 
     assert repo.pull(number)["merged"]
-    assert [review for review in repo.reviews(number)
-            if review["user"]["login"] == "queue" and review["state"] == "APPROVED" and review["commit_id"] == new_head]
+    assert [
+        review
+        for review in repo.reviews(number)
+        if review["user"]["login"] == "queue" and review["state"] == "APPROVED" and review["commit_id"] == new_head
+    ]
 
 
 def test_red_checks_flag_needs_fix(repo, run_pass):
@@ -193,9 +203,21 @@ def test_rebase_restores_two_approvals_through_two_approvers(repo, run_pass):
     run_pass(mergeable=number, approvers=approvers)
 
     new_head = eventually(lambda: (head := repo.head(number)) != old_head and head)
-    eventually(lambda: len([review for review in repo.reviews(number)
-                            if review["user"]["login"] in ("reviewer", "reviewer2") and review["dismissed"]]) == 2)
-    carry_over = [status["description"] for status in repo.statuses(new_head) if status["context"] == "mergeweasel/approval"]
+    eventually(
+        lambda: (
+            len(
+                [
+                    review
+                    for review in repo.reviews(number)
+                    if review["user"]["login"] in ("reviewer", "reviewer2") and review["dismissed"]
+                ]
+            )
+            == 2
+        )
+    )
+    carry_over = [
+        status["description"] for status in repo.statuses(new_head) if status["context"] == "mergeweasel/approval"
+    ]
     assert carry_over == [f"approved at {old_head[:7]}\napproved by reviewer\napproved by reviewer2"]
 
     repo.post_status(new_head, "success")
@@ -203,8 +225,11 @@ def test_rebase_restores_two_approvals_through_two_approvers(repo, run_pass):
     run_pass(mergeable=number, approvers=approvers)
 
     assert repo.pull(number)["merged"]
-    restored = {review["user"]["login"] for review in repo.reviews(number)
-                if review["state"] == "APPROVED" and review["commit_id"] == new_head and not review["dismissed"]}
+    restored = {
+        review["user"]["login"]
+        for review in repo.reviews(number)
+        if review["state"] == "APPROVED" and review["commit_id"] == new_head and not review["dismissed"]
+    }
     assert restored == set(approvers)
 
 
@@ -269,5 +294,8 @@ def test_renovates_update_stays_trusted_across_the_queues_rebase(repo, run_pass)
     run_pass(mergeable=number, approvers=("approver1",))
 
     assert repo.pull(number)["merged"]
-    assert [review for review in repo.reviews(number)
-            if review["user"]["login"] == "approver1" and review["state"] == "APPROVED" and review["commit_id"] == new_head]
+    assert [
+        review
+        for review in repo.reviews(number)
+        if review["user"]["login"] == "approver1" and review["state"] == "APPROVED" and review["commit_id"] == new_head
+    ]

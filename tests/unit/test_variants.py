@@ -1,4 +1,5 @@
 """Which variants a scenario runs, and which a marker skips. No Gitea needed."""
+
 import fixtures
 
 
@@ -25,7 +26,8 @@ def test_an_unmarked_variant_runs():
 
 def test_upgrade_without_a_revision_fails_even_when_marked():
     assert fixtures.missing_revision("upgrade", "") == (
-        "the released image names no revision - [upgrade] cannot read its workflow files")
+        "the released image names no revision - [upgrade] cannot read its workflow files"
+    )
     assert fixtures.missing_revision("upgrade", "abc123") is None
     assert fixtures.missing_revision("released", "") is None
     assert fixtures.missing_revision("built", "") is None

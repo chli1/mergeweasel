@@ -1,4 +1,5 @@
 """The Forgejo API client, and telling Forgejo from Gitea."""
+
 import json
 import urllib.parse
 
@@ -16,8 +17,7 @@ class Forgejo(Client):
         # page: without it, Forgejo ignores limit and reads the workflow's whole history.
         raw = self._json("GET", f"/actions/runs?workflow_id={file}&limit={PAGE_SIZE}&page=1")
         # trigger_event: event is the webhook's - push for a scheduled run, empty for a dispatch.
-        return [WorkflowRun(run["id"], run["status"] in FINISHED, run["trigger_event"])
-                for run in raw["workflow_runs"]]
+        return [WorkflowRun(run["id"], run["status"] in FINISHED, run["trigger_event"]) for run in raw["workflow_runs"]]
 
     def remove_label(self, number, name, label_id):
         # By name: Forgejo looks a label's id up among the repository's labels only, so an

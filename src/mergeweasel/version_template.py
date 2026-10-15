@@ -2,6 +2,7 @@
 
 Placeholders and rules: docs/configuration.md, "The release tag".
 """
+
 import dataclasses
 import re
 
@@ -76,8 +77,9 @@ class Template:
 
     def render(self, version=None, now=None, count=None, sha=None):
         fields = Fields(version, now, count, sha)
-        return "".join(part if index % 2 == 0 else PLACEHOLDERS[part][1](fields)
-                       for index, part in enumerate(self.parts))
+        return "".join(
+            part if index % 2 == 0 else PLACEHOLDERS[part][1](fields) for index, part in enumerate(self.parts)
+        )
 
 
 def valid_tag_name(name):
@@ -87,7 +89,7 @@ def valid_tag_name(name):
 def compile(text):
     parts, position = [], 0
     for match in PLACEHOLDER.finditer(text):
-        parts += [text[position:match.start()], match[1]]
+        parts += [text[position : match.start()], match[1]]
         position = match.end()
     parts.append(text[position:])
     texts, names = parts[0::2], parts[1::2]
@@ -106,13 +108,18 @@ def compile(text):
     for index in range(1, len(names)):
         before, between = names[index - 1], texts[index]
         if before not in FIXED_WIDTH and (not between or between[0].isdigit()):
-            raise TemplateError(f"{{{before}}}{between}{{{names[index]}}} cannot be told apart"
-                                f" - follow {{{before}}} with a non-digit")
+            raise TemplateError(
+                f"{{{before}}}{between}{{{names[index]}}} cannot be told apart - follow {{{before}}} with a non-digit"
+            )
     # Placeholder values are digits and hex letters: a stand-in digit checks the text around them.
     if not valid_tag_name("".join(part if index % 2 == 0 else "0" for index, part in enumerate(parts))):
         raise TemplateError(f"{text!r} is not a valid tag name")
-    regex = "".join(re.escape(part) if index % 2 == 0
-                    else f"(?P<{part}>{PLACEHOLDERS[part][0]})" if part in SEMVER
-                    else f"(?:{PLACEHOLDERS[part][0]})"
-                    for index, part in enumerate(parts))
+    regex = "".join(
+        re.escape(part)
+        if index % 2 == 0
+        else f"(?P<{part}>{PLACEHOLDERS[part][0]})"
+        if part in SEMVER
+        else f"(?:{PLACEHOLDERS[part][0]})"
+        for index, part in enumerate(parts)
+    )
     return Template(text, tuple(parts), re.compile(regex))

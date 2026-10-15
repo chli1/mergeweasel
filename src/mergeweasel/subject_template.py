@@ -2,6 +2,7 @@
 
 Placeholders and rules: docs/configuration.md, "The subject".
 """
+
 import dataclasses
 import re
 
@@ -65,16 +66,25 @@ class Template:
         if match is None:
             return None
         values = match.groupdict()
-        return Parts(values.get("type"), values.get("scope"), bool(values.get("breaking")), values["description"],
-                     issue=values.get("issue"), pull=values.get("pull"), pull_or_issue=values.get("pull_or_issue"),
-                     key=values.get("key"), template=self)
+        return Parts(
+            values.get("type"),
+            values.get("scope"),
+            bool(values.get("breaking")),
+            values["description"],
+            issue=values.get("issue"),
+            pull=values.get("pull"),
+            pull_or_issue=values.get("pull_or_issue"),
+            key=values.get("key"),
+            template=self,
+        )
 
     def render(self, parts):
         rendered = []
         for index, part in enumerate(self.parts):
             if index % 2 == 1:
-                rendered.append((f"{parts.scope}:" if parts.scope else "") if part == CONVENTIONAL
-                                else getattr(parts, part))
+                rendered.append(
+                    (f"{parts.scope}:" if parts.scope else "") if part == CONVENTIONAL else getattr(parts, part)
+                )
             elif index and self.parts[index - 1] == CONVENTIONAL and not parts.scope:
                 # Without a scope {conventional} leaves nothing, and takes the space after it along.
                 rendered.append(part[1:])
@@ -89,7 +99,7 @@ class Template:
 def compile(text):
     parts, position = [], 0
     for match in PLACEHOLDER.finditer(text):
-        parts += [text[position:match.start()], match[1]]
+        parts += [text[position : match.start()], match[1]]
         position = match.end()
     parts.append(text[position:])
     texts, names = parts[0::2], parts[1::2]
@@ -111,8 +121,9 @@ def compile(text):
         raise TemplateError("{conventional} must be followed by a space")
     for index in range(1, len(names)):
         if not texts[index]:
-            raise TemplateError(f"{{{names[index - 1]}}}{{{names[index]}}} cannot be told apart"
-                                " - put text between them")
+            raise TemplateError(
+                f"{{{names[index - 1]}}}{{{names[index]}}} cannot be told apart - put text between them"
+            )
     if text != text.strip():
         raise TemplateError("must not start or end with whitespace")
     regex = "".join(re.escape(part) if index % 2 == 0 else PLACEHOLDERS[part][0] for index, part in enumerate(parts))

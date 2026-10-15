@@ -1,4 +1,5 @@
 """What mergeweasel-queue.yml hands a pass: the image, the environment and the command."""
+
 import dataclasses
 import pathlib
 import re
@@ -57,5 +58,6 @@ def parse(text, name=QUEUE_WORKFLOW.name):
     if len(steps) != 1:
         raise ValueError(f"{name}: expected one step with if: {PASS_STEP_CONDITION}, found {len(steps)}")
     step = steps[0]
-    return QueueWorkflow(job["container"]["image"], {**job.get("env", {}), **step.get("env", {})},
-                         shlex.split(step["run"]))
+    return QueueWorkflow(
+        job["container"]["image"], {**job.get("env", {}), **step.get("env", {})}, shlex.split(step["run"])
+    )

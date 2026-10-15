@@ -3,6 +3,7 @@
 The commit types since the previous release - the nearest tag in main's history of the template's shape - decide
 whether to release; the template in mergeweasel.toml names the release. How and why: docs/design.md, "Releases".
 """
+
 import dataclasses
 import datetime
 import itertools
@@ -35,8 +36,12 @@ def kind(commit_type, minor_types, patch_types):
     return None
 
 
-def change(message, rules=commit_rule.DEFAULT_COMMIT_RULES, minor_types=config.DEFAULT_MINOR_TYPES,
-           patch_types=config.DEFAULT_PATCH_TYPES):
+def change(
+    message,
+    rules=commit_rule.DEFAULT_COMMIT_RULES,
+    minor_types=config.DEFAULT_MINOR_TYPES,
+    patch_types=config.DEFAULT_PATCH_TYPES,
+):
     subject, _, rest = message.partition("\n")
     if commit_rule.REVERT.match(subject):
         # git's own revert subject counts as the type revert.
@@ -99,11 +104,11 @@ def run(gitea, dry_run, base_branch, now=None):
     Never raises: a failed release must not hold up the queue, the job fails at its end.
     """
     try:
-        return _release(gitea, dry_run, base_branch, now or datetime.datetime.now(datetime.timezone.utc))
+        return _release(gitea, dry_run, base_branch, now or datetime.datetime.now(datetime.UTC))
     except (ApiError, config.ConfigError) as error:
         print(f"release failed: {error}", file=sys.stderr)
         return False
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001
         # A bug: without its traceback it shows as one line like 'object'.
         traceback.print_exc()
         print(f"release failed: {error!r}", file=sys.stderr)
@@ -112,8 +117,11 @@ def run(gitea, dry_run, base_branch, now=None):
 
 def release_tags(gitea, template):
     """Tag name -> commit sha of every tag of the template's shape."""
-    return {ref.name: gitea.tag_commit(ref.sha) if ref.annotated else ref.sha
-            for ref in gitea.tag_refs() if template.matches(ref.name)}
+    return {
+        ref.name: gitea.tag_commit(ref.sha) if ref.annotated else ref.sha
+        for ref in gitea.tag_refs()
+        if template.matches(ref.name)
+    }
 
 
 def _release(gitea, dry_run, base_branch, now):
@@ -123,8 +131,10 @@ def _release(gitea, dry_run, base_branch, now):
         return True
     # The forms only: a scope, project or type the lists no longer name is still read as it landed;
     # the release lists decide whether it releases.
-    template, rules = configuration.tag, dataclasses.replace(configuration.commits, scopes=None, projects=None,
-                                                              types=None)
+    template, rules = (
+        configuration.tag,
+        dataclasses.replace(configuration.commits, scopes=None, projects=None, types=None),
+    )
     tags = release_tags(gitea, template)
     if not tags and template.semver:
         print(f"release: no tag matching {template.text} to bump from, nothing released")
@@ -156,11 +166,20 @@ def _release(gitea, dry_run, base_branch, now):
         if outside_the_rule(commit.message, rules):
             subject = commit.message.partition("\n")[0]
             print(f"release: {commit.sha[:7]} is outside the subject rule and releases nothing: {subject!r}")
-    changes = [item for item in (change(commit.message, rules, configuration.minor_types, configuration.patch_types)
-                                 for commit in reversed(since)) if item]
+    changes = [
+        item
+        for item in (
+            change(commit.message, rules, configuration.minor_types, configuration.patch_types)
+            for commit in reversed(since)
+        )
+        if item
+    ]
     if not changes:
-        print(f"release: nothing to release since {base}" if base
-              else f"release: nothing to release on {head[:7]}, the first {template.text} release waits for a releasing commit")
+        print(
+            f"release: nothing to release since {base}"
+            if base
+            else f"release: nothing to release on {head[:7]}, the first {template.text} release waits for a releasing commit"
+        )
         return True
     version = next_version(template.version(base), changes) if template.semver else None
     count = gitea.commit_count(head) if template.uses_count else None

@@ -1,11 +1,11 @@
 """The forges the Docker layers run against: each forge's own behaviour, in its own class."""
+
 import abc
 import os
 import pathlib
 import re
 
 import pytest
-
 import workflow
 
 # Picks the forge; Gitea when unset.
@@ -14,7 +14,7 @@ FORGE_VARIABLE = "MERGEWEASEL_E2E_FORGE"
 # after the previous run at the earliest; with the schedule checker forgejo.Dockerfile sets, every 5 s
 # plus that.
 TEST_CRON = '- cron: "@every 5s"'
-CRON = re.compile(r'^(\s*)- cron: .*$', re.M)
+CRON = re.compile(r"^(\s*)- cron: .*$", re.MULTILINE)
 
 
 class Forge(abc.ABC):

@@ -1,8 +1,8 @@
 """Reading mergeweasel-queue.yml: what it hands a pass. No Gitea needed."""
-import pytest
-import yaml
 
+import pytest
 import workflow
+import yaml
 
 CONTEXTS = {"vars": {"LABEL": "merge-me"}, "secrets": {"TOKEN": "t0ken"}}
 
@@ -52,7 +52,7 @@ def test_the_repositorys_own_workflow_is_readable():
 
 @pytest.mark.parametrize("value", ["${{ vars.LABEL || 'automerge' }}", "x-${{ vars.LABEL }}", "${{ github.ref }}"])
 def test_an_expression_the_test_cannot_evaluate_fails(tmp_path, value):
-    queue = workflow.read(write(tmp_path, f"{{ A: \"{value}\" }}", "{}"))
+    queue = workflow.read(write(tmp_path, f'{{ A: "{value}" }}', "{}"))
 
     with pytest.raises(ValueError, match="A"):
         queue.resolve(CONTEXTS)

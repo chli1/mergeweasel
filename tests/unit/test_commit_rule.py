@@ -2,10 +2,17 @@ import dataclasses
 
 import pytest
 
-from mergeweasel import commit_rule as commit_message
 from mergeweasel import commit_rule, subject_template
-from mergeweasel.commit_rule import (Commit, check_reference, check_subject, commit_problems, commit_section,
-                                     referenced_issues, squash_message)
+from mergeweasel import commit_rule as commit_message
+from mergeweasel.commit_rule import (
+    Commit,
+    check_reference,
+    check_subject,
+    commit_problems,
+    commit_section,
+    referenced_issues,
+    squash_message,
+)
 from mergeweasel.subject_template import Parts
 
 ISSUES = {99, 209}
@@ -19,11 +26,14 @@ def rules(subject=None, **changes):
 
 
 # mergeweasel's own forms: an issue, or this pull request in its own words; nothing appended.
-ISSUE_OR_PULL = rules(["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"],
-                      append_pull_reference=False)
+ISSUE_OR_PULL = rules(
+    ["{conventional} {description} (#{issue})", "{conventional} {description} (PR #{pull})"],
+    append_pull_reference=False,
+)
 
 
 # --- subject and reference ---
+
 
 def test_accepts_every_type_without_a_scope():
     for commit_type in commit_message.TYPES:
@@ -39,13 +49,15 @@ def test_configured_scopes_reject_any_other():
     domain_ui = rules(scopes=("domain", "ui"))
     assert check_subject("feat(ui): add dark mode (#99)", domain_ui) is None
     assert check_subject("feat(domian): add dark mode (#99)", domain_ui) == (
-        "unknown scope 'domian', expected one of: domain, ui")
+        "unknown scope 'domian', expected one of: domain, ui"
+    )
     assert check_subject("feat: add dark mode (#99)", domain_ui) is None
 
 
 def test_no_configured_scope_rejects_every_scope():
     assert check_subject("feat(ui): add dark mode (#99)", rules(scopes=())) == (
-        "unknown scope 'ui', this repository allows no scope")
+        "unknown scope 'ui', this repository allows no scope"
+    )
     assert check_subject("feat: add dark mode (#99)", rules(scopes=())) is None
 
 
@@ -70,7 +82,8 @@ def test_configured_scopes_reach_titles_and_commits():
     assert message.problems == ("PR title: unknown scope 'domian', expected one of: domain",)
     commits = [Commit("a" * 40, "feat(domian): x (#99)", 1)]
     assert commit_problems(commits, ISSUES, 1, rules(scopes=("domain",))) == [
-        "aaaaaaa: unknown scope 'domian', expected one of: domain"]
+        "aaaaaaa: unknown scope 'domian', expected one of: domain"
+    ]
 
 
 def test_accepts_a_breaking_marker_with_and_without_a_scope():
@@ -155,8 +168,15 @@ def test_reference_reports_the_format_before_the_reference():
 
 
 def test_referenced_issues_are_the_distinct_issue_references():
-    subjects = ["ci: one (#99)", "ci: two (#99)", "ci: three (PR #101)", "wip #5", 'Revert "ci: x (#7)"',
-                "fixup! ci: y (#8)", " fix: four (#209) "]
+    subjects = [
+        "ci: one (#99)",
+        "ci: two (#99)",
+        "ci: three (PR #101)",
+        "wip #5",
+        'Revert "ci: x (#7)"',
+        "fixup! ci: y (#8)",
+        " fix: four (#209) ",
+    ]
     assert referenced_issues(subjects, ISSUE_OR_PULL) == {99, 209}
 
 
@@ -166,14 +186,20 @@ def test_reference_lets_exempt_subjects_pass():
 
 # --- keep-commits: every commit ---
 
+
 def test_commit_problems_accepts_conforming_commits():
-    assert commit_problems([Commit("a" * 40, "ci: one (#99)", 1), Commit("b" * 40, "ci: two (#209)", 1)], ISSUES, 213,
-                           ISSUE_OR_PULL) == []
+    assert (
+        commit_problems(
+            [Commit("a" * 40, "ci: one (#99)", 1), Commit("b" * 40, "ci: two (#209)", 1)], ISSUES, 213, ISSUE_OR_PULL
+        )
+        == []
+    )
 
 
 def test_commit_problems_names_each_bad_commit():
-    problems = commit_problems([Commit("a" * 40, "wip", 1), Commit("b" * 40, "ci: x (#4711)", 1)], ISSUES, 213,
-                               ISSUE_OR_PULL)
+    problems = commit_problems(
+        [Commit("a" * 40, "wip", 1), Commit("b" * 40, "ci: x (#4711)", 1)], ISSUES, 213, ISSUE_OR_PULL
+    )
     assert len(problems) == 2
     assert problems[0].startswith("aaaaaaa: ") and "subject must read" in problems[0]
     assert problems[1].startswith("bbbbbbb: ") and "not an issue" in problems[1]
@@ -185,6 +211,7 @@ def test_commit_problems_rejects_a_merge_commit_whatever_its_subject():
 
 
 # --- the ## Commit section ---
+
 
 def test_section_is_the_text_up_to_the_next_level_two_heading():
     body = "Closes #209\n\n## Commit\n\nFirst line.\nSecond line.\n\n## Test plan\n\n- ran it\n"
@@ -235,7 +262,7 @@ def test_two_sections_are_rejected():
 
 def test_a_line_over_72_characters_is_rejected():
     long_line = "word " * 15
-    section, problems = commit_section(f"## Commit\nShort.\n{long_line.strip()}")
+    _section, problems = commit_section(f"## Commit\nShort.\n{long_line.strip()}")
     assert problems == [f"'## Commit' line 2 is {len(long_line.strip())} characters, wrap at 72"]
 
 
@@ -256,12 +283,14 @@ def test_the_squash_message_holds_the_body_to_the_rules_line_limit():
     body = f"## Commit\n{LINE_OF_84}"
     assert squash_message("feat: add a (#99)", body, ISSUES, 1, rules(max_line=100)).problems == ()
     assert squash_message("feat: add a (#99)", body, ISSUES, 1).problems == (
-        "'## Commit' line 1 is 84 characters, wrap at 72",)
+        "'## Commit' line 1 is 84 characters, wrap at 72",
+    )
 
 
 def test_attribution_lines_are_rejected():
-    section, problems = commit_section(
-        "## Commit\nBody.\n\nCo-authored-by: Someone <a@b>\n🤖 Generated with [Claude Code](https://claude.com)")
+    _section, problems = commit_section(
+        "## Commit\nBody.\n\nCo-authored-by: Someone <a@b>\n🤖 Generated with [Claude Code](https://claude.com)"
+    )
     assert problems == [
         "'## Commit' line 3 is an attribution line: 'Co-authored-by: Someone <a@b>'",
         "'## Commit' line 4 is an attribution line: '🤖 Generated with [Claude Code](https://claude.com)'",
@@ -273,6 +302,7 @@ def test_generated_with_inside_a_sentence_is_fine():
 
 
 # --- the squash message ---
+
 
 def test_squash_message_takes_title_and_section():
     message = squash_message("ci: squash by default", "## Commit\nWhy.", ISSUES, 213)
@@ -296,6 +326,7 @@ def test_squash_message_resolves_the_pr_fallback_against_this_pr():
 
 # --- final review fixes ---
 
+
 def test_a_fenced_code_block_does_not_end_the_section():
     body = "## Commit\nRun:\n```\n# reset the db\nrm x\n```\nAfter.\n## Notes\nno"
     assert commit_section(body) == ("Run:\n```\n# reset the db\nrm x\n```\nAfter.", [])
@@ -307,7 +338,7 @@ def test_a_heading_inside_a_fence_is_not_a_second_section():
 
 
 def test_an_unterminated_html_comment_is_rejected():
-    section, problems = commit_section("## Commit\nA <!-- note\nline two")
+    _section, problems = commit_section("## Commit\nA <!-- note\nline two")
     assert problems == ["the PR body has an unterminated HTML comment ('<!--' without '-->')"]
 
 
@@ -318,12 +349,14 @@ def test_a_title_may_not_use_the_commit_exemptions():
 
 def test_parse_subject_returns_its_parts():
     assert commit_message.parse_subject("feat(cli)!: drop the old flag (#8)") == Parts(
-        "feat", "cli", True, "drop the old flag", pull="8")
+        "feat", "cli", True, "drop the old flag", pull="8"
+    )
     assert commit_message.parse_subject("fix: retry on 409") == Parts("fix", None, False, "retry on 409")
 
 
-@pytest.mark.parametrize("subject", ["wip", "feat(): x (#1)", "feature: x (#1)", 'Revert "feat: x (#1)"',
-                                     "fixup! feat: x (#1)"])
+@pytest.mark.parametrize(
+    "subject", ["wip", "feat(): x (#1)", "feature: x (#1)", 'Revert "feat: x (#1)"', "fixup! feat: x (#1)"]
+)
 def test_parse_subject_rejects_what_the_rule_rejects_or_exempts(subject):
     assert commit_message.parse_subject(subject) is None
 
@@ -340,13 +373,15 @@ KEYS = rules(subject=["[{key}] {conventional} {description}", "{conventional} {d
 def test_the_no_match_message_lists_the_default_forms():
     assert check_subject("add dark mode") == (
         "subject must read '<type>[(<scope>)][!]: <description> (#<pr>)' or "
-        "'<type>[(<scope>)][!]: <description>', got: 'add dark mode'")
+        "'<type>[(<scope>)][!]: <description>', got: 'add dark mode'"
+    )
 
 
 def test_the_no_match_message_lists_the_configured_forms():
     assert check_subject("feat: add x (#1)", KEYS) == (
         "subject must read '[<key>] <type>[(<scope>)][!]: <description>' or "
-        "'<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'feat: add x (#1)'")
+        "'<type>[(<scope>)][!]: <description> (PR #<pr>)', got: 'feat: add x (#1)'"
+    )
 
 
 def test_a_key_template_accepts_any_project_without_a_list():
@@ -356,7 +391,10 @@ def test_a_key_template_accepts_any_project_without_a_list():
 def test_configured_projects_reject_any_other():
     projects = dataclasses.replace(KEYS, projects=("PROJ", "OPS"))
     assert check_subject("[OPS-4] fix: repair", projects) is None
-    assert check_subject("[PORJ-4] fix: repair", projects) == "unknown project 'PORJ' in PORJ-4, expected one of: PROJ, OPS"
+    assert (
+        check_subject("[PORJ-4] fix: repair", projects)
+        == "unknown project 'PORJ' in PORJ-4, expected one of: PROJ, OPS"
+    )
 
 
 def test_the_first_matching_template_decides():
@@ -395,8 +433,10 @@ def test_pull_or_issue_takes_the_pull_request_or_an_issue(subject):
 
 
 def test_pull_or_issue_rejects_anything_else():
-    assert (check_reference("feat: x (#4711)", {12}, 80, EITHER)
-            == "#4711 is neither this pull request nor an issue of this repository")
+    assert (
+        check_reference("feat: x (#4711)", {12}, 80, EITHER)
+        == "#4711 is neither this pull request nor an issue of this repository"
+    )
 
 
 def test_pull_or_issue_numbers_are_looked_up():
@@ -408,12 +448,15 @@ def test_pull_or_issue_numbers_are_looked_up():
 APPEND = rules(["{conventional} {description} (#{pull})"], append_pull_reference=True)
 
 
-@pytest.mark.parametrize("title, subject", [
-    ("feat: x", "feat: x (#80)"),
-    ("  feat: x  ", "feat: x (#80)"),
-    ("feat: x (#80)", "feat: x (#80)"),
-    ("feat: x (#79)", "feat: x (#79) (#80)"),
-])
+@pytest.mark.parametrize(
+    "title, subject",
+    [
+        ("feat: x", "feat: x (#80)"),
+        ("  feat: x  ", "feat: x (#80)"),
+        ("feat: x (#80)", "feat: x (#80)"),
+        ("feat: x (#79)", "feat: x (#79) (#80)"),
+    ],
+)
 def test_the_pull_reference_is_appended_once(title, subject):
     assert commit_rule.squash_subject(title, 80, APPEND) == subject
 

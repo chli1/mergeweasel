@@ -3,6 +3,7 @@
 Never from the repository's files: its commits must work unchanged on another instance, with other
 labels, accounts and default branch.
 """
+
 import dataclasses
 
 # Settings field -> the environment variable the workflow fills from the Actions variable.
@@ -45,8 +46,12 @@ class Settings:
 def read(gitea, environ):
     """An empty or unset variable keeps its default."""
     values = {field: environ.get(variable, "").strip() for field, variable in VARIABLES.items()}
-    settings = Settings(gitea.default_branch(), **{field: value for field, value in values.items() if value},
-                        keep_commits_required=bool(values["keep_commits"]), prio_required=bool(values["prio"]))
+    settings = Settings(
+        gitea.default_branch(),
+        **{field: value for field, value in values.items() if value},
+        keep_commits_required=bool(values["keep_commits"]),
+        prio_required=bool(values["prio"]),
+    )
     if len(set(settings.labels())) < len(settings.labels()):
         raise SettingsError(f"the label variables must name four different labels, not {', '.join(settings.labels())}")
     return settings

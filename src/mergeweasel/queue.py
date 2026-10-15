@@ -4,6 +4,7 @@ Each pass reads the current state, takes at most one step on one candidate and e
 flagged `needs-fix` hands over to the next one within the same pass. How and why: docs/design.md.
 The labels, the base branch and the Renovate account are the instance's names, from settings.
 """
+
 import dataclasses
 import fnmatch
 import re
@@ -26,10 +27,14 @@ CONFLICT_HINT = "Rebase onto `{base_branch}` and resolve the conflict, then remo
 REFUSED_HINT = "Fix the cause, then remove `{needs_fix}` to queue it again."
 MESSAGE_HINT = "Fix the PR title or its `## Commit` section, then remove `{needs_fix}` to queue it again."
 CONFIG_HINT = f"Fix `{config.CONFIG_FILE}` on the branch, then remove `{{needs_fix}}` to queue it again."
-COMMITS_HINT = "Reword the commits, or drop `{keep_commits}` to squash them, then remove `{needs_fix}` to queue it again."
+COMMITS_HINT = (
+    "Reword the commits, or drop `{keep_commits}` to squash them, then remove `{needs_fix}` to queue it again."
+)
 SHORTFALL_HINT = "Approve it again, then remove `{needs_fix}` to queue it again."
-RENOVATE_APPROVAL = ("Approves {renovate}'s update: posted, pushed and labelled `{automerge}` "
-                     "by {renovate}, rebased only by the merge queue.")
+RENOVATE_APPROVAL = (
+    "Approves {renovate}'s update: posted, pushed and labelled `{automerge}` "
+    "by {renovate}, rebased only by the merge queue."
+)
 
 
 def text(template, settings):
@@ -96,6 +101,7 @@ class FlagNeedsFix:
 @dataclasses.dataclass(frozen=True)
 class Restored:
     """An approval the rebase dismissed and the carry-over lists, restored by an approver account."""
+
     # A login, or DRY_RUN_APPROVER in a dry run.
     approver: object
     reviewer: str
@@ -107,6 +113,7 @@ class Restored:
 @dataclasses.dataclass(frozen=True)
 class RenovateApproval:
     """An approval a trusted Renovate pull request is missing; no reviewer gave it."""
+
     # A login, or DRY_RUN_APPROVER in a dry run.
     approver: object
 
@@ -127,6 +134,7 @@ class Merge:
 @dataclasses.dataclass(frozen=True)
 class Land:
     """A Merge whose message and config were validated: what execute() merges."""
+
     merge: Merge
     # The squash message, None to fast-forward.
     message: object
@@ -172,8 +180,13 @@ def standing(pull):
 def queued(pull, needed, approvers, settings):
     """Without approver accounts, Renovate's update is approved by hand."""
     renovate_approvable = pull.renovate_trusted and approvers.any()
-    return (settings.automerge in pull.labels and settings.needs_fix not in pull.labels and not pull.draft
-            and not pull.rejected and (renovate_approvable or len(standing(pull)) >= needed))
+    return (
+        settings.automerge in pull.labels
+        and settings.needs_fix not in pull.labels
+        and not pull.draft
+        and not pull.rejected
+        and (renovate_approvable or len(standing(pull)) >= needed)
+    )
 
 
 def carried_forward(pull, approvers):
@@ -182,8 +195,9 @@ def carried_forward(pull, approvers):
     On a head that has a carry-over, the approver accounts' approvals are its restorations.
     """
     restored = set(approvers.logins()) if pull.carried else set()
-    return pull.carried + tuple(login for login in pull.approvers
-                                if login not in pull.carried and login not in restored)
+    return pull.carried + tuple(
+        login for login in pull.approvers if login not in pull.carried and login not in restored
+    )
 
 
 def restorations(pull, needed, approvers):
@@ -198,17 +212,22 @@ def restorations(pull, needed, approvers):
     if assigned is None:
         return None
     reviewers = [login for login in pull.carried if login not in pull.approvers][:missing]
-    restored = tuple(Restored(approver, reviewer) for approver, reviewer in zip(assigned, reviewers))
+    restored = tuple(Restored(approver, reviewer) for approver, reviewer in zip(assigned, reviewers, strict=False))
     if not pull.renovate_trusted:
         return restored
-    return restored + tuple(RenovateApproval(approver) for approver in assigned[len(reviewers):])
+    return restored + tuple(RenovateApproval(approver) for approver in assigned[len(reviewers) :])
 
 
 def failure_comment(pull, required, settings):
-    failed = [status for context, status in sorted(pull.statuses.items())
-              if status.state in FAILED and (not required or is_required(context, required))]
+    failed = [
+        status
+        for context, status in sorted(pull.statuses.items())
+        if status.state in FAILED and (not required or is_required(context, required))
+    ]
     lines = [f"- `{status.context}`: {status.state} - {status.target_url}" for status in failed]
-    return "\n".join([f"mergeweasel: required checks failed on {pull.head_sha[:7]}:", *lines, "", text(RED_HINT, settings)])
+    return "\n".join(
+        [f"mergeweasel: required checks failed on {pull.head_sha[:7]}:", *lines, "", text(RED_HINT, settings)]
+    )
 
 
 def conflict_comment(settings):
@@ -225,8 +244,14 @@ def shortfall_comment(settings):
 
 def invalid_message_comment(problems, keep_commits, settings):
     lines = [f"- {problem}" for problem in problems]
-    return "\n".join([f"mergeweasel: what this pull request would land on `{settings.base_branch}` is invalid:",
-                      *lines, "", text(COMMITS_HINT if keep_commits else MESSAGE_HINT, settings)])
+    return "\n".join(
+        [
+            f"mergeweasel: what this pull request would land on `{settings.base_branch}` is invalid:",
+            *lines,
+            "",
+            text(COMMITS_HINT if keep_commits else MESSAGE_HINT, settings),
+        ]
+    )
 
 
 def invalid_config_comment(error, settings):
@@ -239,8 +264,10 @@ def carry_over_description(reviewers, head_sha):
 
 def decide(pulls, required, needed, approvers, settings):
     # prio first, then up to date - the one in flight stays in place - then the lowest number.
-    candidates = sorted((pull for pull in pulls if queued(pull, needed, approvers, settings)),
-                        key=lambda pull: (settings.prio not in pull.labels, pull.behind, pull.number))
+    candidates = sorted(
+        (pull for pull in pulls if queued(pull, needed, approvers, settings)),
+        key=lambda pull: (settings.prio not in pull.labels, pull.behind, pull.number),
+    )
     if not candidates:
         return Idle()
     pull = candidates[0]
@@ -263,8 +290,13 @@ def decide(pulls, required, needed, approvers, settings):
 def valid_approvers(reviews):
     logins = []
     for review in reviews:
-        if (review.state == "APPROVED" and review.official and not review.dismissed
-                and not review.stale and review.login not in logins):
+        if (
+            review.state == "APPROVED"
+            and review.official
+            and not review.dismissed
+            and not review.stale
+            and review.login not in logins
+        ):
             logins.append(review.login)
     return tuple(logins)
 
@@ -279,8 +311,11 @@ def rejected(reviews):
 
 def head_approvers(reviews, head_sha):
     """Official or not: an approval the whitelist ignores must not be repeated every pass."""
-    return frozenset(review.login for review in reviews
-                     if review.state == "APPROVED" and not review.dismissed and review.commit_id == head_sha)
+    return frozenset(
+        review.login
+        for review in reviews
+        if review.state == "APPROVED" and not review.dismissed and review.commit_id == head_sha
+    )
 
 
 def renovate_pushed_since_needs_fix(timeline, settings):
@@ -325,9 +360,11 @@ def carried_reviewers(statuses, merger):
 
 def statuses_by_context(statuses, server):
     """The queue's own statuses never count towards its verdict: the carry-over and its own job runs."""
-    return {status.context: Status(status.context, status.state, absolute(server, status.target_url))
-            for status in statuses
-            if status.context != CARRY_OVER_CONTEXT and not status.context.startswith(f"{QUEUE_WORKFLOW} / ")}
+    return {
+        status.context: Status(status.context, status.state, absolute(server, status.target_url))
+        for status in statuses
+        if status.context != CARRY_OVER_CONTEXT and not status.context.startswith(f"{QUEUE_WORKFLOW} / ")
+    }
 
 
 def absolute(server, url):
@@ -370,14 +407,24 @@ def read_state(gitea, server, merger, settings):
         reviews = gitea.reviews(number)
         flagged = settings.needs_fix in pull_request.labels
         timeline = gitea.timeline(number) if flagged or (settings.renovate and poster == settings.renovate) else []
-        pulls.append(Pull(
-            number=number, head_ref=pull_request.head_ref, head_sha=head_sha, labels=frozenset(pull_request.labels),
-            draft=pull_request.draft, behind=gitea.is_behind(head_sha, branch.sha), poster=poster,
-            approvers=valid_approvers(reviews), carried=carried_reviewers(statuses, merger),
-            rejected=rejected(reviews), approved_head=head_approvers(reviews, head_sha),
-            renovate_retried=flagged and renovate_pushed_since_needs_fix(timeline, settings),
-            renovate_trusted=renovate_trusted(poster, timeline, merger, settings),
-            statuses=statuses_by_context(statuses, server)))
+        pulls.append(
+            Pull(
+                number=number,
+                head_ref=pull_request.head_ref,
+                head_sha=head_sha,
+                labels=frozenset(pull_request.labels),
+                draft=pull_request.draft,
+                behind=gitea.is_behind(head_sha, branch.sha),
+                poster=poster,
+                approvers=valid_approvers(reviews),
+                carried=carried_reviewers(statuses, merger),
+                rejected=rejected(reviews),
+                approved_head=head_approvers(reviews, head_sha),
+                renovate_retried=flagged and renovate_pushed_since_needs_fix(timeline, settings),
+                renovate_trusted=renovate_trusted(poster, timeline, merger, settings),
+                statuses=statuses_by_context(statuses, server),
+            )
+        )
     return State(branch.sha, branch.required_contexts, branch.required_approvals, pulls, label_ids)
 
 
@@ -389,8 +436,11 @@ def rebase(gitea, action):
     # Retried: once the rebase is pushed, Gitea dismisses the approval, and without the carry-over
     # the pull request would wait unapproved.
     new_head = retried(lambda: gitea.branch_head(action.head_ref))
-    retried(lambda: gitea.set_status(new_head, CARRY_OVER_CONTEXT, "success",
-                                     carry_over_description(action.reviewers, action.head_sha)))
+    retried(
+        lambda: gitea.set_status(
+            new_head, CARRY_OVER_CONTEXT, "success", carry_over_description(action.reviewers, action.head_sha)
+        )
+    )
 
 
 def merge_message(gitea, action):
@@ -486,8 +536,10 @@ def run_pass(gitea, server, dry_run, merger, approvers, settings):
             gitea.remove_label(retry.number, settings.needs_fix, state.label_ids[retry.number][settings.needs_fix])
         # The removal re-runs mergeweasel-commits, a required check: the statuses read above are
         # stale, so the pull request waits this pass out. That run's completion wakes the queue again.
-        pulls = [dataclasses.replace(pull, statuses={}) if pull.number == retry.number else pull
-                 for pull in relabel(pulls, retry.number, remove=settings.needs_fix)]
+        pulls = [
+            dataclasses.replace(pull, statuses={}) if pull.number == retry.number else pull
+            for pull in relabel(pulls, retry.number, remove=settings.needs_fix)
+        ]
     while True:
         action = validated(gitea, decide(pulls, state.required, state.needed, approvers, settings), settings)
         print(action)

@@ -1,4 +1,5 @@
 """The release step against a real Gitea: the tag, the release and its notes."""
+
 import datetime
 import re
 
@@ -89,7 +90,7 @@ def commit_count(repo, sha):
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 def test_calver_releases_from_the_first_releasing_merge(repo, run_pass):
-    before = datetime.datetime.now(datetime.timezone.utc)
+    before = datetime.datetime.now(datetime.UTC)
     switch_on(repo, CALVER)
     number, first = merge_through_the_queue(repo, run_pass, TITLE)
 
@@ -97,7 +98,7 @@ def test_calver_releases_from_the_first_releasing_merge(repo, run_pass):
 
     name = release_on(repo, first)
     date, count, short = re.fullmatch(r"(\d{4}\.\d+\.\d+)\.(\d+)\+([0-9a-f]{7})", name).groups()
-    assert date in utc_dates(before, datetime.datetime.now(datetime.timezone.utc))
+    assert date in utc_dates(before, datetime.datetime.now(datetime.UTC))
     assert int(count) == commit_count(repo, first) and short == first[:7]
     assert repo.release(name)["body"] == f"## Fixes\n\n- repair a (#{number})\n"
 

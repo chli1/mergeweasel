@@ -3,15 +3,22 @@ from unittest import mock
 
 import pytest
 
-from mergeweasel import cli
+from mergeweasel import api, cli
 from mergeweasel.accounts import Approvers, DryRunApprovers, DryRunMerger, Merger
-from mergeweasel import api
 from mergeweasel.api import ApiError
 from mergeweasel.gitea import Gitea
 from mergeweasel.settings import VARIABLES, Settings
 
-ENVIRONMENT = ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "MERGEWEASEL_MERGER_TOKEN", "MERGEWEASEL_APPROVER_TOKENS",
-               "GITHUB_TOKEN", "GITHUB_RUN_ID", "GITHUB_EVENT_NAME", *VARIABLES.values())
+ENVIRONMENT = (
+    "GITHUB_SERVER_URL",
+    "GITHUB_REPOSITORY",
+    "MERGEWEASEL_MERGER_TOKEN",
+    "MERGEWEASEL_APPROVER_TOKENS",
+    "GITHUB_TOKEN",
+    "GITHUB_RUN_ID",
+    "GITHUB_EVENT_NAME",
+    *VARIABLES.values(),
+)
 SERVER = "https://git.example"
 
 
@@ -50,7 +57,9 @@ class Fake:
 @pytest.fixture
 def fake(monkeypatch):
     """Gitea replaced by one mock per token, the pass by a mock."""
-    fake = Fake({}, {"pat": "weasel-bot", "a-1": "approver-1", "a-2": "approver-2"}, mock.Mock(), mock.Mock(return_value=True))
+    fake = Fake(
+        {}, {"pat": "weasel-bot", "a-1": "approver-1", "a-2": "approver-2"}, mock.Mock(), mock.Mock(return_value=True)
+    )
 
     def factory(server, repository, token):
         client = mock.create_autospec(Gitea, instance=True)
@@ -287,7 +296,9 @@ def test_a_malformed_token_is_not_printed(env, fake, capsys):
 def test_pass_releases_before_it_runs(env, fake):
     env.setenv("MERGEWEASEL_MERGER_TOKEN", "pat")
     order = []
-    fake.release.side_effect = lambda gitea, dry_run, base_branch: order.append(("release", dry_run, base_branch)) or True
+    fake.release.side_effect = lambda gitea, dry_run, base_branch: (
+        order.append(("release", dry_run, base_branch)) or True
+    )
     fake.run_pass.side_effect = lambda *args: order.append(("pass",))
     assert cli.main(["pass"]) == 0
     assert order == [("release", False, "trunk"), ("pass",)]
@@ -316,7 +327,10 @@ def test_pass_prints_and_passes_the_instances_settings(env, fake, capsys):
     fake.labels = ["merge-me", "needs-fix", "keep-commits"]
     assert cli.main(["pass"]) == 0
     assert fake.settings() == Settings("trunk", automerge="merge-me", renovate="deps-bot")
-    assert "settings: base branch trunk; labels merge-me, needs-fix, keep-commits, prio; Renovate account deps-bot" in capsys.readouterr().out
+    assert (
+        "settings: base branch trunk; labels merge-me, needs-fix, keep-commits, prio; Renovate account deps-bot"
+        in capsys.readouterr().out
+    )
 
 
 def test_a_missing_label_fails_the_pass_before_the_release(env, fake, capsys):

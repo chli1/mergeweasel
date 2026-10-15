@@ -1,4 +1,5 @@
 """A job's container reaches the forge and knows its run - what every scenario builds on."""
+
 from actions import settle
 from driver import REQUIRED_CONTEXT, create_repo
 
@@ -24,7 +25,7 @@ jobs:
           urllib.request.urlopen(request)
           EOF
 """
-TRIVIAL = "on: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: \"true\"\n"
+TRIVIAL = 'on: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n'
 
 
 def finished(repo):

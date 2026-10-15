@@ -24,6 +24,11 @@
       "semanticCommitType": "test"
     },
     {
+      "description": "The linter and formatter: CI checks the code with them, neither the image nor the tests use them.",
+      "matchFileNames": ["requirements-lint.txt"],
+      "semanticCommitType": "ci"
+    },
+    {
       "description": "The Gitea the end-to-end test passes against is the one mergeweasel supports: a new major releases, and the notes name it.",
       "matchFileNames": ["tests/support/gitea.Dockerfile"],
       "matchUpdateTypes": ["major"],

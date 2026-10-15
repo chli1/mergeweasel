@@ -1,4 +1,5 @@
 """urlopen replaced by canned answers, for the API clients' unit tests."""
+
 import io
 import json
 import urllib.error

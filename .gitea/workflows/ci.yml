@@ -15,11 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Tests
+      - name: Install
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install --quiet -r requirements-test.txt
-          .venv/bin/python -m pytest
+          .venv/bin/pip install --quiet -r requirements-test.txt -r requirements-lint.txt
+      # Each check runs even after another failed, so one run reports all three.
+      - name: Tests
+        run: .venv/bin/python -m pytest
+      - name: Lint
+        if: success() || failure()
+        run: .venv/bin/ruff check .
+      - name: Format
+        if: success() || failure()
+        run: .venv/bin/ruff format --check .
   image:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

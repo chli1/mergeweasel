@@ -1,4 +1,5 @@
 """mergeweasel.toml: what a repository configures. Keys and defaults: docs/configuration.md."""
+
 import dataclasses
 import re
 import tomllib
@@ -12,9 +13,17 @@ DEFAULT_TAG = "v{major}.{minor}.{patch}"
 DEFAULT_MINOR_TYPES = ("feat",)
 DEFAULT_PATCH_TYPES = ("fix", "perf", "revert")
 # Table -> key -> type.
-SCHEMA = {"release": {"enabled": bool, "tag": str, "minor_types": list, "patch_types": list},
-          "commits": {"scopes": list, "subject": list, "projects": list, "types": list, "max_line": int,
-                      "squash_append_pull_reference": bool}}
+SCHEMA = {
+    "release": {"enabled": bool, "tag": str, "minor_types": list, "patch_types": list},
+    "commits": {
+        "scopes": list,
+        "subject": list,
+        "projects": list,
+        "types": list,
+        "max_line": int,
+        "squash_append_pull_reference": bool,
+    },
+}
 TYPE_NAMES = {bool: "true or false", str: "a string", list: "a list of strings", int: "an integer"}
 # What {conventional} reads as the type.
 TYPE = re.compile(r"[a-z]+")
@@ -97,8 +106,10 @@ def parse(text):
     if scopes is not None:
         for scope in scopes:
             if not isinstance(scope, str) or not SCOPE.fullmatch(scope):
-                raise ConfigError(f"{CONFIG_FILE}: commits.scopes: {scope!r} is not a scope - "
-                                  "it must be a non-empty string without whitespace and ')'")
+                raise ConfigError(
+                    f"{CONFIG_FILE}: commits.scopes: {scope!r} is not a scope - "
+                    "it must be a non-empty string without whitespace and ')'"
+                )
         scopes = tuple(scopes)
     append = commits.get("squash_append_pull_reference", commit_rule.DEFAULT_COMMIT_RULES.append_pull_reference)
     if append:
@@ -109,8 +120,10 @@ def parse(text):
             raise ConfigError(f"{CONFIG_FILE}: commits.projects must not be empty")
         for project in projects:
             if not isinstance(project, str) or not PROJECT.fullmatch(project):
-                raise ConfigError(f"{CONFIG_FILE}: commits.projects: {project!r} is not a project - it must be "
-                                  "an uppercase letter followed by uppercase letters, digits and '_'")
+                raise ConfigError(
+                    f"{CONFIG_FILE}: commits.projects: {project!r} is not a project - it must be "
+                    "an uppercase letter followed by uppercase letters, digits and '_'"
+                )
         if not any("key" in template.names for template in templates):
             raise ConfigError(f"{CONFIG_FILE}: commits.projects needs a commits.subject template with {{key}}")
         projects = tuple(projects)
@@ -150,15 +163,19 @@ def check_conventional(templates, commits, release, enabled):
         return
     if typed:
         free = next(template for template in templates if template not in typed)
-        raise ConfigError(f"{CONFIG_FILE}: commits.subject: {typed[0].text!r} has {{conventional}}, "
-                          f"{free.text!r} does not - either every form has it or none")
+        raise ConfigError(
+            f"{CONFIG_FILE}: commits.subject: {typed[0].text!r} has {{conventional}}, "
+            f"{free.text!r} does not - either every form has it or none"
+        )
     for table, keys in (("commits", commits), ("release", release)):
         for key in TYPE_KEYS[table]:
             if key in keys:
                 raise ConfigError(f"{CONFIG_FILE}: {table}.{key} needs commits.subject templates with {{conventional}}")
     if enabled:
-        raise ConfigError(f"{CONFIG_FILE}: release.enabled needs commits.subject templates with {{conventional}} - "
-                          "the release reads the commit type; add it, or set release.enabled = false")
+        raise ConfigError(
+            f"{CONFIG_FILE}: release.enabled needs commits.subject templates with {{conventional}} - "
+            "the release reads the commit type; add it, or set release.enabled = false"
+        )
 
 
 # A squash subject ends in the appended pull reference; these forms take it, an {issue} form would fail it.
@@ -169,11 +186,16 @@ def check_appendable(templates):
     key = "commits.squash_append_pull_reference"
     for template in templates:
         if template.text.endswith(" (#{issue})"):
-            raise ConfigError(f"{CONFIG_FILE}: commits.subject: {template.text!r} ends like the appended pull "
-                              f"reference - use {{pull_or_issue}}, or set {key} = false")
+            raise ConfigError(
+                f"{CONFIG_FILE}: commits.subject: {template.text!r} ends like the appended pull "
+                f"reference - use {{pull_or_issue}}, or set {key} = false"
+            )
     if not any(template.text.endswith(APPENDED_ENDINGS) for template in templates):
-        raise ConfigError(f"{CONFIG_FILE}: {key} needs a commits.subject form ending in "
-                          + " or ".join(f"'{ending}'" for ending in APPENDED_ENDINGS) + f", or set {key} = false")
+        raise ConfigError(
+            f"{CONFIG_FILE}: {key} needs a commits.subject form ending in "
+            + " or ".join(f"'{ending}'" for ending in APPENDED_ENDINGS)
+            + f", or set {key} = false"
+        )
 
 
 def commit_types(texts):
@@ -205,7 +227,9 @@ def release_types(table, types):
         configured[key] = tuple(table[key])
     both = set(configured.get("minor_types", ())) & set(configured.get("patch_types", ()))
     if both:
-        raise ConfigError(f"{CONFIG_FILE}: release.minor_types and release.patch_types both name {', '.join(sorted(both))}")
+        raise ConfigError(
+            f"{CONFIG_FILE}: release.minor_types and release.patch_types both name {', '.join(sorted(both))}"
+        )
     taken = {entry for entries in configured.values() for entry in entries}
 
     def effective(key, default):

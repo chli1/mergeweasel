@@ -1,4 +1,5 @@
 """The Gitea API client."""
+
 from mergeweasel.api import PAGE_SIZE, Client, WorkflowRun
 
 

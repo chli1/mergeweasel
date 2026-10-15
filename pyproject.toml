@@ -15,6 +15,17 @@ requires-python = ">=3.12"
 [project.scripts]
 mergeweasel = "mergeweasel.cli:main"
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B"]
+# The tests' subprocess calls read the return code themselves, or clean up whatever is left.
+ignore = ["PLW1510"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["mergeweasel.settings.Settings"]
+
 [tool.pytest.ini_options]
 # importlib: tests/unit and tests/integration both have a test_queue.py.
 addopts = "--import-mode=importlib"

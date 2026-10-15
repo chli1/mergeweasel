@@ -6,7 +6,7 @@ import pytest
 from mergeweasel import version_template
 from mergeweasel.version_template import TemplateError
 
-MOMENT = datetime.datetime(2026, 5, 3, 7, 4, tzinfo=datetime.timezone.utc)
+MOMENT = datetime.datetime(2026, 5, 3, 7, 4, tzinfo=datetime.UTC)
 SHA = "abcdef0123456789abcdef0123456789abcdef01"
 DEFAULT = "v{major}.{minor}.{patch}"
 
@@ -43,7 +43,7 @@ def test_padded_date_and_time_fields():
 
 
 def test_year_fields_count_from_2000():
-    early = datetime.datetime(2006, 1, 1, tzinfo=datetime.timezone.utc)
+    early = datetime.datetime(2006, 1, 1, tzinfo=datetime.UTC)
     assert version_template.compile("{YY}.{0Y}").render(now=early) == "6.06"
 
 
@@ -54,44 +54,51 @@ def test_count_and_sha():
     assert template.matches(name) and template.uses_count and not template.semver
 
 
-@pytest.mark.parametrize("template, name", [
-    ("{YY}.{MM}", "26.05"),          # unpadded fields have no leading zero
-    ("{0Y}.{0M}", "26.5"),           # padded ones always two digits
-    ("r{sha}", "rabcdef01"),         # 7 characters exactly
-    ("r{sha}", "rABCDEF0"),          # lower-case hex
-    ("{YYYY}", "26"),
-])
+@pytest.mark.parametrize(
+    "template, name",
+    [
+        ("{YY}.{MM}", "26.05"),  # unpadded fields have no leading zero
+        ("{0Y}.{0M}", "26.5"),  # padded ones always two digits
+        ("r{sha}", "rabcdef01"),  # 7 characters exactly
+        ("r{sha}", "rABCDEF0"),  # lower-case hex
+        ("{YYYY}", "26"),
+    ],
+)
 def test_matching_follows_each_fields_shape(template, name):
     assert not version_template.compile(template).matches(name)
 
 
 def test_every_placeholder_round_trips():
     template = version_template.compile(
-        "v{major}.{minor}.{patch}-{YYYY}.{YY}.{0Y}.{MM}.{0M}.{DD}.{0D}.{HH}.{0H}.{mm}.{0m}.{count}+{sha}")
+        "v{major}.{minor}.{patch}-{YYYY}.{YY}.{0Y}.{MM}.{0M}.{DD}.{0D}.{HH}.{0H}.{mm}.{0m}.{count}+{sha}"
+    )
     name = template.render(version=(2, 0, 11), now=MOMENT, count=7, sha=SHA)
     assert name == "v2.0.11-2026.26.26.5.05.3.03.7.07.4.04.7+abcdef0"
     assert template.version(name) == (2, 0, 11)
 
 
-@pytest.mark.parametrize("text, message", [
-    ("", "at least one placeholder"),
-    ("release", "at least one placeholder"),
-    ("{yy}", "unknown placeholder {yy}"),
-    ("v{major}.{minor}", "all of {major}, {minor}, {patch} or none"),
-    ("v{major}.{minor}.{patch}.{major}", "{major} appears twice"),
-    ("{YY}{MM}", "{YY}{MM} cannot be told apart"),
-    ("v{major}1{minor}.{patch}", "{major}1{minor} cannot be told apart"),
-    ("{count}{0M}", "{count}{0M} cannot be told apart"),
-    ("{count}2.{sha}", "{count}2.{sha} cannot be told apart"),
-    ("v{major", "a { or } outside a placeholder"),
-    ("v}{count}", "a { or } outside a placeholder"),
-    ("v {count}", "not a valid tag name"),
-    ("-{count}", "not a valid tag name"),
-    ("{count}.lock", "not a valid tag name"),
-    ("{count}..{sha}", "not a valid tag name"),
-    ("{count}:{sha}", "not a valid tag name"),
-    ("{count}.", "not a valid tag name"),
-])
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("", "at least one placeholder"),
+        ("release", "at least one placeholder"),
+        ("{yy}", "unknown placeholder {yy}"),
+        ("v{major}.{minor}", "all of {major}, {minor}, {patch} or none"),
+        ("v{major}.{minor}.{patch}.{major}", "{major} appears twice"),
+        ("{YY}{MM}", "{YY}{MM} cannot be told apart"),
+        ("v{major}1{minor}.{patch}", "{major}1{minor} cannot be told apart"),
+        ("{count}{0M}", "{count}{0M} cannot be told apart"),
+        ("{count}2.{sha}", "{count}2.{sha} cannot be told apart"),
+        ("v{major", "a { or } outside a placeholder"),
+        ("v}{count}", "a { or } outside a placeholder"),
+        ("v {count}", "not a valid tag name"),
+        ("-{count}", "not a valid tag name"),
+        ("{count}.lock", "not a valid tag name"),
+        ("{count}..{sha}", "not a valid tag name"),
+        ("{count}:{sha}", "not a valid tag name"),
+        ("{count}.", "not a valid tag name"),
+    ],
+)
 def test_invalid_templates_name_their_fault(text, message):
     with pytest.raises(TemplateError, match=re.escape(message)):
         version_template.compile(text)

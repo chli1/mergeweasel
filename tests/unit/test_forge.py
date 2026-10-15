@@ -1,9 +1,9 @@
 """The forge the Docker layers pick, and what tells the forges apart. No forge needed."""
-import pytest
-import yaml
 
 import forge
+import pytest
 import workflow
+import yaml
 
 
 def test_gitea_by_default(monkeypatch):
@@ -24,7 +24,8 @@ def test_an_unknown_forge_fails(monkeypatch):
 
 def test_gitea_appends_the_co_author_trailer():
     assert forge.FORGES["gitea"].squash_message("feat: a (#1)\n\n- a\n", "x <x@y>") == (
-        "feat: a (#1)\n\n- a\n\nCo-authored-by: x <x@y>\n")
+        "feat: a (#1)\n\n- a\n\nCo-authored-by: x <x@y>\n"
+    )
 
 
 def test_forgejo_appends_nothing():
