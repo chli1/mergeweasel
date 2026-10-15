@@ -5,6 +5,9 @@ labels, accounts and default branch.
 """
 
 import dataclasses
+from collections.abc import Iterable, Mapping
+
+from mergeweasel.api import Client
 
 # Settings field -> the environment variable the workflow fills from the Actions variable.
 VARIABLES = {
@@ -35,15 +38,15 @@ class Settings:
     # True if the prio variable names a label: then it has to exist.
     prio_required: bool = False
 
-    def labels(self):
+    def labels(self) -> tuple[str, str, str, str]:
         return (self.automerge, self.needs_fix, self.keep_commits, self.prio)
 
-    def describe(self):
+    def describe(self) -> str:
         renovate = f"Renovate account {self.renovate}" if self.renovate else "Renovate rule off"
         return f"settings: base branch {self.base_branch}; labels {', '.join(self.labels())}; {renovate}"
 
 
-def read(gitea, environ):
+def read(gitea: Client, environ: Mapping[str, str]) -> Settings:
     """An empty or unset variable keeps its default."""
     values = {field: environ.get(variable, "").strip() for field, variable in VARIABLES.items()}
     settings = Settings(
@@ -57,7 +60,7 @@ def read(gitea, environ):
     return settings
 
 
-def required_labels(settings):
+def required_labels(settings: Settings) -> tuple[str, ...]:
     """The labels that must exist: the queue cannot work without automerge and needs-fix.
 
     keep-commits and prio are optional - without them every pull request is squashed and none goes
@@ -67,7 +70,7 @@ def required_labels(settings):
     return (settings.automerge, settings.needs_fix, *(label for label, required in optional if required))
 
 
-def missing_labels(gitea, required):
+def missing_labels(gitea: Client, required: Iterable[str]) -> list[str] | None:
     """The required labels neither the repository nor its organization has, None if that is unknown.
 
     Unknown: the organization's labels are unreadable - a user's repository, or a token without access.

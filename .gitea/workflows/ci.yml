@@ -19,7 +19,7 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r requirements-test.txt -r requirements-lint.txt
-      # Each check runs even after another failed, so one run reports all three.
+      # Each check runs even after another failed, so one run reports all four.
       - name: Tests
         run: .venv/bin/python -m pytest
       - name: Lint
@@ -28,6 +28,9 @@ jobs:
       - name: Format
         if: success() || failure()
         run: .venv/bin/ruff format --check .
+      - name: Types
+        if: success() || failure()
+        run: .venv/bin/mypy
   image:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

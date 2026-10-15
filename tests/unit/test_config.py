@@ -1,3 +1,4 @@
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -7,7 +8,7 @@ from mergeweasel.api import ApiError, NotAFile
 from mergeweasel.gitea import Gitea
 
 
-def gitea_with(answer):
+def gitea_with(answer: bytes | Exception | None) -> Any:
     """answer: the file's bytes, None for no file, or the exception file() raises."""
     gitea = mock.create_autospec(Gitea, instance=True)
     if isinstance(answer, Exception):
@@ -17,33 +18,33 @@ def gitea_with(answer):
     return gitea
 
 
-def contents(text, encoding="utf-8"):
+def contents(text: str, encoding: str = "utf-8") -> bytes:
     return text.encode(encoding)
 
 
-def test_the_file_is_read_from_a_branch():
+def test_the_file_is_read_from_a_branch() -> None:
     gitea = gitea_with(contents('[release]\ntag = "{YY}.{count}"\n'))
     assert config.load(gitea, "main").tag.text == "{YY}.{count}"
     gitea.file.assert_called_once_with("mergeweasel.toml", "main")
 
 
-def test_the_file_is_read_at_a_given_commit():
+def test_the_file_is_read_at_a_given_commit() -> None:
     gitea = gitea_with(contents(""))
     config.load(gitea, "a" * 40)
     gitea.file.assert_called_once_with("mergeweasel.toml", "a" * 40)
 
 
-def test_without_the_file_everything_is_default():
+def test_without_the_file_everything_is_default() -> None:
     assert config.load(gitea_with(None), "main").tag.text == config.DEFAULT_TAG
 
 
-def test_another_api_error_is_raised():
+def test_another_api_error_is_raised() -> None:
     boom = ApiError("boom", 500, "url")
     with pytest.raises(ApiError):
         config.load(gitea_with(boom), "main")
 
 
-def test_a_byte_order_mark_is_ignored():
+def test_a_byte_order_mark_is_ignored() -> None:
     assert (
         config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n', "utf-8-sig")), "main").tag.text
         == "{YY}.{count}"
@@ -51,11 +52,11 @@ def test_a_byte_order_mark_is_ignored():
 
 
 @pytest.mark.parametrize("text", ["", "# only a comment\n", "[release]\n"])
-def test_missing_keys_take_their_default(text):
+def test_missing_keys_take_their_default(text: str) -> None:
     assert config.parse(text).tag.text == config.DEFAULT_TAG
 
 
-def test_without_scopes_any_scope_passes():
+def test_without_scopes_any_scope_passes() -> None:
     assert config.parse("").commits.scopes is None
 
 
@@ -66,18 +67,18 @@ def test_without_scopes_any_scope_passes():
         ("[commits]\nscopes = []\n", ()),
     ],
 )
-def test_scopes_are_read(text, scopes):
+def test_scopes_are_read(text: str, scopes: tuple[str, ...]) -> None:
     assert config.parse(text).commits.scopes == scopes
 
 
-def test_without_the_keys_the_subject_is_the_default():
+def test_without_the_keys_the_subject_is_the_default() -> None:
     commits = config.parse("").commits
     assert tuple(template.text for template in commits.templates) == commit_rule.DEFAULT_SUBJECT
     assert commits.projects is None
     assert config.parse("") == config.Config(config.parse("").tag, commit_rule.DEFAULT_COMMIT_RULES)
 
 
-def test_the_subject_templates_are_read_in_order():
+def test_the_subject_templates_are_read_in_order() -> None:
     text = (
         '[commits]\nsquash_append_pull_reference = false\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description}"]\n'
         'projects = ["PROJ", "OPS"]\n'
@@ -90,7 +91,7 @@ def test_the_subject_templates_are_read_in_order():
     assert commits.projects == ("PROJ", "OPS")
 
 
-def test_without_the_keys_types_line_limit_and_release_lists_are_the_defaults():
+def test_without_the_keys_types_line_limit_and_release_lists_are_the_defaults() -> None:
     configuration = config.parse("")
     assert configuration.commits.types == commit_rule.TYPES
     assert configuration.commits.max_line == commit_rule.MAX_LINE
@@ -98,7 +99,7 @@ def test_without_the_keys_types_line_limit_and_release_lists_are_the_defaults():
     assert configuration.patch_types == config.DEFAULT_PATCH_TYPES
 
 
-def test_types_line_limit_and_release_lists_are_read():
+def test_types_line_limit_and_release_lists_are_read() -> None:
     configuration = config.parse(
         '[commits]\ntypes = ["feature", "fix", "ci"]\nmax_line = 100\n'
         '[release]\nminor_types = ["feature"]\npatch_types = ["fix"]\n'
@@ -108,7 +109,7 @@ def test_types_line_limit_and_release_lists_are_read():
     assert (configuration.minor_types, configuration.patch_types) == (("feature",), ("fix",))
 
 
-def test_an_empty_release_list_releases_nothing_of_its_kind():
+def test_an_empty_release_list_releases_nothing_of_its_kind() -> None:
     assert config.parse("[release]\nminor_types = []\n").minor_types == ()
 
 
@@ -121,7 +122,9 @@ def test_an_empty_release_list_releases_nothing_of_its_kind():
         ('[release]\npatch_types = ["feat"]\n', (), ("feat",)),
     ],
 )
-def test_a_default_release_list_keeps_only_what_the_file_allows(text, minor, patch):
+def test_a_default_release_list_keeps_only_what_the_file_allows(
+    text: str, minor: tuple[str, ...], patch: tuple[str, ...]
+) -> None:
     configuration = config.parse(text)
     assert (configuration.minor_types, configuration.patch_types) == (minor, patch)
 
@@ -134,11 +137,11 @@ def test_a_default_release_list_keeps_only_what_the_file_allows(text, minor, pat
         ("[release]\nenabled = false\n", False),
     ],
 )
-def test_the_release_switch(text, enabled):
+def test_the_release_switch(text: str, enabled: bool) -> None:
     assert config.parse(text).release_enabled is enabled
 
 
-def test_by_default_the_pull_reference_is_appended():
+def test_by_default_the_pull_reference_is_appended() -> None:
     commits = config.parse("").commits
     assert commits.append_pull_reference is True
     assert [template.text for template in commits.templates] == [
@@ -147,7 +150,7 @@ def test_by_default_the_pull_reference_is_appended():
     ]
 
 
-def test_crlf_line_ends_parse():
+def test_crlf_line_ends_parse() -> None:
     assert config.parse('[release]\r\ntag = "{YY}.{count}"\r\n').tag.text == "{YY}.{count}"
 
 
@@ -160,35 +163,35 @@ def test_crlf_line_ends_parse():
         ('[commits]\nscopse = ["ui"]\n[x]\ny = 1\n', ("commits.scopse", "x")),
     ],
 )
-def test_unknown_keys_are_collected_not_rejected(text, unknown):
+def test_unknown_keys_are_collected_not_rejected(text: str, unknown: tuple[str, ...]) -> None:
     assert config.parse(text).unknown_keys == unknown
 
 
-def test_unknown_keys_keep_the_known_ones():
+def test_unknown_keys_keep_the_known_ones() -> None:
     configuration = config.parse('[release]\ntags = "x"\ntag = "{YY}.{count}"\n')
     assert configuration.tag.text == "{YY}.{count}"
 
 
-def test_load_prints_each_unknown_key(capsys):
+def test_load_prints_each_unknown_key(capsys: pytest.CaptureFixture[str]) -> None:
     config.load(gitea_with(contents('[comits]\n[release]\ntags = "x"\n')), "main")
     assert capsys.readouterr().out == (
         "mergeweasel.toml: unknown key comits ignored\nmergeweasel.toml: unknown key release.tags ignored\n"
     )
 
 
-def test_strict_load_rejects_unknown_keys_naming_each():
+def test_strict_load_rejects_unknown_keys_naming_each() -> None:
     with pytest.raises(config.ConfigError, match=r"^mergeweasel.toml: unknown key comits, release.tags$"):
         config.load(gitea_with(contents('[comits]\n[release]\ntags = "x"\n')), "main", strict=True)
 
 
-def test_strict_load_accepts_a_file_of_known_keys():
+def test_strict_load_accepts_a_file_of_known_keys() -> None:
     assert (
         config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n')), "main", strict=True).tag.text
         == "{YY}.{count}"
     )
 
 
-def test_a_file_without_unknown_keys_prints_nothing(capsys):
+def test_a_file_without_unknown_keys_prints_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     config.load(gitea_with(contents('[release]\ntag = "{YY}.{count}"\n')), "main")
     assert capsys.readouterr().out == ""
 
@@ -205,11 +208,11 @@ FREE = '"{description} (#{pull_or_issue})"'
         (f"[commits]\nsquash_append_pull_reference = true\nsubject = [{PULL}]\n", True),
     ],
 )
-def test_the_append_switch_is_read(text, append):
+def test_the_append_switch_is_read(text: str, append: bool) -> None:
     assert config.parse(text).commits.append_pull_reference is append
 
 
-def test_without_the_append_any_forms_pass():
+def test_without_the_append_any_forms_pass() -> None:
     text = (
         "[commits]\nsquash_append_pull_reference = false\nsubject = ["
         + ISSUE
@@ -218,7 +221,7 @@ def test_without_the_append_any_forms_pass():
     assert config.parse(text).commits.append_pull_reference is False
 
 
-def test_type_free_forms_with_the_release_off():
+def test_type_free_forms_with_the_release_off() -> None:
     commits = config.parse(f'[commits]\nsubject = [{FREE}, "{{description}}"]\n[release]\nenabled = false\n').commits
     assert [template.text for template in commits.templates] == ["{description} (#{pull_or_issue})", "{description}"]
     assert commit_rule.check_subject("fix the login (#12)", commits) is None
@@ -339,17 +342,17 @@ def test_type_free_forms_with_the_release_off():
         ),
     ],
 )
-def test_invalid_files_name_the_key(text, message):
+def test_invalid_files_name_the_key(text: str, message: str) -> None:
     with pytest.raises(config.ConfigError) as raised:
         config.parse(text)
     assert str(raised.value).startswith(message)
 
 
-def test_something_else_than_a_file_is_a_config_error():
+def test_something_else_than_a_file_is_a_config_error() -> None:
     with pytest.raises(config.ConfigError, match="^mergeweasel.toml: not a file$"):
         config.load(gitea_with(NotAFile("mergeweasel.toml: not a file")), "main")
 
 
-def test_a_file_that_is_not_utf8_is_a_config_error():
+def test_a_file_that_is_not_utf8_is_a_config_error() -> None:
     with pytest.raises(config.ConfigError, match="^mergeweasel.toml: cannot read it as UTF-8 text$"):
         config.load(gitea_with(b"\xff\xfe[release]"), "main")

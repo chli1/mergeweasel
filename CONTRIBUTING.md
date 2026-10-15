@@ -105,7 +105,7 @@ The one exception is `[upgrade]` with a released image that names no revision: i
 release's workflow files at all, so it fails, marked or not, instead of turning CI green
 untested.
 
-## Lint and format
+## Lint, format and types
 
 [Ruff](https://docs.astral.sh/ruff/) lints and formats the code, configured under `[tool.ruff]` in
 `pyproject.toml`. CI fails on a finding or on code the formatter would change. Before pushing, let
@@ -121,6 +121,30 @@ ruff fix what it can and format the rest:
 where the rule has a point; where the code is deliberate, silence the one line with
 `# noqa: <rule>` and a comment that says why, as `release.py` does for the release step's
 catch-all.
+
+[mypy](https://mypy.readthedocs.io/) checks the type annotations, configured under `[tool.mypy]`
+in `pyproject.toml`. It runs in strict mode over `src` and `tests`: every function, test functions
+and fixtures included, annotates its parameters and its return value, and CI fails on a missing
+annotation or a type error:
+
+```sh
+.venv/bin/mypy
+```
+
+A test function returns `None`, and pytest's own fixtures have types of their own:
+`monkeypatch: pytest.MonkeyPatch`, `capsys: pytest.CaptureFixture[str]`, `tmp_path: pathlib.Path`.
+
+The forge's JSON answers are typed `Json` (`dict[str, Any]`, in `api.py`), and only the client
+functions that turn them into dataclasses, such as `pull_request()`, read them. Everything past
+that point works with the dataclasses' exact types, which mypy checks. For the same reason mypy
+lets `api.py` and the tests' `driver.py`, which reads the forge's answers as they are, return an
+`Any` from a function with a declared return type, which it reports everywhere else.
+
+Where mypy cannot follow the code - most often a value it thinks may be `None` - narrow the type
+with a check the code needs anyway, such as an early `return` or `raise`. Where the reason lies
+outside what mypy sees, an `assert x is not None` with a comment that says why it holds will do.
+Only where neither fits, silence the one line with `# type: ignore[<code>]` and a comment that
+says why; mypy reports an ignore that is no longer needed.
 
 ## Layout
 
@@ -171,7 +195,7 @@ ends in its issue, `(#N)`, or in its own number, `(PR #N)`, and nothing is appen
 
 CI (`ci.yml`) runs on every pull request:
 
-- `test` - the unit tests, `ruff check` and `ruff format --check`;
+- `test` - the unit tests, `ruff check`, `ruff format --check` and `mypy`;
 - `image` - builds the image, which then checks the pull request itself and dry-runs a pass with
   the run token;
 - `layers` - one job per Docker layer, variant and forge, such as `integration (built, gitea)`

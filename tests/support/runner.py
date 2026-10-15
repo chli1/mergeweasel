@@ -3,8 +3,9 @@
 import contextlib
 import dataclasses
 import subprocess
+from collections.abc import Iterator
 
-from server import LABEL, build, docker, names
+from server import LABEL, Server, build, docker, names
 
 # Jobs on the default bridge reach the forge as http://gitea:3000, its root URL. The label lets the orphan
 # sweep find a job container that outlived its run.
@@ -21,7 +22,7 @@ container:
 class Runner:
     container: str
 
-    def log(self, lines=40):
+    def log(self, lines: int = 40) -> str:
         result = subprocess.run(
             ["docker", "logs", "--tail", str(lines), self.container], capture_output=True, text=True
         )
@@ -29,7 +30,7 @@ class Runner:
 
 
 @contextlib.contextmanager
-def start(server, run_id, image):
+def start(server: Server, run_id: str, image: str) -> Iterator[Runner]:
     """image: the default job image, ubuntu-latest - the built image, which exists only locally."""
     named = names(server.forge, run_id)
     subprocess.run(["docker", "rm", "--force", named.runner], capture_output=True)

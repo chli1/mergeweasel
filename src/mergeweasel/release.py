@@ -9,9 +9,10 @@ import datetime
 import itertools
 import sys
 import traceback
+from collections.abc import Iterable
 
-from mergeweasel import commit_rule, config
-from mergeweasel.api import ApiError, ReleaseExists
+from mergeweasel import commit_rule, config, version_template
+from mergeweasel.api import ApiError, Client, HistoryCommit, ReleaseExists
 
 BREAKING, FEATURE, FIX = "breaking", "feature", "fix"
 SECTIONS = ((BREAKING, "Breaking changes"), (FEATURE, "Features"), (FIX, "Fixes"))
@@ -28,7 +29,7 @@ class Change:
     body: str
 
 
-def kind(commit_type, minor_types, patch_types):
+def kind(commit_type: str | None, minor_types: tuple[str, ...], patch_types: tuple[str, ...]) -> str | None:
     if commit_type in minor_types:
         return FEATURE
     if commit_type in patch_types:
@@ -37,11 +38,11 @@ def kind(commit_type, minor_types, patch_types):
 
 
 def change(
-    message,
-    rules=commit_rule.DEFAULT_COMMIT_RULES,
-    minor_types=config.DEFAULT_MINOR_TYPES,
-    patch_types=config.DEFAULT_PATCH_TYPES,
-):
+    message: str,
+    rules: commit_rule.CommitRules = commit_rule.DEFAULT_COMMIT_RULES,
+    minor_types: tuple[str, ...] = config.DEFAULT_MINOR_TYPES,
+    patch_types: tuple[str, ...] = config.DEFAULT_PATCH_TYPES,
+) -> Change | None:
     subject, _, rest = message.partition("\n")
     if commit_rule.REVERT.match(subject):
         # git's own revert subject counts as the type revert.
@@ -59,13 +60,13 @@ def change(
     return Change(released, line, "") if released else None
 
 
-def outside_the_rule(message, rules):
+def outside_the_rule(message: str, rules: commit_rule.CommitRules) -> bool:
     """A subject the release cannot read: it releases nothing, whatever it meant to."""
     subject = message.partition("\n")[0]
     return not commit_rule.EXEMPT.match(subject) and commit_rule.parse_subject(subject, rules) is None
 
 
-def next_version(version, changes):
+def next_version(version: tuple[int, int, int], changes: Iterable[Change]) -> tuple[int, int, int] | None:
     kinds = {item.kind for item in changes}
     major, minor, patch = version
     if BREAKING in kinds:
@@ -77,13 +78,13 @@ def next_version(version, changes):
     return None
 
 
-def notes(changes):
-    blocks = []
+def notes(changes: list[Change]) -> str:
+    blocks: list[str] = []
     for kind, heading in SECTIONS:
         items = [item for item in changes if item.kind == kind]
         if not items:
             continue
-        entries = []
+        entries: list[str] = []
         for item in items:
             entry = f"- {item.line}\n"
             if item.body:
@@ -93,12 +94,20 @@ def notes(changes):
     return "\n".join(blocks)
 
 
-def newest(template, names):
+def release_version(template: version_template.Template, name: str) -> tuple[int, int, int]:
+    """The version of a SemVer template's release tag."""
+    version = template.version(name)
+    # The name has the template's shape, and the template has the SemVer fields.
+    assert version is not None
+    return version
+
+
+def newest(template: version_template.Template, names: list[str]) -> str:
     """The previous release among the tags on one commit: the highest version, for SemVer."""
-    return max(names, key=template.version) if template.semver else max(names)
+    return max(names, key=lambda name: release_version(template, name)) if template.semver else max(names)
 
 
-def run(gitea, dry_run, base_branch, now=None):
+def run(gitea: Client, dry_run: bool, base_branch: str, now: datetime.datetime | None = None) -> bool:
     """Release the base branch if it holds releasing commits; False after an error, which it prints.
 
     Never raises: a failed release must not hold up the queue, the job fails at its end.
@@ -115,7 +124,7 @@ def run(gitea, dry_run, base_branch, now=None):
         return False
 
 
-def release_tags(gitea, template):
+def release_tags(gitea: Client, template: version_template.Template) -> dict[str, str]:
     """Tag name -> commit sha of every tag of the template's shape."""
     return {
         ref.name: gitea.tag_commit(ref.sha) if ref.annotated else ref.sha
@@ -124,7 +133,7 @@ def release_tags(gitea, template):
     }
 
 
-def _release(gitea, dry_run, base_branch, now):
+def _release(gitea: Client, dry_run: bool, base_branch: str, now: datetime.datetime) -> bool:
     configuration = config.load(gitea, base_branch)
     if not configuration.release_enabled:
         print(f"release: to release, set release.enabled = true in {config.CONFIG_FILE}")
@@ -139,11 +148,12 @@ def _release(gitea, dry_run, base_branch, now):
     if not tags and template.semver:
         print(f"release: no tag matching {template.text} to bump from, nothing released")
         return True
-    since, base = [], None
+    since: list[HistoryCommit] = []
+    base: str | None = None
     if tags:
-        on_commit = {}
-        for name, commit in tags.items():
-            on_commit.setdefault(commit, []).append(name)
+        on_commit: dict[str, list[str]] = {}
+        for name, sha in tags.items():
+            on_commit.setdefault(sha, []).append(name)
         # main is linear: the nearest tagged commit in its history is the previous release.
         walked = 0
         for commit in itertools.islice(gitea.commits(base_branch), MAX_COMMITS):
@@ -181,7 +191,11 @@ def _release(gitea, dry_run, base_branch, now):
             else f"release: nothing to release on {head[:7]}, the first {template.text} release waits for a releasing commit"
         )
         return True
-    version = next_version(template.version(base), changes) if template.semver else None
+    version = None
+    if template.semver:
+        # A SemVer template releases nothing without a previous release to bump: base is set.
+        assert base is not None
+        version = next_version(release_version(template, base), changes)
     count = gitea.commit_count(head) if template.uses_count else None
     name, text = template.render(version=version, now=now, count=count, sha=head), notes(changes)
     if name in tags:

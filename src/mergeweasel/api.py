@@ -4,13 +4,16 @@ domain exceptions; paging and retries. Each forge's client implements the rest (
 import abc
 import base64
 import dataclasses
+import http.client
 import json
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable, Iterator
+from typing import Any, NoReturn
 
-from mergeweasel.commit_rule import Commit
+from mergeweasel.commit_rule import Commit, SquashMessage
 
 # Gitea caps every list at 50 entries per page, whatever `limit` asks for.
 PAGE_SIZE = 50
@@ -24,9 +27,11 @@ MALFORMED = "the token or the server's answer is malformed"
 PUSH, LABEL_ADDED, LABEL_REMOVED, OTHER = "push", "label_added", "label_removed", "other"
 # Gitea's 405 while its mergeable check still runs; the next pass retries.
 TRANSIENT_MERGE_REFUSAL = "Please try again later"
+# A forge's JSON answer, read only by the functions that turn it into dataclasses.
+Json = dict[str, Any]
 
 
-def gitea_message(error):
+def gitea_message(error: urllib.error.HTTPError) -> str:
     """Gitea's message in an HTTP error's body, else the HTTP reason."""
     try:
         return json.loads(error.read())["message"]
@@ -37,7 +42,7 @@ def gitea_message(error):
 class ApiError(Exception):
     """The server's answer to a request, or its absence; status None without an HTTP answer."""
 
-    def __init__(self, message, status=None, url=None):
+    def __init__(self, message: str, status: int | None = None, url: str | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.status = status
@@ -72,7 +77,7 @@ class NotAFile(ApiError):
     pass
 
 
-def reraise_as(kind, error):
+def reraise_as(kind: type[ApiError], error: ApiError) -> NoReturn:
     raise kind(error.message, error.status, error.url) from error
 
 
@@ -80,7 +85,7 @@ def reraise_as(kind, error):
 class Branch:
     sha: str
     # Empty when the branch protection requires no status checks.
-    required_contexts: tuple
+    required_contexts: tuple[str, ...]
     required_approvals: int
 
 
@@ -91,7 +96,7 @@ class PullRequest:
     head_ref: str
     head_sha: str
     # Name -> id.
-    labels: dict
+    labels: dict[str, int]
     draft: bool
     poster: str
     title: str
@@ -152,7 +157,7 @@ class WorkflowRun:
     event: str
 
 
-def pull_request(raw):
+def pull_request(raw: Json) -> PullRequest:
     return PullRequest(
         number=raw["number"],
         base_ref=raw["base"]["ref"],
@@ -167,7 +172,7 @@ def pull_request(raw):
     )
 
 
-def timeline_event(raw):
+def timeline_event(raw: Json) -> TimelineEvent:
     if raw["type"] == "pull_push":
         kind = PUSH
     elif raw["type"] == "label":
@@ -178,19 +183,21 @@ def timeline_event(raw):
     return TimelineEvent(raw["id"], kind, (raw.get("user") or {}).get("login"), (raw.get("label") or {}).get("name"))
 
 
-def retried(operation):
+def retried[T](operation: Callable[[], T]) -> T:
     """Retries a network error or a 5xx answer; anything else is no lag that waiting fixes."""
-    for attempt in range(RETRY_ATTEMPTS):
+    for _ in range(RETRY_ATTEMPTS - 1):
         try:
             return operation()
         except ApiError as error:
             transient = isinstance(error, Unreachable) or (error.status or 0) >= 500
-            if not transient or attempt == RETRY_ATTEMPTS - 1:
+            if not transient:
                 raise
-            time.sleep(RETRY_DELAY_SECONDS)
+        time.sleep(RETRY_DELAY_SECONDS)
+    # The last attempt: whatever it raises goes to the caller.
+    return operation()
 
 
-def exchange(method, url, token, body=None):
+def exchange(method: str, url: str, token: str, body: Json | None = None) -> tuple[bytes, http.client.HTTPMessage]:
     """One request: the answer's payload and headers."""
     data = None if body is None else json.dumps(body).encode()
     try:
@@ -214,20 +221,20 @@ def exchange(method, url, token, body=None):
 class Client(abc.ABC):
     """Everything Gitea and Forgejo share; each forge's class implements the rest."""
 
-    def __init__(self, server, repository, token):
+    def __init__(self, server: str, repository: str, token: str) -> None:
         self.root = f"{server}/api/v1"
         self.api = f"{self.root}/repos/{repository}"
         self._owner = repository.split("/")[0]
         self.token = token
 
-    def own_login(self):
+    def own_login(self) -> str:
         """The login of the token's account; needs the token scope read:user."""
         return self._json("GET", "/user", root=True)["login"]
 
-    def _exchange(self, method, url, body=None):
+    def _exchange(self, method: str, url: str, body: Json | None = None) -> tuple[bytes, http.client.HTTPMessage]:
         return exchange(method, url, self.token, body)
 
-    def _json(self, method, path, body=None, root=False):
+    def _json(self, method: str, path: str, body: Json | None = None, root: bool = False) -> Any:
         url = f"{self.root if root else self.api}{path}"
         payload, _ = self._exchange(method, url, body)
         if not payload.strip():
@@ -237,7 +244,7 @@ class Client(abc.ABC):
         except ValueError:
             raise ApiError("the server's answer is not JSON", None, url) from None
 
-    def _pages(self, path, root=False):
+    def _pages(self, path: str, root: bool = False) -> Iterator[Json]:
         """The list's items, one page read at a time as the caller advances."""
         separator = "&" if "?" in path else "?"
         page = 1
@@ -248,16 +255,16 @@ class Client(abc.ABC):
                 return
             page += 1
 
-    def default_branch(self):
+    def default_branch(self) -> str:
         return self._json("GET", "")["default_branch"]
 
-    def branch(self, name):
+    def branch(self, name: str) -> Branch:
         # branches/{name}, not branch_protections: the protection API needs repo admin.
         raw = self._json("GET", f"/branches/{name}")
         required = tuple(raw["status_check_contexts"] or ()) if raw["enable_status_check"] else ()
         return Branch(raw["commit"]["id"], required, raw["required_approvals"])
 
-    def branch_head(self, name):
+    def branch_head(self, name: str) -> str:
         """The branch's head from the git refs API, which reads the repository itself: a pull
         request's head.sha may still lag behind a push."""
         ref = f"refs/heads/{name}"
@@ -268,13 +275,13 @@ class Client(abc.ABC):
             raise NotFound(f"{ref} not found", None, f"{self.api}{path}")
         return head
 
-    def open_pulls(self):
+    def open_pulls(self) -> list[PullRequest]:
         return [pull_request(raw) for raw in self._pages("/pulls?state=open")]
 
-    def pull(self, number):
+    def pull(self, number: int) -> PullRequest:
         return pull_request(self._json("GET", f"/pulls/{number}"))
 
-    def statuses(self, sha):
+    def statuses(self, sha: str) -> list[CommitStatus]:
         """The latest status per context on sha."""
         raw = self._json("GET", f"/commits/{sha}/status?limit={PAGE_SIZE}&page=1")
         return [
@@ -288,12 +295,12 @@ class Client(abc.ABC):
             for status in raw["statuses"] or ()
         ]
 
-    def is_behind(self, head, base):
+    def is_behind(self, head: str, base: str) -> bool:
         """True if base holds commits head lacks."""
         # compare, not merge_base: Gitea updates merge_base asynchronously after a push.
         return self._json("GET", f"/compare/{head}...{base}")["total_commits"] > 0
 
-    def reviews(self, number):
+    def reviews(self, number: int) -> list[Review]:
         return [
             Review(
                 raw["user"]["login"], raw["state"], raw["official"], raw["dismissed"], raw["stale"], raw["commit_id"]
@@ -301,23 +308,23 @@ class Client(abc.ABC):
             for raw in self._pages(f"/pulls/{number}/reviews")
         ]
 
-    def timeline(self, number):
+    def timeline(self, number: int) -> list[TimelineEvent]:
         return [timeline_event(raw) for raw in self._pages(f"/issues/{number}/timeline")]
 
-    def pull_commits(self, number):
+    def pull_commits(self, number: int) -> list[Commit]:
         return [
             Commit(raw["sha"], raw["commit"]["message"].split("\n", 1)[0], len(raw.get("parents") or []))
             for raw in self._pages(f"/pulls/{number}/commits?{COMMIT_QUERY}")
         ]
 
-    def is_issue(self, number):
+    def is_issue(self, number: int) -> bool:
         """False for a pull request, which Gitea also serves as an issue, and for a missing number."""
         try:
             return self._json("GET", f"/issues/{number}").get("pull_request") is None
         except NotFound:
             return False
 
-    def file(self, path, ref):
+    def file(self, path: str, ref: str) -> bytes | None:
         """The file's content as of ref - a branch or a commit's SHA -, None if it does not exist there."""
         try:
             answer = self._json("GET", f"/contents/{path}?ref={ref}")
@@ -331,7 +338,7 @@ class Client(abc.ABC):
         except (TypeError, ValueError):
             raise NotAFile(f"{path}: cannot read its content", None, url) from None
 
-    def tag_refs(self):
+    def tag_refs(self) -> list[TagRef]:
         """Every tag; the git refs API lists them all in one call."""
         try:
             refs = self._json("GET", "/git/refs/tags")
@@ -343,18 +350,18 @@ class Client(abc.ABC):
             for ref in refs
         ]
 
-    def tag_commit(self, sha):
+    def tag_commit(self, sha: str) -> str:
         """The commit an annotated tag object points at."""
         return self._json("GET", f"/git/tags/{sha}")["object"]["sha"]
 
-    def commits(self, ref):
+    def commits(self, ref: str) -> Iterator[HistoryCommit]:
         """ref's history, newest first."""
         return (
             HistoryCommit(raw["sha"], raw["commit"]["message"])
             for raw in self._pages(f"/commits?sha={ref}&{COMMIT_QUERY}")
         )
 
-    def commit_count(self, sha):
+    def commit_count(self, sha: str) -> int:
         """The commits in sha's history, from Gitea's X-Total-Count header."""
         url = f"{self.api}/commits?sha={sha}&{COMMIT_QUERY}&limit=1"
         _, headers = self._exchange("GET", url)
@@ -363,10 +370,10 @@ class Client(abc.ABC):
             raise ApiError("the server sent no X-Total-Count", None, url)
         return int(value)
 
-    def labels(self):
+    def labels(self) -> list[str]:
         return [label["name"] for label in self._pages("/labels")]
 
-    def org_labels(self):
+    def org_labels(self) -> list[str] | None:
         """The organization's label names, None if unreadable: a user's repository, or a token without access."""
         try:
             return [label["name"] for label in self._pages(f"/orgs/{self._owner}/labels", root=True)]
@@ -376,10 +383,10 @@ class Client(abc.ABC):
             raise
 
     @abc.abstractmethod
-    def workflow_runs(self, file):
+    def workflow_runs(self, file: str) -> list[WorkflowRun]:
         """The newest runs of the workflow, one page, newest first."""
 
-    def rebase(self, number):
+    def rebase(self, number: int) -> None:
         try:
             self._json("POST", f"/pulls/{number}/update?style=rebase")
         except ApiError as error:
@@ -387,7 +394,7 @@ class Client(abc.ABC):
                 reraise_as(Conflict, error)
             raise
 
-    def merge(self, number, head_sha, message):
+    def merge(self, number: int, head_sha: str, message: SquashMessage | None) -> None:
         """Squash into message's subject and body, or fast-forward the commits as they are if message is None."""
         if message is None:
             request = {"Do": "fast-forward-only", "head_commit_id": head_sha}
@@ -407,23 +414,23 @@ class Client(abc.ABC):
                 reraise_as(MergeDeferred, error)
             raise
 
-    def approve(self, number, sha, body):
+    def approve(self, number: int, sha: str, body: str) -> None:
         self._json("POST", f"/pulls/{number}/reviews", {"event": "APPROVED", "commit_id": sha, "body": body})
 
-    def add_label(self, number, name):
+    def add_label(self, number: int, name: str) -> None:
         self._json("POST", f"/issues/{number}/labels", {"labels": [name]})
 
-    def remove_label(self, number, name, label_id):
+    def remove_label(self, number: int, name: str, label_id: int) -> None:
         """name and label_id: the same label; each forge identifies it by what it resolves."""
         self._json("DELETE", f"/issues/{number}/labels/{label_id}")
 
-    def comment(self, number, body):
+    def comment(self, number: int, body: str) -> None:
         self._json("POST", f"/issues/{number}/comments", {"body": body})
 
-    def set_status(self, sha, context, state, description):
+    def set_status(self, sha: str, context: str, state: str, description: str) -> None:
         self._json("POST", f"/statuses/{sha}", {"state": state, "context": context, "description": description})
 
-    def create_release(self, name, sha, body):
+    def create_release(self, name: str, sha: str, body: str) -> None:
         try:
             self._json("POST", "/releases", {"tag_name": name, "target_commitish": sha, "name": name, "body": body})
         except ApiError as error:

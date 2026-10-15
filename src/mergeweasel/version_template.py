@@ -4,13 +4,16 @@ Placeholders and rules: docs/configuration.md, "The release tag".
 """
 
 import dataclasses
+import datetime
 import re
+from collections.abc import Callable
+from typing import Any
 
 SEMVER = ("major", "minor", "patch")
 NUMBER = r"0|[1-9]\d*"
 TWO_DIGITS = r"\d{2}"
 # Placeholder -> (the regex of its value, its value from the release's fields).
-PLACEHOLDERS = {
+PLACEHOLDERS: dict[str, tuple[str, Callable[[Any], str]]] = {
     "major": (NUMBER, lambda fields: str(fields.version[0])),
     "minor": (NUMBER, lambda fields: str(fields.version[1])),
     "patch": (NUMBER, lambda fields: str(fields.version[2])),
@@ -41,53 +44,61 @@ class TemplateError(ValueError):
 
 @dataclasses.dataclass(frozen=True)
 class Fields:
-    version: tuple
-    now: object
-    count: int
-    sha: str
+    version: tuple[int, int, int] | None
+    now: datetime.datetime | None
+    count: int | None
+    sha: str | None
 
 
 @dataclasses.dataclass(frozen=True)
 class Template:
     text: str
     # Text and placeholder names alternating, starting and ending with text (possibly empty).
-    parts: tuple
-    pattern: re.Pattern
+    parts: tuple[str, ...]
+    pattern: re.Pattern[str]
 
     @property
-    def names(self):
+    def names(self) -> tuple[str, ...]:
         return self.parts[1::2]
 
     @property
-    def semver(self):
+    def semver(self) -> bool:
         return "major" in self.names
 
     @property
-    def uses_count(self):
+    def uses_count(self) -> bool:
         return "count" in self.names
 
-    def matches(self, name):
+    def matches(self, name: str) -> bool:
         return self.pattern.fullmatch(name) is not None
 
-    def version(self, name):
+    def version(self, name: str) -> tuple[int, int, int] | None:
         match = self.pattern.fullmatch(name)
         if match is None or not self.semver:
             return None
-        return tuple(int(match[field]) for field in SEMVER)
+        major, minor, patch = (int(match[field]) for field in SEMVER)
+        return major, minor, patch
 
-    def render(self, version=None, now=None, count=None, sha=None):
+    def render(
+        self,
+        version: tuple[int, int, int] | None = None,
+        now: datetime.datetime | None = None,
+        count: int | None = None,
+        sha: str | None = None,
+    ) -> str:
         fields = Fields(version, now, count, sha)
         return "".join(
             part if index % 2 == 0 else PLACEHOLDERS[part][1](fields) for index, part in enumerate(self.parts)
         )
 
 
-def valid_tag_name(name):
+def valid_tag_name(name: str) -> bool:
     return not (INVALID_IN_TAG.search(name) or name.startswith(("-", "/", ".")) or name.endswith(("/", ".")))
 
 
-def compile(text):
-    parts, position = [], 0
+def compile(text: str) -> Template:
+    parts: list[str] = []
+    position = 0
     for match in PLACEHOLDER.finditer(text):
         parts += [text[position : match.start()], match[1]]
         position = match.end()

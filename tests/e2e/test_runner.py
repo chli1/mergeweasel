@@ -1,7 +1,9 @@
 """A job's container reaches the forge and knows its run - what every scenario builds on."""
 
 from actions import settle
-from driver import REQUIRED_CONTEXT, create_repo
+from driver import REQUIRED_CONTEXT, Repo, create_repo
+from runner import Runner
+from server import Server
 
 # Posts GITHUB_RUN_ID as a status: a pass compares it with the run listing's ids to find its turn.
 PROBE = """name: probe
@@ -28,12 +30,12 @@ jobs:
 TRIVIAL = 'on: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n'
 
 
-def finished(repo):
+def finished(repo: Repo) -> list[tuple[str, str, str]] | None:
     runs = repo.runs()
     return runs if runs and all(status in ("success", "failure") for _, _, status in runs) else None
 
 
-def test_a_job_reaches_the_forge_and_knows_its_run(server, repo, runner):
+def test_a_job_reaches_the_forge_and_knows_its_run(server: Server, repo: Repo, runner: Runner) -> None:
     # A run in another repository first: the probe's run id then differs from its number, 1.
     elsewhere = create_repo(server.clients, "probe-elsewhere", contexts=(REQUIRED_CONTEXT,))
     elsewhere.move_main({".gitea/workflows/trivial.yml": TRIVIAL}, "ci: trivial")

@@ -2,11 +2,13 @@
 
 import pytest
 from actions import CI_CONTEXT, settle
+from driver import Repo
+from runner import Runner
 
 BODY = "Adds {name}.{marker}\n\n## Commit\n\n- adds {name}\n"
 
 
-def open_approved(repo, name, marker=""):
+def open_approved(repo: Repo, name: str, marker: str = "") -> int:
     """A pull request whose CI runs, approved by the reviewer."""
     repo.commit("author", repo.branch, {f"{name}.txt": f"{name}\n"}, f"add {name}", new_branch=f"add-{name}")
     number = repo.open_pull("author", f"add-{name}", f"feat: add {name}", BODY.format(name=name, marker=marker))
@@ -14,16 +16,17 @@ def open_approved(repo, name, marker=""):
     return number
 
 
-def ci_state(repo, number):
+def ci_state(repo: Repo, number: int) -> str | None:
     return repo.states(repo.head(number)).get(CI_CONTEXT)
 
 
-def merged(repo, number):
-    return repo.pull(number)["merged"]
+def merged(repo: Repo, number: int) -> bool:
+    state: bool = repo.pull(number)["merged"]
+    return state
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
-def test_the_label_comes_last(actions_repo, runner):
+def test_the_label_comes_last(actions_repo: Repo, runner: Runner) -> None:
     repo = actions_repo
     number = open_approved(repo, "a")
     settle(repo, runner, lambda: ci_state(repo, number) == "success")
@@ -33,14 +36,14 @@ def test_the_label_comes_last(actions_repo, runner):
     settle(repo, runner, lambda: merged(repo, number))
 
 
-def finished_passes(repo):
+def finished_passes(repo: Repo) -> int:
     return sum(
         workflow == "mergeweasel-queue.yml" and status in ("success", "failure") for workflow, _, status in repo.runs()
     )
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
-def test_ci_comes_last(actions_repo, runner):
+def test_ci_comes_last(actions_repo: Repo, runner: Runner) -> None:
     repo = actions_repo
     number = open_approved(repo, "b", marker=" ci-slow")
     before = finished_passes(repo)
@@ -55,7 +58,7 @@ def test_ci_comes_last(actions_repo, runner):
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
-def test_a_moved_main_is_rebased_and_tested_again(actions_repo, runner):
+def test_a_moved_main_is_rebased_and_tested_again(actions_repo: Repo, runner: Runner) -> None:
     repo = actions_repo
     number = open_approved(repo, "c")
     settle(repo, runner, lambda: ci_state(repo, number) == "success")
@@ -69,7 +72,7 @@ def test_a_moved_main_is_rebased_and_tested_again(actions_repo, runner):
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
-def test_red_ci_needs_a_fix(actions_repo, runner):
+def test_red_ci_needs_a_fix(actions_repo: Repo, runner: Runner) -> None:
     repo = actions_repo
     number = open_approved(repo, "d", marker=" ci-fail")
     repo.add_label("author", number, repo.automerge)
@@ -81,7 +84,7 @@ def test_red_ci_needs_a_fix(actions_repo, runner):
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
-def test_the_next_moves_up_after_a_merge(actions_repo, runner):
+def test_the_next_moves_up_after_a_merge(actions_repo: Repo, runner: Runner) -> None:
     repo = actions_repo
     first, second = open_approved(repo, "e"), open_approved(repo, "f")
     settle(repo, runner, lambda: ci_state(repo, first) == ci_state(repo, second) == "success")

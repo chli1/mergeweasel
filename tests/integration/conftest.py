@@ -1,25 +1,33 @@
 """The integration layer: one pass at a time, started by the test, against a real forge."""
 
 import os
+import pathlib
 import subprocess
+from collections.abc import Callable, Iterable
 
 import pytest
 import workflow
-from driver import eventually
-from server import LABEL
+from driver import Repo, eventually
+from server import LABEL, Server
 
 PASS_TIMEOUT_SECONDS = 300
 
 
 @pytest.fixture
-def pass_workflow(workflow_text, server):
+def pass_workflow(workflow_text: Callable[[pathlib.Path], str], server: Server) -> workflow.QueueWorkflow:
     """What the forge's mergeweasel-queue.yml hands a pass, as the variant runs it."""
     return workflow.parse(workflow_text(server.forge.queue_source))
 
 
 @pytest.fixture
-def run_pass(server, image, pass_workflow, repo, instance):
-    def run(mergeable=None, approvers=("queue",)):
+def run_pass(
+    server: Server,
+    image: str,
+    pass_workflow: workflow.QueueWorkflow,
+    repo: Repo,
+    instance: tuple[str, tuple[str, ...]],
+) -> Callable[..., str]:
+    def run(mergeable: int | None = None, approvers: Iterable[str] = ("queue",)) -> str:
         """One pass, with the environment and the command mergeweasel-queue.yml gives it.
 
         No GITHUB_RUN_ID: there is no other pass to wait for. `mergeable` names a pull request whose

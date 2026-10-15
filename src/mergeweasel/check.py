@@ -9,10 +9,11 @@ import json
 import sys
 
 from mergeweasel import commit_rule, config
-from mergeweasel.api import ApiError, Unreachable
+from mergeweasel.api import ApiError, Client, Unreachable
+from mergeweasel.settings import Settings
 
 
-def run(gitea, event_path, settings):
+def run(gitea: Client, event_path: str, settings: Settings) -> int:
     try:
         with open(event_path, encoding="utf-8") as handle:
             number = json.load(handle)["pull_request"]["number"]

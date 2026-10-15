@@ -6,20 +6,24 @@ break with the old workflow files.
 import inspect
 import pathlib
 import subprocess
+from collections.abc import Callable
 
 UNCOMMITTED = "0" * 40
 
 
-def git(directory, *arguments):
+def git(directory: pathlib.Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *arguments], cwd=directory, capture_output=True, text=True)
 
 
-def unreleased(test, revision, marker):
+def unreleased(test: Callable[..., object], revision: str, marker: str) -> str | None:
     """Why `test`, marked with `marker`, may not run with the release built from `revision`, or None if it may.
 
     Unknown counts as unreleased: a skip shows its reason, a false red would block every pull request.
     """
-    path = pathlib.Path(inspect.getsourcefile(test))
+    source = inspect.getsourcefile(test)
+    # A test function comes from a source file.
+    assert source is not None
+    path = pathlib.Path(source)
     lines, start = inspect.getsourcelines(test)
     number = start + next(offset for offset, line in enumerate(lines) if f"pytest.mark.{marker}" in line)
     blame = git(path.parent, "blame", "--porcelain", "-L", f"{number},{number}", "--", path.name)

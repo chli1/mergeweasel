@@ -3,10 +3,11 @@
 import argparse
 import os
 import sys
+from collections.abc import Sequence
 
 from mergeweasel import accounts, check, queue, release, turn
 from mergeweasel import settings as instance
-from mergeweasel.api import ApiError
+from mergeweasel.api import ApiError, Client
 from mergeweasel.forgejo import detect
 
 MERGER_TOKEN = "MERGEWEASEL_MERGER_TOKEN"
@@ -19,7 +20,7 @@ class EnvironmentMissing(Exception):
     pass
 
 
-def required(name):
+def required(name: str) -> str:
     value = os.environ.get(name, "")
     if not value:
         raise EnvironmentMissing(f"{name} is not set - mergeweasel runs in Actions, which sets it")
@@ -30,7 +31,7 @@ class TokenProblem(Exception):
     pass
 
 
-def account_login(client, source):
+def account_login(client: Client, source: str) -> str:
     """The login behind a token; source names the token in an error, never its value."""
     try:
         login = client.own_login()
@@ -44,7 +45,7 @@ def account_login(client, source):
     return login
 
 
-def forge_at(server, token):
+def forge_at(server: str, token: str) -> type[Client] | None:
     """The client class for the forge at server, printed; None after an error, which it prints."""
     try:
         forge = detect(server, token)
@@ -55,9 +56,9 @@ def forge_at(server, token):
     return forge
 
 
-def approver_clients(forge, server, repository, text):
+def approver_clients(forge: type[Client], server: str, repository: str, text: str) -> dict[str, Client]:
     """One client per approver token, keyed by its login, in the secret's order."""
-    clients = {}
+    clients: dict[str, Client] = {}
     tokens = [line.strip() for line in text.splitlines() if line.strip()]
     for position, token in enumerate(tokens, start=1):
         source = f"token {position} of {APPROVER_TOKENS}"
@@ -69,7 +70,7 @@ def approver_clients(forge, server, repository, text):
     return clients
 
 
-def instance_settings(gitea):
+def instance_settings(gitea: Client) -> instance.Settings | None:
     """The instance's names, printed; None after an error, which it prints."""
     try:
         found = instance.read(gitea, os.environ)
@@ -83,7 +84,7 @@ def instance_settings(gitea):
     return found
 
 
-def labels_exist(gitea, settings):
+def labels_exist(gitea: Client, settings: instance.Settings) -> bool:
     try:
         missing = instance.missing_labels(gitea, instance.required_labels(settings))
     except ApiError as error:
@@ -102,7 +103,7 @@ def labels_exist(gitea, settings):
     return True
 
 
-def queue_pass(server, repository, dry_run):
+def queue_pass(server: str, repository: str, dry_run: bool) -> int:
     token = os.environ.get(MERGER_TOKEN, "").strip()
     approver_tokens = os.environ.get(APPROVER_TOKENS, "")
     if not token and not dry_run:
@@ -112,6 +113,8 @@ def queue_pass(server, repository, dry_run):
     forge = forge_at(server, token or os.environ.get("GITHUB_TOKEN", ""))
     if forge is None:
         return 1
+    merger: accounts.MergerAccount
+    approvers: accounts.ApproverAccounts
     try:
         if token:
             gitea = forge(server, repository, token)
@@ -141,7 +144,7 @@ def queue_pass(server, repository, dry_run):
     return 0 if released else 1
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mergeweasel", description="A merge queue for Gitea and Forgejo.")
     commands = parser.add_subparsers(dest="command", required=True)
     pass_parser = commands.add_parser("pass", help="run one queue pass")

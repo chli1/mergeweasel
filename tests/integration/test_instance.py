@@ -1,7 +1,10 @@
 """Every default changed: the instance's names - a default branch other than main, labels named
 otherwise - and the repository's mergeweasel.toml."""
 
+from collections.abc import Callable
+
 import pytest
+from driver import Repo
 
 CONFIG = """[release]
 enabled = true
@@ -28,7 +31,7 @@ RUN_URL = "https://ci.example.com/runs/1"
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name
 @pytest.mark.instance(branch="trunk", labels=("merge-me", "broken", "no-squash", "hotfix"))
-def test_the_queue_works_with_every_default_changed(repo, run_pass):
+def test_the_queue_works_with_every_default_changed(repo: Repo, run_pass: Callable[..., str]) -> None:
     repo.move_main({"mergeweasel.toml": CONFIG}, "[PROJ-1] ci(app): configure mergeweasel")
     repo.commit("author", "trunk", {"b.txt": "b\n"}, "add b", new_branch="add-b")
     red_number = repo.open_pull("author", "add-b", "[PROJ-2] feature: add b", BODY)

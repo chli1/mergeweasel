@@ -8,6 +8,8 @@ import re
 import secrets
 import subprocess
 import urllib.request
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from driver import ACCOUNTS, ADMIN, ORGANIZATION, PASSWORD, TOKEN_SCOPES, Client, eventually
@@ -33,7 +35,7 @@ class Names:
     runner_tag: str
 
 
-def names(forge, run_id):
+def names(forge: Forge, run_id: str) -> Names:
     return Names(
         f"mergeweasel-e2e-{forge.name}-{run_id}",
         f"mergeweasel-e2e-{forge.name}:{run_id}",
@@ -48,26 +50,28 @@ class Server:
     url: str
     ip: str
     container: str
-    clients: dict
-    tokens: dict
+    clients: dict[str, Client]
+    tokens: dict[str, str]
     # The leading digits of every Actions task id of this server.
     task_prefix: str
 
 
-def docker(*arguments, **options):
-    result = subprocess.run(["docker", *arguments], capture_output=True, text=True, **options)
+def docker(*arguments: str, **options: Any) -> str:
+    result: subprocess.CompletedProcess[str] = subprocess.run(
+        ["docker", *arguments], capture_output=True, text=True, **options
+    )
     if result.returncode != 0:
         pytest.fail(f"docker {arguments[0]} failed: {result.stderr.strip()}")
     return result.stdout.strip()
 
 
-def build(dockerfile, tag):
+def build(dockerfile: str, tag: str) -> None:
     """An image from one of the Dockerfiles next to this file, built without a context."""
     with pathlib.Path(__file__).with_name(dockerfile).open() as file:
         docker("build", "--quiet", "--tag", tag, "-", stdin=file)
 
 
-def task_offset(container):
+def task_offset(container: str) -> str:
     """Starts the server's Actions task ids at a random offset; returns its leading digits.
 
     A job's container and volume are named GITEA-ACTIONS-TASK-<task id>-WORKFLOW-...-JOB-..., and the
@@ -87,7 +91,7 @@ def task_offset(container):
     return str(prefix)
 
 
-def remove_orphans():
+def remove_orphans() -> None:
     now = datetime.datetime.now(datetime.UTC)
     for container in docker("ps", "--all", "--quiet", "--filter", f"label={LABEL}").split():
         created = subprocess.run(
@@ -109,15 +113,16 @@ def remove_orphans():
             subprocess.run(["docker", "volume", "rm", "--force", volume], capture_output=True)
 
 
-def healthy(url):
+def healthy(url: str) -> bool:
     try:
         with urllib.request.urlopen(f"{url}/api/healthz", timeout=2) as response:
-            return response.status == 200
+            ok: bool = response.status == 200
+            return ok
     except OSError:
         return False
 
 
-def accounts(url):
+def accounts(url: str) -> tuple[dict[str, Client], dict[str, str]]:
     admin = Client(url, basic=f"{ADMIN}:{PASSWORD}")
     tokens = {ADMIN: admin.call("POST", f"/users/{ADMIN}/tokens", {"name": "e2e", "scopes": ["all"]})["sha1"]}
     for account in ACCOUNTS:
@@ -139,7 +144,7 @@ def accounts(url):
 
 
 @contextlib.contextmanager
-def start(forge, run_id):
+def start(forge: Forge, run_id: str) -> Iterator[Server]:
     named = names(forge, run_id)
     remove_orphans()
     # A re-run of a CI job keeps its run id, and with it the name.

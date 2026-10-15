@@ -7,6 +7,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable, Collection, Iterable, Mapping
+from typing import Any, Literal
 
 ADMIN = "root"
 # renovate is the Renovate account the passes are given; ci posts the required status; queue is the merger.
@@ -21,7 +23,7 @@ TIMEOUT_SECONDS = 30
 
 
 class ApiError(AssertionError):
-    def __init__(self, method, path, code, message):
+    def __init__(self, method: str, path: str, code: int, message: str) -> None:
         super().__init__(f"{method} {path}: {code} {message}")
         self.code = code
 
@@ -29,14 +31,16 @@ class ApiError(AssertionError):
 class Client:
     """One account's view of the Gitea API."""
 
-    def __init__(self, server, token=None, basic=None):
+    def __init__(self, server: str, token: str | None = None, basic: str | None = None) -> None:
         self.root = f"{server}/api/v1"
         if token:
             self.authorization = f"token {token}"
         else:
+            # Without a token the client signs in with a password.
+            assert basic is not None
             self.authorization = "Basic " + base64.b64encode(basic.encode()).decode()
 
-    def call(self, method, path, body=None):
+    def call(self, method: str, path: str, body: object = None) -> Any:
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(f"{self.root}{path}", data=data, method=method)
         request.add_header("Authorization", self.authorization)
@@ -50,7 +54,9 @@ class Client:
         return json.loads(payload) if payload.strip() else None
 
 
-def eventually(probe, timeout=TIMEOUT_SECONDS, interval=0.5):
+def eventually[T](
+    probe: Callable[[], T | Literal[False] | None], timeout: float = TIMEOUT_SECONDS, interval: float = 0.5
+) -> T:
     """The first truthy result of probe(): Gitea settles some effects asynchronously."""
     deadline = time.monotonic() + timeout
     while True:
@@ -62,7 +68,14 @@ def eventually(probe, timeout=TIMEOUT_SECONDS, interval=0.5):
         time.sleep(interval)
 
 
-def create_repo(clients, name, required_approvals=1, branch="main", labels=LABELS, contexts=(REQUIRED_CONTEXT,)):
+def create_repo(
+    clients: Mapping[str, Client],
+    name: str,
+    required_approvals: int = 1,
+    branch: str = "main",
+    labels: tuple[str, ...] = LABELS,
+    contexts: Iterable[str] = (REQUIRED_CONTEXT,),
+) -> "Repo":
     """A repository set up as docs/onboarding.md describes, with issue #1 for the titles to refer to.
 
     branch: its default branch; labels: the automerge, needs-fix, keep-commits and prio labels' names;
@@ -108,7 +121,9 @@ def create_repo(clients, name, required_approvals=1, branch="main", labels=LABEL
 
 
 class Repo:
-    def __init__(self, clients, name, branch="main", automerge="automerge"):
+    def __init__(
+        self, clients: Mapping[str, Client], name: str, branch: str = "main", automerge: str = "automerge"
+    ) -> None:
         self.clients = clients
         self.name = name
         self.path = f"/repos/{name}"
@@ -116,23 +131,25 @@ class Repo:
         self.branch = branch
         self.automerge = automerge
 
-    def call(self, account, method, path, body=None):
+    def call(self, account: str, method: str, path: str, body: object = None) -> Any:
         return self.clients[account].call(method, f"{self.path}{path}", body)
 
-    def read(self, path):
+    def read(self, path: str) -> Any:
         return self.call(ADMIN, "GET", path)
 
     # The people and systems around the queue.
 
-    def commit(self, account, branch, files, message, new_branch=None):
+    def commit(
+        self, account: str, branch: str, files: Mapping[str, str], message: str, new_branch: str | None = None
+    ) -> str:
         """One commit through the contents API; files maps a path to its new content."""
-        operations = []
+        operations: list[dict[str, str]] = []
         for path, content in files.items():
             operation = {"path": path, "content": base64.b64encode(content.encode()).decode()}
             existing = self._file_sha(branch, path)
             operation.update({"operation": "update", "sha": existing} if existing else {"operation": "create"})
             operations.append(operation)
-        body = {"branch": branch, "message": message, "files": operations}
+        body: dict[str, object] = {"branch": branch, "message": message, "files": operations}
         if new_branch:
             body["new_branch"] = new_branch
         sha = self.call(account, "POST", "/contents", body)["commit"]["sha"]
@@ -141,10 +158,10 @@ class Repo:
         eventually(lambda: [entry for entry in self.read("/activities/feeds") if sha in entry["content"]])
         return sha
 
-    def move_main(self, files, message):
+    def move_main(self, files: Mapping[str, str], message: str) -> str:
         return self.commit(ADMIN, self.branch, files, message)
 
-    def open_pull(self, account, branch, title, body="", labels=()):
+    def open_pull(self, account: str, branch: str, title: str, body: str = "", labels: Collection[str] = ()) -> int:
         """labels: set in the creating call itself, as Renovate does."""
         known = self.read("/labels") + self.clients[ADMIN].call("GET", f"/orgs/{ORGANIZATION}/labels?limit=50")
         ids = [label["id"] for label in known if label["name"] in labels]
@@ -155,28 +172,34 @@ class Repo:
             {"head": branch, "base": self.branch, "title": title, "body": body, "labels": ids},
         )["number"]
 
-    def post_status(self, sha, state, target_url=""):
+    def post_status(self, sha: str, state: str, target_url: str = "") -> None:
         self.call(
             "ci", "POST", f"/statuses/{sha}", {"state": state, "context": REQUIRED_CONTEXT, "target_url": target_url}
         )
 
-    def approve(self, number, account="reviewer"):
+    def approve(self, number: int, account: str = "reviewer") -> None:
         self.call(account, "POST", f"/pulls/{number}/reviews", {"event": "APPROVED", "body": "Looks good."})
 
-    def add_label(self, account, number, name):
+    def add_label(self, account: str, number: int, name: str) -> None:
         self.call(account, "POST", f"/issues/{number}/labels", {"labels": [name]})
 
-    def ready(self, number, state="success", target_url="", labeller="author"):
+    def ready(self, number: int, state: str = "success", target_url: str = "", labeller: str = "author") -> None:
         """CI reports on the head, the reviewer approves, the author queues it."""
         self.post_status(self.head(number), state, target_url)
         self.approve(number)
         self.add_label(labeller, number, self.automerge)
 
-    def tag(self, name):
+    def tag(self, name: str) -> None:
         """The tag a repository's owner sets by hand on the default branch to enable releases."""
         self.call(ADMIN, "POST", "/tags", {"tag_name": name, "target": self.branch})
 
-    def open_renovate_pull(self, branch, files, title="fix(deps): update a (#1)", label_at_creation=False):
+    def open_renovate_pull(
+        self,
+        branch: str,
+        files: Mapping[str, str],
+        title: str = "fix(deps): update a (#1)",
+        label_at_creation: bool = False,
+    ) -> int:
         """Renovate's update: its commit, its pull request, its automerge label - CI green on the head.
 
         label_at_creation: the label comes with the pull request, as Renovate's addLabels sets it;
@@ -191,35 +214,35 @@ class Repo:
 
     # What the assertions read.
 
-    def pull(self, number):
+    def pull(self, number: int) -> Any:
         return self.read(f"/pulls/{number}")
 
-    def head(self, number):
+    def head(self, number: int) -> str:
         return self.pull(number)["head"]["sha"]
 
-    def main_sha(self):
+    def main_sha(self) -> str:
         return self.read(f"/branches/{self.branch}")["commit"]["id"]
 
-    def git_commit(self, sha):
+    def git_commit(self, sha: str) -> Any:
         return self.read(f"/git/commits/{sha}")
 
-    def labels(self, number):
+    def labels(self, number: int) -> set[str]:
         return {label["name"] for label in self.read(f"/issues/{number}/labels")}
 
-    def comments_by(self, account, number):
+    def comments_by(self, account: str, number: int) -> list[str]:
         return [
             comment["body"]
             for comment in self.read(f"/issues/{number}/comments")
             if comment["user"]["login"] == account
         ]
 
-    def reviews(self, number):
+    def reviews(self, number: int) -> Any:
         return self.read(f"/pulls/{number}/reviews")
 
-    def statuses(self, sha):
+    def statuses(self, sha: str) -> Any:
         return self.read(f"/commits/{sha}/statuses")
 
-    def states(self, sha):
+    def states(self, sha: str) -> dict[str, str]:
         """The latest state per context, as the forge combines them - the queue reads the same.
 
         Not from statuses(): Forgejo lists changes within one second oldest first.
@@ -229,21 +252,21 @@ class Repo:
             for status in self.read(f"/commits/{sha}/status?limit=50&page=1")["statuses"] or ()
         }
 
-    def runs(self):
+    def runs(self) -> list[tuple[str, str, str]]:
         """(workflow file, event, status) of each Actions task, newest first."""
         return [
             (task["workflow_id"], task["event"], task["status"])
             for task in self.read("/actions/tasks")["workflow_runs"]
         ]
 
-    def task_ids(self):
+    def task_ids(self) -> list[int]:
         """The id of each Actions task, newest first."""
         return [task["id"] for task in self.read("/actions/tasks")["workflow_runs"]]
 
-    def tags(self):
+    def tags(self) -> dict[str, str]:
         return {tag["name"]: tag["commit"]["sha"] for tag in self.read("/tags")}
 
-    def release(self, tag):
+    def release(self, tag: str) -> Any:
         try:
             return self.read(f"/releases/tags/{urllib.parse.quote(tag)}")
         except ApiError as error:
@@ -251,7 +274,7 @@ class Repo:
                 return None
             raise
 
-    def pusher(self, number, sha):
+    def pusher(self, number: int, sha: str) -> str | None:
         """Who pushed the commit, as the pull request's timeline records it; None if not recorded."""
         return next(
             (
@@ -262,7 +285,7 @@ class Repo:
             None,
         )
 
-    def _file_sha(self, branch, path):
+    def _file_sha(self, branch: str, path: str) -> str | None:
         try:
             return self.read(f"/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}")["sha"]
         except ApiError as error:

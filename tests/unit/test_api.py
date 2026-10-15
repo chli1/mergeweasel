@@ -1,5 +1,7 @@
 import base64
+import time
 import urllib.error
+import urllib.request
 from unittest import mock
 
 import pytest
@@ -10,12 +12,12 @@ from mergeweasel.commit_rule import Commit, SquashMessage
 from mergeweasel.gitea import Gitea
 
 
-def client():
+def client() -> Gitea:
     """The shared operations, through Gitea's client."""
     return Gitea(SERVER, "org/repo", "secret")
 
 
-def test_own_login_reads_the_user_of_the_token(monkeypatch):
+def test_own_login_reads_the_user_of_the_token(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, {"login": "weasel-bot"}, http_error(401, "token is expired"))
     assert client().own_login() == "weasel-bot"
     assert seen[0][1] == f"{SERVER}/api/v1/user"
@@ -24,21 +26,23 @@ def test_own_login_reads_the_user_of_the_token(monkeypatch):
 
 
 @pytest.fixture
-def no_sleep(monkeypatch):
-    sleeps = []
-    monkeypatch.setattr(api.time, "sleep", sleeps.append)
+def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
     return sleeps
 
 
 @pytest.mark.parametrize("error", [api.Unreachable("down"), api.ApiError("boom", 502)])
-def test_retried_retries_network_errors_and_5xx_until_the_last_attempt(no_sleep, error):
+def test_retried_retries_network_errors_and_5xx_until_the_last_attempt(
+    no_sleep: list[float], error: api.ApiError
+) -> None:
     operation = mock.Mock(side_effect=error)
     with pytest.raises(type(error)):
         api.retried(operation)
     assert operation.call_count == api.RETRY_ATTEMPTS
 
 
-def test_retried_returns_once_a_retry_succeeds(no_sleep):
+def test_retried_returns_once_a_retry_succeeds(no_sleep: list[float]) -> None:
     operation = mock.Mock(side_effect=[api.Unreachable("down"), "ok"])
     assert api.retried(operation) == "ok"
     assert no_sleep == [api.RETRY_DELAY_SECONDS]
@@ -47,27 +51,27 @@ def test_retried_returns_once_a_retry_succeeds(no_sleep):
 @pytest.mark.parametrize(
     "error", [api.ApiError("forbidden", 403), api.NotFound("gone", 404), KeyError("sha"), TypeError("bug")]
 )
-def test_retried_gives_up_at_once_on_a_4xx_or_a_bug(no_sleep, error):
+def test_retried_gives_up_at_once_on_a_4xx_or_a_bug(no_sleep: list[float], error: Exception) -> None:
     operation = mock.Mock(side_effect=error)
     with pytest.raises(type(error)):
         api.retried(operation)
     assert operation.call_count == 1 and no_sleep == []
 
 
-def test_requests_carry_the_token_and_the_timeout(monkeypatch):
-    seen = []
+def test_requests_carry_the_token_and_the_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str | None, float | None]] = []
 
-    def urlopen(request, timeout=None):
+    def urlopen(request: urllib.request.Request, timeout: float | None = None) -> Response:
         seen.append((request.get_header("Authorization"), timeout))
         return Response({"default_branch": "main"})
 
-    monkeypatch.setattr(api.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     client().default_branch()
     Gitea(SERVER, "org/repo", "").default_branch()
     assert seen == [("token secret", api.HTTP_TIMEOUT_SECONDS), (None, api.HTTP_TIMEOUT_SECONDS)]
 
 
-def test_lists_are_read_page_by_page(monkeypatch):
+def test_lists_are_read_page_by_page(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, [{"name": str(n)} for n in range(50)], [{"name": "50"}])
     assert len(client().labels()) == 51
     assert [url for _, url, _ in seen] == [f"{API}/labels?limit=50&page=1", f"{API}/labels?limit=50&page=2"]
@@ -76,7 +80,7 @@ def test_lists_are_read_page_by_page(monkeypatch):
 # --- errors ---
 
 
-def test_an_http_error_carries_giteas_message_status_and_url(monkeypatch):
+def test_an_http_error_carries_giteas_message_status_and_url(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, http_error(403, "token does not have scope"))
     with pytest.raises(api.ApiError) as raised:
         client().default_branch()
@@ -84,27 +88,27 @@ def test_an_http_error_carries_giteas_message_status_and_url(monkeypatch):
     assert str(raised.value) == "token does not have scope"
 
 
-def test_without_giteas_message_the_reason_stands(monkeypatch):
+def test_without_giteas_message_the_reason_stands(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, http_error(502))
     with pytest.raises(api.ApiError, match="^Reason$"):
         client().default_branch()
 
 
-def test_a_404_is_not_found(monkeypatch):
+def test_a_404_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, http_error(404, "not found"))
     with pytest.raises(api.NotFound):
         client().pull(3)
 
 
 @pytest.mark.parametrize("error", [urllib.error.URLError("connection refused"), TimeoutError("timed out")])
-def test_a_network_error_is_unreachable(monkeypatch, error):
+def test_a_network_error_is_unreachable(monkeypatch: pytest.MonkeyPatch, error: OSError) -> None:
     serve(monkeypatch, error)
     with pytest.raises(api.Unreachable) as raised:
         client().default_branch()
     assert raised.value.status is None
 
 
-def test_a_malformed_header_hides_the_token(monkeypatch):
+def test_a_malformed_header_hides_the_token(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, ValueError("Invalid header value b'token secret-value\\n'"))
     with pytest.raises(api.ApiError) as raised:
         client().default_branch()
@@ -112,9 +116,9 @@ def test_a_malformed_header_hides_the_token(monkeypatch):
     assert raised.value.__cause__ is None and raised.value.__suppress_context__
 
 
-def test_an_answer_that_is_not_json_is_an_api_error(monkeypatch):
+def test_an_answer_that_is_not_json_is_an_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
     class Garbage(Response):
-        def read(self):
+        def read(self) -> bytes:
             return b"<html>"
 
     serve(monkeypatch, Garbage(None))
@@ -125,13 +129,13 @@ def test_an_answer_that_is_not_json_is_an_api_error(monkeypatch):
 # --- reads ---
 
 
-def test_default_branch(monkeypatch):
+def test_default_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, {"default_branch": "trunk"})
     assert client().default_branch() == "trunk"
     assert seen == [("GET", API, None)]
 
 
-def test_branch_with_and_without_status_checks(monkeypatch):
+def test_branch_with_and_without_status_checks(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = {"commit": {"id": "f" * 40}, "status_check_contexts": ["ci / *"], "required_approvals": 2}
     seen = serve(monkeypatch, {**raw, "enable_status_check": True}, {**raw, "enable_status_check": False})
     assert client().branch("main") == api.Branch("f" * 40, ("ci / *",), 2)
@@ -139,7 +143,7 @@ def test_branch_with_and_without_status_checks(monkeypatch):
     assert seen[0][1] == f"{API}/branches/main"
 
 
-def test_branch_head_takes_the_exact_ref_among_prefix_matches(monkeypatch):
+def test_branch_head_takes_the_exact_ref_among_prefix_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(
         monkeypatch,
         [
@@ -151,7 +155,7 @@ def test_branch_head_takes_the_exact_ref_among_prefix_matches(monkeypatch):
     assert seen[0][1] == f"{API}/git/refs/heads/renovate/gradle"
 
 
-def test_branch_head_without_an_exact_ref_is_not_found(monkeypatch):
+def test_branch_head_without_an_exact_ref_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, [{"ref": "refs/heads/feature-2", "object": {"sha": "b" * 40}}])
     with pytest.raises(api.NotFound, match="refs/heads/feature not found"):
         client().branch_head("feature")
@@ -171,14 +175,14 @@ RAW_PULL = {
 PULL = api.PullRequest(5, "main", "feature", "5" * 40, {"automerge": 13}, True, "author", "feat: x (#1)", "", False)
 
 
-def test_open_pulls_and_pull(monkeypatch):
+def test_open_pulls_and_pull(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, [RAW_PULL], RAW_PULL)
     assert client().open_pulls() == [PULL]
     assert client().pull(5) == PULL
     assert [url for _, url, _ in seen] == [f"{API}/pulls?state=open&limit=50&page=1", f"{API}/pulls/5"]
 
 
-def test_statuses(monkeypatch):
+def test_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(
         monkeypatch,
         {
@@ -203,13 +207,13 @@ def test_statuses(monkeypatch):
     assert seen[0][1] == f"{API}/commits/{'a' * 40}/status?limit=50&page=1"
 
 
-def test_is_behind(monkeypatch):
+def test_is_behind(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, {"total_commits": 2}, {"total_commits": 0})
     assert client().is_behind("h", "b") and not client().is_behind("h", "b")
     assert seen[0][1] == f"{API}/compare/h...b"
 
 
-def test_reviews(monkeypatch):
+def test_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(
         monkeypatch,
         [
@@ -226,7 +230,7 @@ def test_reviews(monkeypatch):
     assert client().reviews(5) == [api.Review("chli1", "APPROVED", True, False, False, "c" * 40)]
 
 
-def test_timeline_decodes_pushes_and_label_events(monkeypatch):
+def test_timeline_decodes_pushes_and_label_events(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(
         monkeypatch,
         [
@@ -244,13 +248,13 @@ def test_timeline_decodes_pushes_and_label_events(monkeypatch):
     ]
 
 
-def test_pull_commits(monkeypatch):
+def test_pull_commits(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, [{"sha": "a" * 40, "commit": {"message": "feat: x (#1)\n\nbody"}, "parents": [{}]}])
     assert client().pull_commits(7) == [Commit("a" * 40, "feat: x (#1)", 1)]
     assert seen[0][1] == f"{API}/pulls/7/commits?stat=false&verification=false&files=false&limit=50&page=1"
 
 
-def test_is_issue_rejects_a_pull_request_and_a_missing_number(monkeypatch):
+def test_is_issue_rejects_a_pull_request_and_a_missing_number(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(
         monkeypatch,
         {"number": 4, "pull_request": None},
@@ -266,7 +270,7 @@ def test_is_issue_rejects_a_pull_request_and_a_missing_number(monkeypatch):
     assert [url for _, url, _ in seen] == [f"{API}/issues/{number}" for number in (4, 5, 6, 7)]
 
 
-def test_file(monkeypatch):
+def test_file(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(
         monkeypatch,
         {"type": "file", "content": base64.b64encode(b"x = 1\n").decode()},
@@ -284,13 +288,13 @@ def test_file(monkeypatch):
 
 
 @pytest.mark.parametrize("content", [None, "not base64!"])
-def test_a_file_without_readable_content_is_not_a_file(monkeypatch, content):
+def test_a_file_without_readable_content_is_not_a_file(monkeypatch: pytest.MonkeyPatch, content: str | None) -> None:
     serve(monkeypatch, {"type": "file", "content": content})
     with pytest.raises(api.NotAFile, match="^mergeweasel.toml: cannot read its content$"):
         client().file("mergeweasel.toml", "main")
 
 
-def test_tag_refs_and_tag_commit(monkeypatch):
+def test_tag_refs_and_tag_commit(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(
         monkeypatch,
         [
@@ -306,7 +310,7 @@ def test_tag_refs_and_tag_commit(monkeypatch):
     assert [url for _, url, _ in seen] == [f"{API}/git/refs/tags", f"{API}/git/refs/tags", f"{API}/git/tags/{'b' * 40}"]
 
 
-def test_commits_reads_the_next_page_only_when_needed(monkeypatch):
+def test_commits_reads_the_next_page_only_when_needed(monkeypatch: pytest.MonkeyPatch) -> None:
     page = [{"sha": f"{n:040x}", "commit": {"message": "fix: x (#1)"}} for n in range(50)]
     seen = serve(monkeypatch, page, page[:1])
     commits = client().commits("main")
@@ -318,7 +322,7 @@ def test_commits_reads_the_next_page_only_when_needed(monkeypatch):
     ]
 
 
-def test_commit_count_reads_giteas_count_header(monkeypatch):
+def test_commit_count_reads_giteas_count_header(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, Response([{}], {"X-Total-Count": "412"}), Response([{}]))
     assert client().commit_count("abc") == 412
     assert seen[0][1] == f"{API}/commits?sha=abc&stat=false&verification=false&files=false&limit=1"
@@ -326,7 +330,7 @@ def test_commit_count_reads_giteas_count_header(monkeypatch):
         client().commit_count("abc")
 
 
-def test_labels_and_org_labels(monkeypatch):
+def test_labels_and_org_labels(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, [{"name": "automerge"}], [{"name": "needs-fix"}])
     assert client().labels() == ["automerge"]
     assert client().org_labels() == ["needs-fix"]
@@ -337,12 +341,12 @@ def test_labels_and_org_labels(monkeypatch):
 
 
 @pytest.mark.parametrize("code", [403, 404])
-def test_org_labels_unreadable_is_none(monkeypatch, code):
+def test_org_labels_unreadable_is_none(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
     serve(monkeypatch, http_error(code))
     assert client().org_labels() is None
 
 
-def test_org_labels_other_errors_raise(monkeypatch):
+def test_org_labels_other_errors_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, http_error(500))
     with pytest.raises(api.ApiError):
         client().org_labels()
@@ -351,7 +355,7 @@ def test_org_labels_other_errors_raise(monkeypatch):
 # --- writes ---
 
 
-def test_writes_send_their_request(monkeypatch):
+def test_writes_send_their_request(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, *[None] * 7)
     gitea = client()
     gitea.rebase(3)
@@ -380,7 +384,7 @@ def test_writes_send_their_request(monkeypatch):
     ]
 
 
-def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch):
+def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(monkeypatch, None, None)
     client().merge(6, "h" * 40, SquashMessage("ci: land (#1)", "Why.", ()))
     client().merge(6, "h" * 40, None)
@@ -408,14 +412,14 @@ def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch):
         (500, "boom", api.ApiError),
     ],
 )
-def test_merge_errors(monkeypatch, code, message, kind):
+def test_merge_errors(monkeypatch: pytest.MonkeyPatch, code: int, message: str, kind: type[api.ApiError]) -> None:
     serve(monkeypatch, http_error(code, message))
     with pytest.raises(kind) as raised:
         client().merge(6, "h" * 40, None)
     assert type(raised.value) is kind and raised.value.message == message
 
 
-def test_a_conflicting_rebase_and_an_existing_release(monkeypatch):
+def test_a_conflicting_rebase_and_an_existing_release(monkeypatch: pytest.MonkeyPatch) -> None:
     serve(monkeypatch, http_error(409, "conflict"), http_error(409, "tag exists"), http_error(500, "boom"))
     with pytest.raises(api.Conflict):
         client().rebase(3)

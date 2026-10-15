@@ -37,11 +37,11 @@ class Forge(abc.ABC):
     workflow_directory: str
 
     @abc.abstractmethod
-    def squash_message(self, message, co_author):
+    def squash_message(self, message: str, co_author: str) -> str:
         """The message a squash merge lands, for `message` written by `co_author`, not the merger."""
 
     @abc.abstractmethod
-    def queue_workflow(self, text):
+    def queue_workflow(self, text: str) -> str:
         """The queue_source text as the test runs it."""
 
 
@@ -58,11 +58,11 @@ class Gitea(Forge):
     queue_source = workflow.QUEUE_WORKFLOW
     workflow_directory = ".gitea/workflows"
 
-    def squash_message(self, message, co_author):
+    def squash_message(self, message: str, co_author: str) -> str:
         # ADD_CO_COMMITTER_TRAILERS, on by default.
         return f"{message}\nCo-authored-by: {co_author}\n"
 
-    def queue_workflow(self, text):
+    def queue_workflow(self, text: str) -> str:
         return text
 
 
@@ -78,10 +78,10 @@ class Forgejo(Forge):
     queue_source = workflow.FORGEJO_QUEUE_WORKFLOW
     workflow_directory = ".forgejo/workflows"
 
-    def squash_message(self, message, co_author):
+    def squash_message(self, message: str, co_author: str) -> str:
         return message
 
-    def queue_workflow(self, text):
+    def queue_workflow(self, text: str) -> str:
         crons = CRON.findall(text)
         if len(crons) != 1:
             pytest.fail(f"Forgejo's mergeweasel-queue.yml needs one cron line to replace, has {len(crons)}")
@@ -91,7 +91,7 @@ class Forgejo(Forge):
 FORGES = {forge.name: forge for forge in (Gitea(), Forgejo())}
 
 
-def selected():
+def selected() -> Forge:
     name = os.environ.get(FORGE_VARIABLE, "gitea")
     if name not in FORGES:
         pytest.fail(f"{FORGE_VARIABLE}={name} names no forge - one of: {', '.join(FORGES)}")

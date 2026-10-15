@@ -1,13 +1,19 @@
 """Waiting for what the forge's workflows do, and saying what they did when it does not happen."""
 
-from driver import eventually
+from collections.abc import Callable
+from typing import Literal
+
+from driver import Repo, eventually
+from runner import Runner
 
 CI_CONTEXT = "ci / test (pull_request)"
 CHECK_CONTEXT = "mergeweasel-commits / check (pull_request)"
 TIMEOUT_SECONDS = 300
 
 
-def settle(repo, runner, probe, timeout=TIMEOUT_SECONDS):
+def settle[T](
+    repo: Repo, runner: Runner, probe: Callable[[], T | Literal[False] | None], timeout: float = TIMEOUT_SECONDS
+) -> T:
     """probe's first truthy result; on a timeout the runs and the runner's log go into the failure."""
     try:
         return eventually(probe, timeout=timeout, interval=2)

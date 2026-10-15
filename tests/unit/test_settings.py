@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -7,7 +9,11 @@ from mergeweasel.api import ApiError
 from mergeweasel.gitea import Gitea
 
 
-def gitea_with(default_branch="trunk", repo_labels=(), org_labels=()):
+def gitea_with(
+    default_branch: str = "trunk",
+    repo_labels: Iterable[str] = (),
+    org_labels: Iterable[str] | Exception | None = (),
+) -> Any:
     """org_labels: the organization's label names, None if unreadable, or the error reading them raises."""
     gitea = mock.create_autospec(Gitea, instance=True)
     gitea.default_branch.return_value = default_branch
@@ -19,7 +25,7 @@ def gitea_with(default_branch="trunk", repo_labels=(), org_labels=()):
     return gitea
 
 
-def test_without_variables_the_defaults_hold_and_renovate_is_off():
+def test_without_variables_the_defaults_hold_and_renovate_is_off() -> None:
     gitea = gitea_with()
     assert settings.read(gitea, {}) == settings.Settings(
         "trunk", "automerge", "needs-fix", "keep-commits", "prio", None
@@ -27,7 +33,7 @@ def test_without_variables_the_defaults_hold_and_renovate_is_off():
     gitea.default_branch.assert_called_once_with()
 
 
-def test_each_variable_sets_its_name():
+def test_each_variable_sets_its_name() -> None:
     environ = {
         "MERGEWEASEL_AUTOMERGE_LABEL": "merge-me",
         "MERGEWEASEL_NEEDS_FIX_LABEL": "broken",
@@ -40,27 +46,27 @@ def test_each_variable_sets_its_name():
     )
 
 
-def test_an_empty_or_blank_variable_keeps_the_default():
+def test_an_empty_or_blank_variable_keeps_the_default() -> None:
     # ${{ vars.X }} of an unset variable is the empty string.
     environ = {"MERGEWEASEL_AUTOMERGE_LABEL": "", "MERGEWEASEL_RENOVATE_ACCOUNT": "  "}
     assert settings.read(gitea_with(), environ) == settings.Settings("trunk")
 
 
-def test_two_roles_on_one_label_are_refused():
+def test_two_roles_on_one_label_are_refused() -> None:
     with pytest.raises(
         settings.SettingsError, match="four different labels, not automerge, automerge, keep-commits, prio"
     ):
         settings.read(gitea_with(), {"MERGEWEASEL_NEEDS_FIX_LABEL": "automerge"})
 
 
-def test_describe_names_every_setting():
+def test_describe_names_every_setting() -> None:
     assert settings.Settings("trunk", renovate="deps-bot").describe() == (
         "settings: base branch trunk; labels automerge, needs-fix, keep-commits, prio; Renovate account deps-bot"
     )
     assert settings.Settings("trunk").describe().endswith("; Renovate rule off")
 
 
-def test_prio_is_required_once_its_variable_names_it():
+def test_prio_is_required_once_its_variable_names_it() -> None:
     named = settings.read(gitea_with(), {"MERGEWEASEL_PRIO_LABEL": "hotfix"})
     assert named.prio_required and not named.keep_commits_required
     assert settings.required_labels(named) == ("automerge", "needs-fix", "hotfix")
@@ -73,11 +79,11 @@ def test_prio_is_required_once_its_variable_names_it():
 ALL = ("automerge", "needs-fix", "keep-commits")
 
 
-def test_automerge_and_needs_fix_are_always_required():
+def test_automerge_and_needs_fix_are_always_required() -> None:
     assert settings.required_labels(settings.Settings("trunk")) == ("automerge", "needs-fix")
 
 
-def test_keep_commits_is_required_once_its_variable_names_it():
+def test_keep_commits_is_required_once_its_variable_names_it() -> None:
     named = settings.read(gitea_with(), {"MERGEWEASEL_KEEP_COMMITS_LABEL": "no-squash"})
     assert named.keep_commits_required
     assert settings.required_labels(named) == ("automerge", "needs-fix", "no-squash")
@@ -89,27 +95,27 @@ def test_keep_commits_is_required_once_its_variable_names_it():
     assert settings.required_labels(blank) == ("automerge", "needs-fix")
 
 
-def test_labels_of_the_repository_need_no_organization_read():
+def test_labels_of_the_repository_need_no_organization_read() -> None:
     gitea = gitea_with(repo_labels=ALL)
     assert settings.missing_labels(gitea, ALL) == []
     gitea.org_labels.assert_not_called()
 
 
-def test_labels_of_the_organization_count():
+def test_labels_of_the_organization_count() -> None:
     gitea = gitea_with(repo_labels=("automerge",), org_labels=("needs-fix", "keep-commits"))
     assert settings.missing_labels(gitea, ALL) == []
 
 
-def test_a_label_nowhere_is_missing():
+def test_a_label_nowhere_is_missing() -> None:
     gitea = gitea_with(repo_labels=("automerge",), org_labels=("keep-commits",))
     assert settings.missing_labels(gitea, ALL) == ["needs-fix"]
 
 
-def test_unreadable_organization_labels_leave_it_unknown():
+def test_unreadable_organization_labels_leave_it_unknown() -> None:
     gitea = gitea_with(org_labels=None)
     assert settings.missing_labels(gitea, ALL) is None
 
 
-def test_another_error_reading_the_organization_is_raised():
+def test_another_error_reading_the_organization_is_raised() -> None:
     with pytest.raises(ApiError):
         settings.missing_labels(gitea_with(org_labels=ApiError("boom", 500, "url")), ALL)

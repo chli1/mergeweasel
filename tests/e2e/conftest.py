@@ -2,22 +2,24 @@
 
 import pathlib
 import re
+from collections.abc import Callable, Iterator
 
 import pytest
 import runner as runners
 import workflow
 from actions import CHECK_CONTEXT, CI_CONTEXT
-from driver import ADMIN, create_repo
+from driver import ADMIN, Repo, create_repo
+from server import Server
 
 
 @pytest.fixture(scope="session")
-def runner(server, run_id, built_image):
+def runner(server: Server, run_id: str, built_image: str) -> Iterator[runners.Runner]:
     with runners.start(server, run_id, built_image) as running:
         yield running
 
 
 @pytest.fixture
-def workflow_files(workflow_text, image, server):
+def workflow_files(workflow_text: Callable[[pathlib.Path], str], image: str, server: Server) -> dict[str, str]:
     """The queue's and the commit check's workflow files as the variant runs them, each with the image
     under test, the queue's the forge's own."""
     sources = {"mergeweasel-queue.yml": server.forge.queue_source, "mergeweasel-commits.yml": workflow.COMMITS_WORKFLOW}
@@ -30,7 +32,13 @@ def workflow_files(workflow_text, image, server):
 
 
 @pytest.fixture
-def actions_repo(server, runner, image, workflow_files, request):
+def actions_repo(
+    server: Server,
+    runner: runners.Runner,
+    image: str,
+    workflow_files: dict[str, str],
+    request: pytest.FixtureRequest,
+) -> Repo:
     """A repository set up as docs/onboarding.md describes, running the workflow files under test."""
     name = re.sub(r"[^\w.-]+", "-", request.node.name).strip("-")
     repo = create_repo(server.clients, name, contexts=(CI_CONTEXT, CHECK_CONTEXT))

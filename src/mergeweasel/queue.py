@@ -8,9 +8,23 @@ The labels, the base branch and the Renovate account are the instance's names, f
 import dataclasses
 import fnmatch
 import re
+from collections.abc import Iterable, Mapping, Sequence
 
 from mergeweasel import commit_rule, config
-from mergeweasel.api import LABEL_ADDED, PUSH, Conflict, MergeDeferred, MergeRefused, retried
+from mergeweasel.accounts import Approver, ApproverAccounts, MergerAccount
+from mergeweasel.api import (
+    LABEL_ADDED,
+    PUSH,
+    Client,
+    CommitStatus,
+    Conflict,
+    MergeDeferred,
+    MergeRefused,
+    Review,
+    TimelineEvent,
+    retried,
+)
+from mergeweasel.settings import Settings
 
 # The workflow's name: Gitea prefixes its job statuses with it.
 QUEUE_WORKFLOW = "mergeweasel-queue"
@@ -37,7 +51,7 @@ RENOVATE_APPROVAL = (
 )
 
 
-def text(template, settings):
+def text(template: str, settings: Settings) -> str:
     return template.format_map(dataclasses.asdict(settings))
 
 
@@ -53,24 +67,24 @@ class Pull:
     number: int
     head_ref: str
     head_sha: str
-    labels: frozenset
+    labels: frozenset[str]
     draft: bool
     # True if the base branch holds commits the head lacks.
     behind: bool
     poster: str
     # Distinct logins of the valid official approvals, in review order.
-    approvers: tuple
+    approvers: tuple[str, ...]
     # Reviewers named by the merger's carry-over on the head, in its line order; empty without one.
-    carried: tuple
+    carried: tuple[str, ...]
     # True if an official reviewer's latest verdict is an undismissed request for changes.
     rejected: bool
     # Logins that approved the current head, official or not: an approval Gitea ignores is not repeated.
-    approved_head: frozenset
+    approved_head: frozenset[str]
     # True if renovate pushed after needs-fix was last set; always False without needs-fix.
     renovate_retried: bool
     # Posted, pushed and labelled automerge by renovate alone: the approver accounts approve it.
     renovate_trusted: bool
-    statuses: dict
+    statuses: dict[str, Status]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,7 +103,7 @@ class Rebase:
     head_ref: str
     head_sha: str
     # The reviewers the carry-over lists on the rebased head.
-    reviewers: tuple
+    reviewers: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -102,11 +116,10 @@ class FlagNeedsFix:
 class Restored:
     """An approval the rebase dismissed and the carry-over lists, restored by an approver account."""
 
-    # A login, or DRY_RUN_APPROVER in a dry run.
-    approver: object
+    approver: Approver
     reviewer: str
 
-    def body(self, settings):
+    def body(self, settings: Settings) -> str:
         return f"Approval of {self.reviewer}, carried over the merge queue's rebase."
 
 
@@ -114,10 +127,9 @@ class Restored:
 class RenovateApproval:
     """An approval a trusted Renovate pull request is missing; no reviewer gave it."""
 
-    # A login, or DRY_RUN_APPROVER in a dry run.
-    approver: object
+    approver: Approver
 
-    def body(self, settings):
+    def body(self, settings: Settings) -> str:
         return text(RENOVATE_APPROVAL, settings)
 
 
@@ -126,7 +138,7 @@ class Merge:
     number: int
     head_sha: str
     # The Restored and RenovateApproval the approver accounts post before the merge.
-    approvals: tuple
+    approvals: tuple[Restored | RenovateApproval, ...]
     # Fast-forward the commits as they are instead of squashing them.
     keep_commits: bool
 
@@ -137,10 +149,15 @@ class Land:
 
     merge: Merge
     # The squash message, None to fast-forward.
-    message: object
+    message: commit_rule.SquashMessage | None
 
 
-def combine(states):
+# What decide() returns, and what a pass carries out: a validated Merge is a Land.
+Decision = Idle | Wait | Rebase | FlagNeedsFix | Merge
+Action = Idle | Wait | Rebase | FlagNeedsFix | Land
+
+
+def combine(states: Sequence[str]) -> str:
     """Gitea's CommitStatusStates.Combine."""
     if any(state in FAILED for state in states):
         return "failure"
@@ -149,17 +166,18 @@ def combine(states):
     return "pending"
 
 
-def is_required(context, required):
+def is_required(context: str, required: Iterable[str]) -> bool:
     return any(fnmatch.fnmatchcase(context, pattern) for pattern in required)
 
 
-def verdict(statuses, required):
+def verdict(statuses: Mapping[str, Status], required: Sequence[str]) -> str:
     """Gitea's MergeRequiredContextsCommitStatus over the latest status per context."""
     if not statuses:
         return "pending"
     if not required:
         return combine([status.state for status in statuses.values()])
-    matched, all_matched = [], True
+    matched: list[str] = []
+    all_matched = True
     for pattern in required:
         hits = [status.state for context, status in statuses.items() if fnmatch.fnmatchcase(context, pattern)]
         matched.extend(hits)
@@ -172,12 +190,12 @@ def verdict(statuses, required):
     return "pending"
 
 
-def standing(pull):
+def standing(pull: Pull) -> set[str]:
     """Every reviewer whose approval stands: valid on the head or carried over a rebase."""
     return set(pull.approvers) | set(pull.carried)
 
 
-def queued(pull, needed, approvers, settings):
+def queued(pull: Pull, needed: int, approvers: ApproverAccounts, settings: Settings) -> bool:
     """Without approver accounts, Renovate's update is approved by hand."""
     renovate_approvable = pull.renovate_trusted and approvers.any()
     return (
@@ -189,7 +207,7 @@ def queued(pull, needed, approvers, settings):
     )
 
 
-def carried_forward(pull, approvers):
+def carried_forward(pull: Pull, approvers: ApproverAccounts) -> tuple[str, ...]:
     """The reviewers for the rebased head's carry-over.
 
     On a head that has a carry-over, the approver accounts' approvals are its restorations.
@@ -200,7 +218,9 @@ def carried_forward(pull, approvers):
     )
 
 
-def restorations(pull, needed, approvers):
+def restorations(
+    pull: Pull, needed: int, approvers: ApproverAccounts
+) -> tuple[Restored | RenovateApproval, ...] | None:
     """The approvals to post before the merge, None if too few approver accounts can approve.
 
     The carried reviewers' approvals first, then on a trusted Renovate pull request the rest.
@@ -208,7 +228,7 @@ def restorations(pull, needed, approvers):
     missing = needed - len(pull.approvers)
     if missing <= 0:
         return ()
-    assigned = approvers.assign(pull, missing)
+    assigned: tuple[Approver, ...] | None = approvers.assign(pull, missing)
     if assigned is None:
         return None
     reviewers = [login for login in pull.carried if login not in pull.approvers][:missing]
@@ -218,7 +238,7 @@ def restorations(pull, needed, approvers):
     return restored + tuple(RenovateApproval(approver) for approver in assigned[len(reviewers) :])
 
 
-def failure_comment(pull, required, settings):
+def failure_comment(pull: Pull, required: Sequence[str], settings: Settings) -> str:
     failed = [
         status
         for context, status in sorted(pull.statuses.items())
@@ -230,19 +250,19 @@ def failure_comment(pull, required, settings):
     )
 
 
-def conflict_comment(settings):
+def conflict_comment(settings: Settings) -> str:
     return f"mergeweasel: rebasing onto `{settings.base_branch}` failed with a conflict.\n\n{text(CONFLICT_HINT, settings)}"
 
 
-def refused_comment(message, settings):
+def refused_comment(message: str, settings: Settings) -> str:
     return f"mergeweasel: the server refused the merge: {message}\n\n{text(REFUSED_HINT, settings)}"
 
 
-def shortfall_comment(settings):
+def shortfall_comment(settings: Settings) -> str:
     return f"mergeweasel: too few approver accounts to restore the approvals.\n\n{text(SHORTFALL_HINT, settings)}"
 
 
-def invalid_message_comment(problems, keep_commits, settings):
+def invalid_message_comment(problems: Iterable[str], keep_commits: bool, settings: Settings) -> str:
     lines = [f"- {problem}" for problem in problems]
     return "\n".join(
         [
@@ -254,15 +274,17 @@ def invalid_message_comment(problems, keep_commits, settings):
     )
 
 
-def invalid_config_comment(error, settings):
+def invalid_config_comment(error: config.ConfigError, settings: Settings) -> str:
     return f"mergeweasel: {error}\n\n{text(CONFIG_HINT, settings)}"
 
 
-def carry_over_description(reviewers, head_sha):
+def carry_over_description(reviewers: Iterable[str], head_sha: str) -> str:
     return "\n".join([f"approved at {head_sha[:7]}", *(f"approved by {login}" for login in reviewers)])
 
 
-def decide(pulls, required, needed, approvers, settings):
+def decide(
+    pulls: Iterable[Pull], required: Sequence[str], needed: int, approvers: ApproverAccounts, settings: Settings
+) -> Decision:
     # prio first, then up to date - the one in flight stays in place - then the lowest number.
     candidates = sorted(
         (pull for pull in pulls if queued(pull, needed, approvers, settings)),
@@ -287,8 +309,8 @@ def decide(pulls, required, needed, approvers, settings):
     return Merge(pull.number, pull.head_sha, approvals=approvals, keep_commits=settings.keep_commits in pull.labels)
 
 
-def valid_approvers(reviews):
-    logins = []
+def valid_approvers(reviews: Iterable[Review]) -> tuple[str, ...]:
+    logins: list[str] = []
     for review in reviews:
         if (
             review.state == "APPROVED"
@@ -301,15 +323,15 @@ def valid_approvers(reviews):
     return tuple(logins)
 
 
-def rejected(reviews):
-    latest = {}
+def rejected(reviews: Iterable[Review]) -> bool:
+    latest: dict[str, Review] = {}
     for review in reviews:
         if review.official and review.state in ("APPROVED", "REQUEST_CHANGES"):
             latest[review.login] = review
     return any(review.state == "REQUEST_CHANGES" and not review.dismissed for review in latest.values())
 
 
-def head_approvers(reviews, head_sha):
+def head_approvers(reviews: Iterable[Review], head_sha: str) -> frozenset[str]:
     """Official or not: an approval the whitelist ignores must not be repeated every pass."""
     return frozenset(
         review.login
@@ -318,7 +340,7 @@ def head_approvers(reviews, head_sha):
     )
 
 
-def renovate_pushed_since_needs_fix(timeline, settings):
+def renovate_pushed_since_needs_fix(timeline: Sequence[TimelineEvent], settings: Settings) -> bool:
     """Timeline ids are chronological; a Renovate push after the latest flag retries the pull request."""
     if not settings.renovate:
         return False
@@ -328,7 +350,7 @@ def renovate_pushed_since_needs_fix(timeline, settings):
     return any(event.kind == PUSH and event.login == settings.renovate and event.id > max(flags) for event in timeline)
 
 
-def renovate_trusted(poster, timeline, merger, settings):
+def renovate_trusted(poster: str, timeline: Sequence[TimelineEvent], merger: MergerAccount, settings: Settings) -> bool:
     """Renovate's own update: no one else pushed - the merger's rebases aside - and renovate set automerge last."""
     if not settings.renovate or poster != settings.renovate:
         return False
@@ -339,16 +361,21 @@ def renovate_trusted(poster, timeline, merger, settings):
     return bool(added) and added[-1] == settings.renovate
 
 
-def parse_carry_over(description):
+def parse_carry_over(description: str) -> tuple[str, ...] | None:
     """The reviewers a carry-over description lists, None if it is none."""
     first, *rest = description.split("\n")
-    matches = [CARRY_OVER_REVIEWER.match(line) for line in rest]
-    if not CARRY_OVER_HEAD.match(first) or not matches or not all(matches):
+    if not CARRY_OVER_HEAD.match(first) or not rest:
         return None
-    return tuple(match.group(1) for match in matches)
+    reviewers = []
+    for line in rest:
+        match = CARRY_OVER_REVIEWER.match(line)
+        if match is None:
+            return None
+        reviewers.append(match.group(1))
+    return tuple(reviewers)
 
 
-def carried_reviewers(statuses, merger):
+def carried_reviewers(statuses: Iterable[CommitStatus], merger: MergerAccount) -> tuple[str, ...]:
     """Only the merger's carry-over counts."""
     for status in statuses:
         if status.context == CARRY_OVER_CONTEXT and status.state == "success" and merger.owns(status.creator):
@@ -358,7 +385,7 @@ def carried_reviewers(statuses, merger):
     return ()
 
 
-def statuses_by_context(statuses, server):
+def statuses_by_context(statuses: Iterable[CommitStatus], server: str) -> dict[str, Status]:
     """The queue's own statuses never count towards its verdict: the carry-over and its own job runs."""
     return {
         status.context: Status(status.context, status.state, absolute(server, status.target_url))
@@ -367,17 +394,17 @@ def statuses_by_context(statuses, server):
     }
 
 
-def absolute(server, url):
+def absolute(server: str, url: str) -> str:
     return server + url if url.startswith("/") else url
 
 
-def needs_fix_to_clear(pulls, settings):
+def needs_fix_to_clear(pulls: Iterable[Pull], settings: Settings) -> list[Pull]:
     """Step 0: Renovate pushing to a needs-fix pull request retries it."""
     return [pull for pull in pulls if settings.needs_fix in pull.labels and pull.renovate_retried]
 
 
 class MessageInvalid(Exception):
-    def __init__(self, problems, keep_commits):
+    def __init__(self, problems: list[str], keep_commits: bool) -> None:
         super().__init__("; ".join(problems))
         self.problems = problems
         self.keep_commits = keep_commits
@@ -386,18 +413,19 @@ class MessageInvalid(Exception):
 @dataclasses.dataclass(frozen=True)
 class State:
     base_sha: str
-    required: tuple
+    required: tuple[str, ...]
     # required_approvals of the base branch's protection.
     needed: int
-    pulls: list
+    pulls: list[Pull]
     # Pull request number -> its labels' name -> id: removing a label needs its id, and a repository
     # and an organization label can share a name.
-    label_ids: dict
+    label_ids: dict[int, dict[str, int]]
 
 
-def read_state(gitea, server, merger, settings):
+def read_state(gitea: Client, server: str, merger: MergerAccount, settings: Settings) -> State:
     branch = gitea.branch(settings.base_branch)
-    pulls, label_ids = [], {}
+    pulls: list[Pull] = []
+    label_ids: dict[int, dict[str, int]] = {}
     for pull_request in gitea.open_pulls():
         if pull_request.base_ref != settings.base_branch or settings.automerge not in pull_request.labels:
             continue
@@ -428,7 +456,7 @@ def read_state(gitea, server, merger, settings):
     return State(branch.sha, branch.required_contexts, branch.required_approvals, pulls, label_ids)
 
 
-def rebase(gitea, action):
+def rebase(gitea: Client, action: Rebase) -> None:
     gitea.rebase(action.number)
     if not action.reviewers:
         # No approval stands, nothing to carry over.
@@ -443,7 +471,7 @@ def rebase(gitea, action):
     )
 
 
-def merge_message(gitea, action):
+def merge_message(gitea: Client, action: Merge) -> commit_rule.SquashMessage | None:
     """The squash message, None to fast-forward; MessageInvalid or ConfigError if it may not land.
 
     Read here, not in read_state: the title, body and commits can change after the commit-message
@@ -467,7 +495,7 @@ def merge_message(gitea, action):
     return message
 
 
-def validated(gitea, action, settings):
+def validated(gitea: Client, action: Decision, settings: Settings) -> Action:
     """A Merge as a Land, or as a needs-fix hand-over if what it would land is invalid.
 
     Reads only, so a dry run flags and hands over as a real pass does.
@@ -482,7 +510,9 @@ def validated(gitea, action, settings):
         return FlagNeedsFix(action.number, invalid_message_comment(invalid.problems, invalid.keep_commits, settings))
 
 
-def merge(gitea, action, approvers, label_ids, settings):
+def merge(
+    gitea: Client, action: Land, approvers: ApproverAccounts, label_ids: dict[int, dict[str, int]], settings: Settings
+) -> None:
     pull = action.merge
     for approval in pull.approvals:
         approvers.client(approval.approver).approve(pull.number, pull.head_sha, approval.body(settings))
@@ -496,9 +526,9 @@ def merge(gitea, action, approvers, label_ids, settings):
     gitea.remove_label(pull.number, settings.automerge, label_ids[pull.number][settings.automerge])
 
 
-def relabel(pulls, number, add=None, remove=None):
+def relabel(pulls: Iterable[Pull], number: int, add: str | None = None, remove: str | None = None) -> list[Pull]:
     """The pass's own view of a label change, so the next decision sees it without a re-read."""
-    changed = []
+    changed: list[Pull] = []
     for pull in pulls:
         if pull.number == number:
             labels = set(pull.labels) - {remove}
@@ -509,24 +539,38 @@ def relabel(pulls, number, add=None, remove=None):
     return changed
 
 
-def execute(gitea, action, approvers, label_ids, settings):
+def execute(
+    gitea: Client,
+    action: Action,
+    approvers: ApproverAccounts,
+    label_ids: dict[int, dict[str, int]],
+    settings: Settings,
+) -> Action:
     """Carry out a Rebase or Land.
 
     A conflict or a refused merge - found only by the write - becomes a needs-fix hand-over.
     """
-    try:
-        if isinstance(action, Rebase):
+    if isinstance(action, Rebase):
+        try:
             rebase(gitea, action)
-        elif isinstance(action, Land):
+        except Conflict:
+            return FlagNeedsFix(action.number, conflict_comment(settings))
+    elif isinstance(action, Land):
+        try:
             merge(gitea, action, approvers, label_ids, settings)
-    except Conflict:
-        return FlagNeedsFix(action.number, conflict_comment(settings))
-    except MergeRefused as refusal:
-        return FlagNeedsFix(action.merge.number, refused_comment(refusal.message, settings))
+        except MergeRefused as refusal:
+            return FlagNeedsFix(action.merge.number, refused_comment(refusal.message, settings))
     return action
 
 
-def run_pass(gitea, server, dry_run, merger, approvers, settings):
+def run_pass(
+    gitea: Client,
+    server: str,
+    dry_run: bool,
+    merger: MergerAccount,
+    approvers: ApproverAccounts,
+    settings: Settings,
+) -> Action:
     """merger, approvers: the accounts, their DryRun variants in a dry run that lacks their tokens."""
     state = read_state(gitea, server, merger, settings)
     pulls = state.pulls

@@ -2,6 +2,9 @@
 
 import dataclasses
 import time
+from collections.abc import Iterable
+
+from mergeweasel.api import Client, WorkflowRun
 
 QUEUE_WORKFLOW_FILE = "mergeweasel-queue.yml"
 # A manual dispatch can be a dry run, which must neither replace an event's pass nor be replaced.
@@ -28,7 +31,7 @@ class Superseded:
     run_id: int
 
 
-def turn(runs, own_id, own_event):
+def turn(runs: Iterable[WorkflowRun], own_id: int, own_event: str) -> OwnTurn | AfterOlder | Superseded:
     """A newer pass reads a newer state, so an event's pass leaves to a newer event's pass; otherwise
     it waits until every older pass has finished.
     """
@@ -42,7 +45,7 @@ def turn(runs, own_id, own_event):
     return OwnTurn()
 
 
-def wait_for_turn(gitea, own_id, own_event):
+def wait_for_turn(gitea: Client, own_id: int, own_event: str) -> bool:
     """True once this pass may run, False if a newer pass takes over."""
     while True:
         # One page: the newest runs come first, and an unfinished one is never 50 runs old.

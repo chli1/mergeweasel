@@ -4,6 +4,7 @@ import dataclasses
 import pathlib
 import re
 import shlex
+from collections.abc import Mapping
 
 import yaml
 
@@ -24,18 +25,18 @@ EXPRESSION = re.compile(r"\$\{\{\s*(vars|secrets)\.(\w+)\s*\}\}")
 class QueueWorkflow:
     image: str
     # Name to value as written in the file: a literal or one ${{ vars.X }} / ${{ secrets.X }}.
-    environment: dict
-    command: list
+    environment: dict[str, object]
+    command: list[str]
 
-    def resolve(self, contexts):
+    def resolve(self, contexts: Mapping[str, Mapping[str, str]]) -> dict[str, str]:
         """The environment with each expression looked up in contexts ({"vars": {...}, "secrets": {...}}).
 
         An expression of another shape, or a name contexts lack, fails: a new one in the workflow must
         reach the test, not pass untested.
         """
-        resolved = {}
-        for name, value in self.environment.items():
-            value = str(value)
+        resolved: dict[str, str] = {}
+        for name, written in self.environment.items():
+            value = str(written)
             if "${{" in value:
                 match = EXPRESSION.fullmatch(value)
                 if not match:
@@ -48,11 +49,11 @@ class QueueWorkflow:
         return resolved
 
 
-def read(path=QUEUE_WORKFLOW):
+def read(path: pathlib.Path = QUEUE_WORKFLOW) -> QueueWorkflow:
     return parse(path.read_text(), path.name)
 
 
-def parse(text, name=QUEUE_WORKFLOW.name):
+def parse(text: str, name: str = QUEUE_WORKFLOW.name) -> QueueWorkflow:
     job = yaml.safe_load(text)["jobs"]["pass"]
     steps = [step for step in job["steps"] if step.get("if") == PASS_STEP_CONDITION]
     if len(steps) != 1:

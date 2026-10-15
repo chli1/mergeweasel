@@ -13,20 +13,20 @@ VERSION_PATH = "/api/forgejo/v1/version"
 
 
 class Forgejo(Client):
-    def workflow_runs(self, file):
+    def workflow_runs(self, file: str) -> list[WorkflowRun]:
         # page: without it, Forgejo ignores limit and reads the workflow's whole history.
         raw = self._json("GET", f"/actions/runs?workflow_id={file}&limit={PAGE_SIZE}&page=1")
         # trigger_event: event is the webhook's - push for a scheduled run, empty for a dispatch.
         return [WorkflowRun(run["id"], run["status"] in FINISHED, run["trigger_event"]) for run in raw["workflow_runs"]]
 
-    def remove_label(self, number, name, label_id):
+    def remove_label(self, number: int, name: str, label_id: int) -> None:
         # By name: Forgejo looks a label's id up among the repository's labels only, so an
         # organization label's id answers 422. A name resolves to the repository's label first,
         # then the organization's.
         self._json("DELETE", f"/issues/{number}/labels/{urllib.parse.quote(name, safe='')}")
 
 
-def detect(server, token):
+def detect(server: str, token: str) -> type[Client]:
     """The client class for the forge at server: Forgejo if it names its version."""
     try:
         payload, _ = exchange("GET", f"{server}{VERSION_PATH}", token)

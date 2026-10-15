@@ -41,11 +41,13 @@ class Parts:
     template: "Template | None" = dataclasses.field(default=None, compare=False, repr=False)
 
     @property
-    def project(self):
+    def project(self) -> str | None:
         return self.key.rpartition("-")[0] if self.key else None
 
-    def line(self):
+    def line(self) -> str:
         """The release notes' line: the subject through its template, without the type and `!`."""
+        # Template.match sets it; the release notes only read parts it returned.
+        assert self.template is not None
         return self.template.render(self)
 
 
@@ -53,14 +55,14 @@ class Parts:
 class Template:
     text: str
     # Text and placeholder names alternating, starting and ending with text (possibly empty).
-    parts: tuple
-    pattern: re.Pattern
+    parts: tuple[str, ...]
+    pattern: re.Pattern[str]
 
     @property
-    def names(self):
+    def names(self) -> tuple[str, ...]:
         return self.parts[1::2]
 
-    def match(self, subject):
+    def match(self, subject: str) -> Parts | None:
         """The subject's parts, None if it does not take this form."""
         match = self.pattern.fullmatch(subject)
         if match is None:
@@ -78,8 +80,8 @@ class Template:
             template=self,
         )
 
-    def render(self, parts):
-        rendered = []
+    def render(self, parts: Parts) -> str:
+        rendered: list[str] = []
         for index, part in enumerate(self.parts):
             if index % 2 == 1:
                 rendered.append(
@@ -92,12 +94,13 @@ class Template:
                 rendered.append(part)
         return "".join(rendered)
 
-    def describe(self):
+    def describe(self) -> str:
         return "".join(part if index % 2 == 0 else PLACEHOLDERS[part][1] for index, part in enumerate(self.parts))
 
 
-def compile(text):
-    parts, position = [], 0
+def compile(text: str) -> Template:
+    parts: list[str] = []
+    position = 0
     for match in PLACEHOLDER.finditer(text):
         parts += [text[position : match.start()], match[1]]
         position = match.end()

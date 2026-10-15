@@ -3,9 +3,10 @@
 import dataclasses
 import re
 import tomllib
+from typing import Any
 
 from mergeweasel import commit_rule, subject_template, version_template
-from mergeweasel.api import NotAFile
+from mergeweasel.api import Client, NotAFile
 
 CONFIG_FILE = "mergeweasel.toml"
 DEFAULT_TAG = "v{major}.{minor}.{patch}"
@@ -13,7 +14,7 @@ DEFAULT_TAG = "v{major}.{minor}.{patch}"
 DEFAULT_MINOR_TYPES = ("feat",)
 DEFAULT_PATCH_TYPES = ("fix", "perf", "revert")
 # Table -> key -> type.
-SCHEMA = {
+SCHEMA: dict[str, dict[str, type]] = {
     "release": {"enabled": bool, "tag": str, "minor_types": list, "patch_types": list},
     "commits": {
         "scopes": list,
@@ -42,15 +43,15 @@ class Config:
     tag: version_template.Template
     commits: commit_rule.CommitRules
     # The types that release a minor and a patch version; `!` always releases a major one.
-    minor_types: tuple = DEFAULT_MINOR_TYPES
-    patch_types: tuple = DEFAULT_PATCH_TYPES
+    minor_types: tuple[str, ...] = DEFAULT_MINOR_TYPES
+    patch_types: tuple[str, ...] = DEFAULT_PATCH_TYPES
     # Off by default: the queue releases nothing; the other release keys stay checked.
     release_enabled: bool = False
     # Tables and keys the file names and this version does not know, dotted; load() reports them.
-    unknown_keys: tuple = ()
+    unknown_keys: tuple[str, ...] = ()
 
 
-def load(gitea, ref, strict=False):
+def load(gitea: Client, ref: str, strict: bool = False) -> Config:
     """The file as of ref: a branch, or a commit's SHA. Prints the keys it ignores.
 
     strict: an unknown key is a ConfigError instead - for a reader that runs the pull request's own
@@ -73,12 +74,12 @@ def load(gitea, ref, strict=False):
     return configuration
 
 
-def parse(text):
+def parse(text: str) -> Config:
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise ConfigError(f"{CONFIG_FILE}: {error}") from None
-    unknown = []
+    unknown: list[str] = []
     for table, keys in data.items():
         if table not in SCHEMA:
             unknown.append(table)
@@ -136,12 +137,12 @@ def parse(text):
     return Config(tag, rules, minor_types, patch_types, enabled, tuple(unknown))
 
 
-def subject_templates(texts):
+def subject_templates(texts: list[Any] | None) -> tuple[subject_template.Template, ...]:
     if texts is None:
         return commit_rule.DEFAULT_COMMIT_RULES.templates
     if not texts:
         raise ConfigError(f"{CONFIG_FILE}: commits.subject must not be empty")
-    templates = []
+    templates: list[subject_template.Template] = []
     for text in texts:
         if not isinstance(text, str):
             raise ConfigError(f"{CONFIG_FILE}: commits.subject: {text!r} is not a template")
@@ -156,7 +157,12 @@ def subject_templates(texts):
 TYPE_KEYS = {"commits": ("types", "scopes"), "release": ("minor_types", "patch_types")}
 
 
-def check_conventional(templates, commits, release, enabled):
+def check_conventional(
+    templates: tuple[subject_template.Template, ...],
+    commits: dict[str, Any],
+    release: dict[str, Any],
+    enabled: bool,
+) -> None:
     """Either every form has {conventional} or none has - then nothing may need the type."""
     typed = [template for template in templates if subject_template.CONVENTIONAL in template.names]
     if len(typed) == len(templates):
@@ -182,7 +188,7 @@ def check_conventional(templates, commits, release, enabled):
 APPENDED_ENDINGS = (" (#{pull})", " (#{pull_or_issue})")
 
 
-def check_appendable(templates):
+def check_appendable(templates: tuple[subject_template.Template, ...]) -> None:
     key = "commits.squash_append_pull_reference"
     for template in templates:
         if template.text.endswith(" (#{issue})"):
@@ -198,7 +204,7 @@ def check_appendable(templates):
         )
 
 
-def commit_types(texts):
+def commit_types(texts: list[Any] | None) -> tuple[str, ...]:
     if texts is None:
         return commit_rule.TYPES
     if not texts:
@@ -208,15 +214,15 @@ def commit_types(texts):
     return tuple(texts)
 
 
-def check_type(key, text):
+def check_type(key: str, text: object) -> None:
     if not isinstance(text, str) or not TYPE.fullmatch(text):
         raise ConfigError(f"{CONFIG_FILE}: {key}: {text!r} is not a type - it must be lowercase letters a-z")
 
 
-def release_types(table, types):
+def release_types(table: dict[str, Any], types: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """minor_types and patch_types. A list the file leaves out keeps of its default only the types in
     `types` and not in the other, configured list - so its errors never name an entry the file lacks."""
-    configured = {}
+    configured: dict[str, tuple[str, ...]] = {}
     for key in ("minor_types", "patch_types"):
         if key not in table:
             continue
@@ -232,7 +238,7 @@ def release_types(table, types):
         )
     taken = {entry for entries in configured.values() for entry in entries}
 
-    def effective(key, default):
+    def effective(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
         if key in configured:
             return configured[key]
         return tuple(name for name in default if name in types and name not in taken)

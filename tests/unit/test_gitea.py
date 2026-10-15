@@ -1,10 +1,11 @@
+import pytest
 from fake_http import API, SERVER, serve
 
 from mergeweasel.api import WorkflowRun
 from mergeweasel.gitea import Gitea
 
 
-def test_workflow_runs(monkeypatch):
+def test_workflow_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = serve(
         monkeypatch,
         {

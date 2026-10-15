@@ -1,4 +1,7 @@
 import json
+import pathlib
+from collections.abc import Iterable
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -10,7 +13,7 @@ from mergeweasel.gitea import Gitea
 from mergeweasel.settings import Settings
 
 
-def raw_commit(sha, subject, parents=1):
+def raw_commit(sha: str, subject: str, parents: int = 1) -> Commit:
     return Commit(sha, subject, parents)
 
 
@@ -22,15 +25,15 @@ ISSUE_OR_PULL = (
 
 
 def api(
-    commits=(),
-    issues=(99, 209),
-    config=ISSUE_OR_PULL,
-    title="ci: squash by default (#209)",
-    body="",
-    labels=(),
-    head="h" * 40,
-    merged=False,
-):
+    commits: Iterable[Commit] = (),
+    issues: Iterable[int] = (99, 209),
+    config: str | None = ISSUE_OR_PULL,
+    title: str = "ci: squash by default (#209)",
+    body: str = "",
+    labels: Iterable[str] = (),
+    head: str = "h" * 40,
+    merged: bool = False,
+) -> Any:
     """Pull request 213 as the API reads it when the job runs; config: mergeweasel.toml's text at the
     head, None without the file."""
     gitea = mock.create_autospec(Gitea, instance=True)
@@ -43,7 +46,7 @@ def api(
     return gitea
 
 
-def event(tmp_path):
+def event(tmp_path: pathlib.Path) -> str:
     """A pull_request event for 213 whose payload is stale: only its number may count."""
     path = tmp_path / "event.json"
     path.write_text(
@@ -64,14 +67,16 @@ def event(tmp_path):
     return str(path)
 
 
-def run(gitea, event_path, settings=Settings("main")):
+def run(gitea: Any, event_path: str, settings: Settings = Settings("main")) -> int:
     return check.run(gitea, event_path, settings)
 
 
 # --- squash (default) ---
 
 
-def test_squash_passes_with_a_valid_title_and_section(tmp_path, capsys):
+def test_squash_passes_with_a_valid_title_and_section(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     gitea = api(body="## Commit\nWhy.")
     assert run(gitea, event(tmp_path)) == 0
     gitea.pull.assert_called_once_with(213)
@@ -80,29 +85,31 @@ def test_squash_passes_with_a_valid_title_and_section(tmp_path, capsys):
     assert "ci: squash by default (#209)\n\nWhy." in capsys.readouterr().out
 
 
-def test_squash_ignores_the_branch_commits(tmp_path):
+def test_squash_ignores_the_branch_commits(tmp_path: pathlib.Path) -> None:
     gitea = api(commits=[raw_commit("a" * 40, "wip")])
     assert run(gitea, event(tmp_path)) == 0
     gitea.pull_commits.assert_not_called()
 
 
-def test_squash_fails_on_a_bad_title(tmp_path, capsys):
+def test_squash_fails_on_a_bad_title(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert run(api(title="squash by default"), event(tmp_path)) == 1
     assert "PR title: subject must read" in capsys.readouterr().out
 
 
-def test_squash_fails_on_a_bad_section(tmp_path, capsys):
+def test_squash_fails_on_a_bad_section(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert run(api(body="## Commit\nCo-authored-by: X <x@y>"), event(tmp_path)) == 1
     assert "attribution line" in capsys.readouterr().out
 
 
-def test_squash_looks_up_only_the_titles_issue(tmp_path):
+def test_squash_looks_up_only_the_titles_issue(tmp_path: pathlib.Path) -> None:
     gitea = api(title=" ci: squash by default (#209) ", body="## Commit\nSee #99.")
     assert run(gitea, event(tmp_path)) == 0
     gitea.is_issue.assert_called_once_with(209)
 
 
-def test_squash_fails_on_a_reference_that_is_no_issue(tmp_path, capsys):
+def test_squash_fails_on_a_reference_that_is_no_issue(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert run(api(title="ci: squash by default (#4711)"), event(tmp_path)) == 1
     assert (
         "PR title: #4711 is not an issue of this repository, or the token cannot read its issues"
@@ -110,19 +117,21 @@ def test_squash_fails_on_a_reference_that_is_no_issue(tmp_path, capsys):
     )
 
 
-def test_a_pull_request_reference_needs_no_lookup(tmp_path):
+def test_a_pull_request_reference_needs_no_lookup(tmp_path: pathlib.Path) -> None:
     gitea = api(title="ci: squash by default (PR #213)")
     assert run(gitea, event(tmp_path)) == 0
     gitea.is_issue.assert_not_called()
 
 
-def test_a_re_run_judges_the_pull_request_as_it_is_now(tmp_path, capsys):
+def test_a_re_run_judges_the_pull_request_as_it_is_now(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     # The event fired before the fix; re-running its job must see the fixed title.
     assert run(api(title="ci: fixed title (#209)"), event(tmp_path)) == 0
     assert "stale title" not in capsys.readouterr().out
 
 
-def test_the_event_needs_only_the_number(tmp_path):
+def test_the_event_needs_only_the_number(tmp_path: pathlib.Path) -> None:
     path = tmp_path / "event.json"
     path.write_text(json.dumps({"pull_request": {"number": 213}}))
     assert run(api(), str(path)) == 0
@@ -133,20 +142,22 @@ def test_the_event_needs_only_the_number(tmp_path):
 SCOPES = '[commits]\nscopes = ["domain", "ui"]\n'
 
 
-def test_a_configured_scope_passes(tmp_path):
+def test_a_configured_scope_passes(tmp_path: pathlib.Path) -> None:
     assert run(api(config=SCOPES, title="feat(ui): x (#209)"), event(tmp_path)) == 0
 
 
-def test_an_unknown_scope_fails_naming_the_allowed_ones(tmp_path, capsys):
+def test_an_unknown_scope_fails_naming_the_allowed_ones(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert run(api(config=SCOPES, title="feat(domian): x (#209)"), event(tmp_path)) == 1
     assert "unknown scope 'domian', expected one of: domain, ui" in capsys.readouterr().out
 
 
-def test_without_the_file_any_scope_passes(tmp_path):
+def test_without_the_file_any_scope_passes(tmp_path: pathlib.Path) -> None:
     assert run(api(title="feat(domian): x (#209)"), event(tmp_path)) == 0
 
 
-def test_an_unknown_scope_fails_a_kept_commit(tmp_path, capsys):
+def test_an_unknown_scope_fails_a_kept_commit(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     gitea = api(commits=[raw_commit("a" * 40, "feat(domian): x (#99)")], config=SCOPES, labels=("keep-commits",))
     assert run(gitea, event(tmp_path)) == 1
     assert "aaaaaaa: unknown scope 'domian'" in capsys.readouterr().out
@@ -157,26 +168,30 @@ def test_an_unknown_scope_fails_a_kept_commit(tmp_path, capsys):
 KEYS = '[commits]\nsquash_append_pull_reference = false\nsubject = ["[{key}] {conventional} {description}"]\nprojects = ["PROJ"]\n'
 
 
-def test_a_configured_key_template_passes(tmp_path):
+def test_a_configured_key_template_passes(tmp_path: pathlib.Path) -> None:
     assert run(api(config=KEYS, title="[PROJ-12] feat(ui): x"), event(tmp_path)) == 0
 
 
-def test_a_title_outside_the_configured_templates_fails(tmp_path, capsys):
+def test_a_title_outside_the_configured_templates_fails(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert run(api(config=KEYS, title="feat(ui): x (#209)"), event(tmp_path)) == 1
     assert "subject must read '[<key>] <type>[(<scope>)][!]: <description>'" in capsys.readouterr().out
 
 
-def test_an_invalid_file_on_the_branch_fails(tmp_path, capsys):
+def test_an_invalid_file_on_the_branch_fails(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert run(api(config="[commits]\nmax_line = 0\n"), event(tmp_path)) == 1
     assert "mergeweasel.toml: commits.max_line must be at least 1" in capsys.readouterr().out
 
 
-def test_an_unknown_key_on_the_branch_fails(tmp_path, capsys):
+def test_an_unknown_key_on_the_branch_fails(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert run(api(config="[comits]\n"), event(tmp_path)) == 1
     assert "mergeweasel.toml: unknown key comits\n" in capsys.readouterr().out
 
 
-def test_without_a_file_the_title_gets_the_pull_reference(tmp_path, capsys):
+def test_without_a_file_the_title_gets_the_pull_reference(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     gitea = api(config=None, title="feat: x")
     assert run(gitea, event(tmp_path)) == 0
     assert "feat: x (#213)" in capsys.readouterr().out
@@ -188,7 +203,9 @@ EITHER_APPENDED = (
 )
 
 
-def test_the_appended_reference_is_checked_as_the_pull_request(tmp_path, capsys):
+def test_the_appended_reference_is_checked_as_the_pull_request(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert run(api(config=EITHER_APPENDED, title="feat: x"), event(tmp_path)) == 0
     assert "feat: x (#213)" in capsys.readouterr().out
 
@@ -196,7 +213,7 @@ def test_the_appended_reference_is_checked_as_the_pull_request(tmp_path, capsys)
 # --- keep-commits ---
 
 
-def test_keep_commits_checks_every_commit_through_the_api(tmp_path):
+def test_keep_commits_checks_every_commit_through_the_api(tmp_path: pathlib.Path) -> None:
     gitea = api(
         commits=[raw_commit("a" * 40, "ci: one (#99)"), raw_commit("c" * 40, "ci: two (#209)")],
         title="anything",
@@ -206,7 +223,7 @@ def test_keep_commits_checks_every_commit_through_the_api(tmp_path):
     gitea.pull_commits.assert_called_once_with(213)
 
 
-def test_keep_commits_looks_up_each_referenced_issue_once(tmp_path):
+def test_keep_commits_looks_up_each_referenced_issue_once(tmp_path: pathlib.Path) -> None:
     gitea = api(
         commits=[
             raw_commit("a" * 40, "ci: one (#99)"),
@@ -219,24 +236,26 @@ def test_keep_commits_looks_up_each_referenced_issue_once(tmp_path):
     assert sorted(call.args for call in gitea.is_issue.call_args_list) == [(99,), (209,)]
 
 
-def test_keep_commits_fails_on_a_bad_commit(tmp_path, capsys):
+def test_keep_commits_fails_on_a_bad_commit(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     gitea = api(commits=[raw_commit("a" * 40, "wip")], labels=("keep-commits",))
     assert run(gitea, event(tmp_path)) == 1
     assert "aaaaaaa: subject must read" in capsys.readouterr().out
 
 
-def test_keep_commits_rejects_a_merge_commit(tmp_path, capsys):
+def test_keep_commits_rejects_a_merge_commit(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     gitea = api(commits=[raw_commit("abc1234" + "0" * 33, "ci: merge main (#99)", parents=2)], labels=("keep-commits",))
     assert run(gitea, event(tmp_path)) == 1
     assert "abc1234: merge commits are not allowed" in capsys.readouterr().out
 
 
-def test_keep_commits_refuses_no_commits(tmp_path):
+def test_keep_commits_refuses_no_commits(tmp_path: pathlib.Path) -> None:
     assert run(api(commits=[], labels=("keep-commits",)), event(tmp_path)) == 1
 
 
 @pytest.mark.parametrize("labels", [(), ("keep-commits",)])
-def test_a_merged_pull_request_passes_without_a_check(tmp_path, capsys, labels):
+def test_a_merged_pull_request_passes_without_a_check(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], labels: tuple[str, ...]
+) -> None:
     # Merged since the event fired: the queue's label removal re-runs the check on a landed pull request.
     gitea = api(title="no longer valid", labels=labels, merged=True)
     assert run(gitea, event(tmp_path)) == 0
@@ -247,7 +266,7 @@ def test_a_merged_pull_request_passes_without_a_check(tmp_path, capsys, labels):
 # --- failures around the check ---
 
 
-def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
+def test_fails_loudly_when_the_api_refuses(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     gitea = api()
     gitea.is_issue.side_effect = ApiError("Forbidden", 403, "https://git.example/api/v1/repos/org/repo/issues/209")
     assert run(gitea, event(tmp_path)) == 1
@@ -255,7 +274,9 @@ def test_fails_loudly_when_the_api_refuses(tmp_path, capsys):
     assert "HTTP 403 Forbidden (https://git.example/api/v1/repos/org/repo/issues/209)" in err and "GITHUB_TOKEN" in err
 
 
-def test_fails_loudly_when_the_pull_request_cannot_be_read(tmp_path, capsys):
+def test_fails_loudly_when_the_pull_request_cannot_be_read(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     gitea = api()
     gitea.pull.side_effect = NotFound("Not Found", 404, "https://git.example/api/v1/repos/org/repo/pulls/213")
     assert run(gitea, event(tmp_path)) == 1
@@ -263,7 +284,9 @@ def test_fails_loudly_when_the_pull_request_cannot_be_read(tmp_path, capsys):
     gitea.file.assert_not_called()
 
 
-def test_an_answer_without_a_status_names_no_status_and_no_token_hint(tmp_path, capsys):
+def test_an_answer_without_a_status_names_no_status_and_no_token_hint(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     gitea = api()
     gitea.is_issue.side_effect = ApiError("the server's answer is not JSON", None, "https://git.example/x")
     assert run(gitea, event(tmp_path)) == 1
@@ -272,14 +295,14 @@ def test_an_answer_without_a_status_names_no_status_and_no_token_hint(tmp_path, 
     assert "None" not in err and "GITHUB_TOKEN" not in err
 
 
-def test_fails_clearly_when_gitea_is_unreachable(tmp_path, capsys):
+def test_fails_clearly_when_gitea_is_unreachable(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     gitea = api()
     gitea.file.side_effect = Unreachable("connection refused", None, "https://git.example/x")
     assert run(gitea, event(tmp_path)) == 1
     assert "could not reach the API: connection refused" in capsys.readouterr().err
 
 
-def test_not_a_pull_request_event_fails_clearly(tmp_path, capsys):
+def test_not_a_pull_request_event_fails_clearly(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     push = tmp_path / "push.json"
     push.write_text(json.dumps({"ref": "refs/heads/main"}))
     empty = tmp_path / "empty.json"
@@ -289,7 +312,9 @@ def test_not_a_pull_request_event_fails_clearly(tmp_path, capsys):
         assert "is not a pull_request event" in capsys.readouterr().err
 
 
-def test_the_instances_keep_commits_label_checks_the_commits(tmp_path, capsys):
+def test_the_instances_keep_commits_label_checks_the_commits(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     commits = [raw_commit("a" * 40, "feat: add a (#99)")]
     no_squash = Settings("main", keep_commits="no-squash")
     assert run(api(commits, title="anything", labels=("no-squash",)), event(tmp_path), no_squash) == 0

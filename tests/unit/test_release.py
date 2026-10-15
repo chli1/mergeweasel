@@ -1,11 +1,25 @@
 import datetime
+from collections.abc import Iterable, Iterator
+from typing import Any
 from unittest import mock
 
 import pytest
 
-from mergeweasel import config, release
+from mergeweasel import commit_rule, config, release
 from mergeweasel.api import ApiError, HistoryCommit, ReleaseExists, TagRef
 from mergeweasel.gitea import Gitea
+
+
+def releasing(
+    message: str,
+    rules: commit_rule.CommitRules = commit_rule.DEFAULT_COMMIT_RULES,
+    minor_types: tuple[str, ...] = config.DEFAULT_MINOR_TYPES,
+    patch_types: tuple[str, ...] = config.DEFAULT_PATCH_TYPES,
+) -> release.Change:
+    """The message's change; fails the test if it releases nothing."""
+    change = release.change(message, rules, minor_types, patch_types)
+    assert change is not None
+    return change
 
 
 @pytest.mark.parametrize(
@@ -20,7 +34,7 @@ from mergeweasel.gitea import Gitea
         ("docs!: rename the e flag (#5)", release.BREAKING, "rename the e flag (#5)"),
     ],
 )
-def test_change_classifies_releasing_commits(message, kind, line):
+def test_change_classifies_releasing_commits(message: str, kind: str, line: str) -> None:
     assert release.change(message) == release.Change(kind, line, "")
 
 
@@ -38,19 +52,19 @@ def test_change_classifies_releasing_commits(message, kind, line):
         "fixup! feat: a (#1)",
     ],
 )
-def test_other_commits_release_nothing(message):
+def test_other_commits_release_nothing(message: str) -> None:
     assert release.change(message) is None
 
 
-def test_breaking_body_drops_co_authored_by_trailers():
+def test_breaking_body_drops_co_authored_by_trailers() -> None:
     message = "feat!: approve differently (#8)\n\n- copy the new workflow\n\nCo-authored-by: a <a@example.com>\n"
     assert release.change(message) == release.Change(
         release.BREAKING, "approve differently (#8)", "- copy the new workflow"
     )
 
 
-def test_only_breaking_changes_keep_their_body():
-    assert release.change("fix: repair (#2)\n\nwhy it broke").body == ""
+def test_only_breaking_changes_keep_their_body() -> None:
+    assert releasing("fix: repair (#2)\n\nwhy it broke").body == ""
 
 
 @pytest.mark.parametrize(
@@ -62,16 +76,16 @@ def test_only_breaking_changes_keep_their_body():
         ([], None),
     ],
 )
-def test_next_version_takes_the_largest_bump(kinds, expected):
+def test_next_version_takes_the_largest_bump(kinds: list[str], expected: tuple[int, int, int] | None) -> None:
     changes = [release.Change(kind, "x", "") for kind in kinds]
     assert release.next_version((1, 2, 3), changes) == expected
 
 
-def test_breaking_in_zero_major_is_a_major_bump():
+def test_breaking_in_zero_major_is_a_major_bump() -> None:
     assert release.next_version((0, 2, 0), [release.Change(release.BREAKING, "x", "")]) == (1, 0, 0)
 
 
-def test_notes_group_the_changes_in_order():
+def test_notes_group_the_changes_in_order() -> None:
     changes = [
         release.Change(release.FIX, "repair b (#2)", ""),
         release.Change(release.BREAKING, "approve differently (#8)", "- copy the new workflow\n- then the image"),
@@ -94,15 +108,15 @@ def test_notes_group_the_changes_in_order():
 # --- the release step ---
 
 
-def sha(number):
+def sha(number: int) -> str:
     return f"{number:040x}"
 
 
-def history_commit(number, message):
+def history_commit(number: int, message: str) -> HistoryCommit:
     return HistoryCommit(sha(number), message)
 
 
-def tag_ref(name, number, annotated=False):
+def tag_ref(name: str, number: int, annotated: bool = False) -> TagRef:
     return TagRef(name, sha(number), annotated)
 
 
@@ -113,7 +127,7 @@ NOW = datetime.datetime(2026, 10, 5, 14, 0, tzinfo=datetime.UTC)
 RELEASE_ON = "[release]\nenabled = true\n"
 
 
-def switched_on(text):
+def switched_on(text: str) -> str:
     """The file's text with the release switched on, unless it sets release.enabled itself."""
     if "enabled" in text:
         return text
@@ -126,7 +140,12 @@ FIRST_TAG = (tag_ref("v1.0.0", 1),)
 FIRST_COMMIT = (history_commit(1, "feat: start (#1)"),)
 
 
-def fake_gitea(refs=FIRST_TAG, history=FIRST_COMMIT, config="", count=None):
+def fake_gitea(
+    refs: Iterable[TagRef] = FIRST_TAG,
+    history: Iterable[HistoryCommit] = FIRST_COMMIT,
+    config: str | None = "",
+    count: int | None = None,
+) -> Any:
     """refs: the tags; history: the base branch's commits, newest first; config: mergeweasel.toml on it, the
     release switched on unless it says otherwise, None for no file; count: the commit count. gitea.walked lists
     the commits the release read."""
@@ -136,7 +155,7 @@ def fake_gitea(refs=FIRST_TAG, history=FIRST_COMMIT, config="", count=None):
     gitea.commit_count.return_value = count
     gitea.walked = []
 
-    def commits(ref):
+    def commits(ref: str) -> Iterator[HistoryCommit]:
         for commit in history:
             gitea.walked.append(commit)
             yield commit
@@ -145,11 +164,11 @@ def fake_gitea(refs=FIRST_TAG, history=FIRST_COMMIT, config="", count=None):
     return gitea
 
 
-def posts(gitea):
+def posts(gitea: Any) -> list[tuple[Any, ...]]:
     return [call.args for call in gitea.create_release.call_args_list]
 
 
-def test_releases_the_commits_since_the_nearest_tag_on_main(capsys):
+def test_releases_the_commits_since_the_nearest_tag_on_main(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         history=[
             history_commit(3, "feat: add a (#1)"),
@@ -162,7 +181,7 @@ def test_releases_the_commits_since_the_nearest_tag_on_main(capsys):
     assert "released v1.1.0" in capsys.readouterr().out
 
 
-def test_notes_list_the_commits_oldest_first():
+def test_notes_list_the_commits_oldest_first() -> None:
     gitea = fake_gitea(
         history=[
             history_commit(3, "fix: second (#2)"),
@@ -174,7 +193,7 @@ def test_notes_list_the_commits_oldest_first():
     assert posts(gitea)[0][2] == "## Fixes\n\n- first (#1)\n- second (#2)\n"
 
 
-def test_a_higher_tag_off_main_is_not_the_base():
+def test_a_higher_tag_off_main_is_not_the_base() -> None:
     # A maintenance branch's v2.0.1 does not decide main's next version.
     gitea = fake_gitea(
         refs=[tag_ref("v1.0.0", 1), tag_ref("v2.0.1", 99)],
@@ -184,7 +203,7 @@ def test_a_higher_tag_off_main_is_not_the_base():
     assert posts(gitea)[0][0] == "v1.0.1"
 
 
-def test_the_highest_of_several_tags_on_one_commit_is_the_base():
+def test_the_highest_of_several_tags_on_one_commit_is_the_base() -> None:
     gitea = fake_gitea(
         refs=[tag_ref("v1.9.0", 1), tag_ref("v1.10.0", 1), tag_ref("latest", 1)],
         history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")],
@@ -193,7 +212,7 @@ def test_the_highest_of_several_tags_on_one_commit_is_the_base():
     assert posts(gitea)[0][0] == "v1.10.1"
 
 
-def test_the_base_is_found_on_a_later_page():
+def test_the_base_is_found_on_a_later_page() -> None:
     history = [history_commit(number, "fix: repair (#2)") for number in range(80, 1, -1)] + [
         history_commit(1, "feat: start (#1)")
     ]
@@ -203,7 +222,7 @@ def test_the_base_is_found_on_a_later_page():
     assert len(gitea.walked) == 80
 
 
-def test_an_annotated_tag_is_followed_to_its_commit():
+def test_an_annotated_tag_is_followed_to_its_commit() -> None:
     gitea = fake_gitea(
         refs=[tag_ref("v1.0.0", 77, annotated=True)],
         history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")],
@@ -214,21 +233,21 @@ def test_an_annotated_tag_is_followed_to_its_commit():
     gitea.tag_commit.assert_called_once_with(sha(77))
 
 
-def test_nothing_releasing_releases_nothing(capsys):
+def test_nothing_releasing_releases_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(history=[history_commit(2, "docs: explain (#1)"), history_commit(1, "feat: start (#1)")])
     assert release.run(gitea, dry_run=False, base_branch="main")
     assert posts(gitea) == []
     assert "nothing to release since v1.0.0" in capsys.readouterr().out
 
 
-def test_tag_on_mains_head_releases_nothing():
+def test_tag_on_mains_head_releases_nothing() -> None:
     gitea = fake_gitea()
     assert release.run(gitea, dry_run=False, base_branch="main")
     assert posts(gitea) == []
 
 
 @pytest.mark.parametrize("refs", [[], [tag_ref("latest", 1)]])
-def test_no_version_tag_reads_no_history(capsys, refs):
+def test_no_version_tag_reads_no_history(capsys: pytest.CaptureFixture[str], refs: list[TagRef]) -> None:
     gitea = fake_gitea(refs=refs)
     assert release.run(gitea, dry_run=False, base_branch="main")
     assert posts(gitea) == []
@@ -236,14 +255,14 @@ def test_no_version_tag_reads_no_history(capsys, refs):
     assert "no tag matching v{major}.{minor}.{patch} to bump from" in capsys.readouterr().out
 
 
-def test_no_version_tag_on_main_is_an_error(capsys):
+def test_no_version_tag_on_main_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(refs=[tag_ref("v1.0.0", 99)], history=[history_commit(2, "fix: repair (#2)")])
     assert not release.run(gitea, dry_run=False, base_branch="main")
     assert posts(gitea) == []
     assert "no tag matching v{major}.{minor}.{patch} on main" in capsys.readouterr().err
 
 
-def test_the_walk_stops_at_its_limit(capsys):
+def test_the_walk_stops_at_its_limit(capsys: pytest.CaptureFixture[str]) -> None:
     history = [history_commit(number, "fix: repair (#2)") for number in range(release.MAX_COMMITS + 50, 0, -1)]
     gitea = fake_gitea(refs=[tag_ref("v1.0.0", 99999)], history=history)
     assert not release.run(gitea, dry_run=False, base_branch="main")
@@ -251,7 +270,7 @@ def test_the_walk_stops_at_its_limit(capsys):
     assert f"within the last {release.MAX_COMMITS} commits" in capsys.readouterr().err
 
 
-def test_a_next_version_tagged_elsewhere_is_an_error(capsys):
+def test_a_next_version_tagged_elsewhere_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         refs=[tag_ref("v1.0.0", 1), tag_ref("v1.0.1", 99)],
         history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")],
@@ -261,7 +280,7 @@ def test_a_next_version_tagged_elsewhere_is_an_error(capsys):
     assert "v1.0.1 exists on another commit" in capsys.readouterr().err
 
 
-def test_dry_run_reports_and_writes_nothing(capsys):
+def test_dry_run_reports_and_writes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
     assert release.run(gitea, dry_run=True, base_branch="main")
     assert posts(gitea) == []
@@ -269,7 +288,7 @@ def test_dry_run_reports_and_writes_nothing(capsys):
     assert "would release v1.0.1" in output and "- repair (#2)" in output
 
 
-def test_the_base_branch_is_released_with_its_own_file(capsys):
+def test_the_base_branch_is_released_with_its_own_file(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
     assert release.run(gitea, dry_run=True, base_branch="trunk")
     assert "would release v1.0.1" in capsys.readouterr().out
@@ -277,14 +296,14 @@ def test_the_base_branch_is_released_with_its_own_file(capsys):
     gitea.commits.assert_called_once_with("trunk")
 
 
-def test_a_tag_created_meanwhile_is_not_an_error(capsys):
+def test_a_tag_created_meanwhile_is_not_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
     gitea.create_release.side_effect = ReleaseExists("tag already exists", 409, "url")
     assert release.run(gitea, dry_run=False, base_branch="main")
     assert "v1.0.1 exists already" in capsys.readouterr().out
 
 
-def test_api_error_is_a_release_error_without_a_traceback(capsys):
+def test_api_error_is_a_release_error_without_a_traceback(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
     gitea.create_release.side_effect = ApiError("boom", 500, "url")
     assert not release.run(gitea, dry_run=False, base_branch="main")
@@ -292,7 +311,7 @@ def test_api_error_is_a_release_error_without_a_traceback(capsys):
     assert "release failed: boom" in err and "Traceback" not in err
 
 
-def test_a_bug_prints_its_traceback_and_is_a_release_error(capsys):
+def test_a_bug_prints_its_traceback_and_is_a_release_error(capsys: pytest.CaptureFixture[str]) -> None:
     # Whatever breaks, the pass must still run.
     gitea = fake_gitea()
     gitea.tag_refs.side_effect = TypeError("'NoneType' object is not subscriptable")
@@ -301,7 +320,7 @@ def test_a_bug_prints_its_traceback_and_is_a_release_error(capsys):
     assert "Traceback" in err and "release failed: TypeError(" in err
 
 
-def test_a_custom_semver_template_bumps_from_its_own_tags():
+def test_a_custom_semver_template_bumps_from_its_own_tags() -> None:
     gitea = fake_gitea(
         config='[release]\ntag = "release-{major}.{minor}.{patch}"\n',
         refs=[tag_ref("release-1.4.0", 1), tag_ref("v9.0.0", 1)],
@@ -311,13 +330,13 @@ def test_a_custom_semver_template_bumps_from_its_own_tags():
     assert posts(gitea)[0][0] == "release-1.4.1"
 
 
-def test_the_default_template_reads_no_count():
+def test_the_default_template_reads_no_count() -> None:
     gitea = fake_gitea(history=[history_commit(2, "fix: repair (#2)"), history_commit(1, "feat: start (#1)")])
     release.run(gitea, dry_run=False, base_branch="main")
     gitea.commit_count.assert_not_called()
 
 
-def test_calver_without_a_tag_of_its_shape_releases_mains_head(capsys):
+def test_calver_without_a_tag_of_its_shape_releases_mains_head(capsys: pytest.CaptureFixture[str]) -> None:
     # The old v1.0.0 is no release under the new template; the head alone decides.
     gitea = fake_gitea(
         config=CALVER,
@@ -335,7 +354,7 @@ def test_calver_without_a_tag_of_its_shape_releases_mains_head(capsys):
     assert "released 26.10.5.412+0000000" in capsys.readouterr().out
 
 
-def test_calver_without_a_tag_waits_for_a_releasing_head(capsys):
+def test_calver_without_a_tag_waits_for_a_releasing_head(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         config=CALVER,
         count=3,
@@ -347,7 +366,7 @@ def test_calver_without_a_tag_waits_for_a_releasing_head(capsys):
     assert "nothing to release on 0000000" in capsys.readouterr().out
 
 
-def test_calver_walks_back_to_its_previous_release():
+def test_calver_walks_back_to_its_previous_release() -> None:
     gitea = fake_gitea(
         config=CALVER,
         count=412,
@@ -363,7 +382,7 @@ def test_calver_walks_back_to_its_previous_release():
     assert posts(gitea)[0][2] == "## Features\n\n- add a (#1)\n\n## Fixes\n\n- repair b (#2)\n"
 
 
-def test_a_calver_name_taken_already_is_an_error(capsys):
+def test_a_calver_name_taken_already_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         config='[release]\ntag = "{YY}.{MM}.{DD}"\n',
         refs=[tag_ref("26.10.5", 1)],
@@ -374,20 +393,20 @@ def test_a_calver_name_taken_already_is_an_error(capsys):
     assert "26.10.5 exists on another commit" in capsys.readouterr().err
 
 
-def test_dry_run_names_the_calver_release(capsys):
+def test_dry_run_names_the_calver_release(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(config=CALVER, count=412, history=[history_commit(3, "fix: repair (#2)")])
     assert release.run(gitea, dry_run=True, base_branch="main", now=NOW)
     assert posts(gitea) == []
     assert "would release 26.10.5.412+0000000" in capsys.readouterr().out
 
 
-def test_an_invalid_configuration_is_a_release_error(capsys):
+def test_an_invalid_configuration_is_a_release_error(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(config='[release]\ntag = "{yy}"\n')
     assert not release.run(gitea, dry_run=False, base_branch="main")
     assert "release failed: mergeweasel.toml: release.tag: unknown placeholder {yy}" in capsys.readouterr().err
 
 
-def test_switched_off_the_release_reads_no_tags(capsys):
+def test_switched_off_the_release_reads_no_tags(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         config="[release]\nenabled = false\n",
         history=[history_commit(2, "feat!: add a (#1)"), history_commit(1, "feat: start (#1)")],
@@ -397,7 +416,7 @@ def test_switched_off_the_release_reads_no_tags(capsys):
     assert "release: to release, set release.enabled = true in mergeweasel.toml" in capsys.readouterr().out
 
 
-def test_without_a_file_the_release_is_off(capsys):
+def test_without_a_file_the_release_is_off(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         config=None, history=[history_commit(2, "feat!: add a (#1)"), history_commit(1, "feat: start (#1)")]
     )
@@ -414,19 +433,19 @@ def test_without_a_file_the_release_is_off(capsys):
         ("fix: repair c (#31) (#40)", "## Fixes\n\n- repair c (#31) (#40)\n"),
     ],
 )
-def test_subjects_of_either_format_release_under_the_default(subject, notes):
+def test_subjects_of_either_format_release_under_the_default(subject: str, notes: str) -> None:
     gitea = fake_gitea(history=[history_commit(2, subject), history_commit(1, "feat: start (#1)")])
     assert release.run(gitea, dry_run=False, base_branch="main")
     assert posts(gitea)[0][2] == notes
 
 
-def test_switched_off_an_invalid_release_key_is_still_an_error(capsys):
+def test_switched_off_an_invalid_release_key_is_still_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(config='[release]\nenabled = false\ntag = "{yy}"\n')
     assert not release.run(gitea, dry_run=False, base_branch="main")
     assert "release.tag: unknown placeholder {yy}" in capsys.readouterr().err
 
 
-def test_without_a_given_time_the_date_is_utc():
+def test_without_a_given_time_the_date_is_utc() -> None:
     gitea = fake_gitea(
         config='[release]\ntag = "{YYYY}.{MM}.{DD}.{count}"\n', count=5, history=[history_commit(2, "fix: repair (#2)")]
     )
@@ -442,7 +461,7 @@ def test_without_a_given_time_the_date_is_utc():
 KEYS = '[commits]\nsquash_append_pull_reference = false\nsubject = ["[{key}] {conventional} {description}", "{conventional} {description} (PR #{pull})"]\n'
 
 
-def test_change_renders_the_line_through_the_subjects_template():
+def test_change_renders_the_line_through_the_subjects_template() -> None:
     rules = config.parse(KEYS).commits
     assert release.change("feat(ui): add a (#1)", rules) is None
     assert release.change("[PROJ-1] feat(ui): add a", rules) == release.Change(
@@ -451,7 +470,7 @@ def test_change_renders_the_line_through_the_subjects_template():
     assert release.change("fix: repair b (PR #3)", rules) == release.Change(release.FIX, "repair b (PR #3)", "")
 
 
-def test_the_release_reads_the_templates_on_main():
+def test_the_release_reads_the_templates_on_main() -> None:
     gitea = fake_gitea(
         config=KEYS, history=(history_commit(2, "[PROJ-1] feat: add a"), history_commit(1, "feat: start (#1)"))
     )
@@ -459,7 +478,7 @@ def test_the_release_reads_the_templates_on_main():
     assert posts(gitea) == [("v1.1.0", sha(2), "## Features\n\n- [PROJ-1] add a\n")]
 
 
-def test_a_commit_outside_the_rule_is_printed_and_releases_nothing(capsys):
+def test_a_commit_outside_the_rule_is_printed_and_releases_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         config=KEYS,
         history=(
@@ -475,7 +494,7 @@ def test_a_commit_outside_the_rule_is_printed_and_releases_nothing(capsys):
     assert posts(gitea) == []
 
 
-def test_the_release_reads_the_shape_only_not_the_scope_and_project_lists(capsys):
+def test_the_release_reads_the_shape_only_not_the_scope_and_project_lists(capsys: pytest.CaptureFixture[str]) -> None:
     gitea = fake_gitea(
         config='[commits]\nscopes = ["api"]\n',
         history=(history_commit(2, "feat(ui): add x (#1)"), history_commit(1, "feat: start (#1)")),
@@ -493,7 +512,7 @@ CUSTOM = config.parse(
 )
 
 
-def custom_change(message):
+def custom_change(message: str) -> release.Change | None:
     return release.change(message, CUSTOM.commits, CUSTOM.minor_types, CUSTOM.patch_types)
 
 
@@ -505,21 +524,21 @@ def custom_change(message):
         ("docs!: rename c (#3)", release.BREAKING),
     ],
 )
-def test_the_release_lists_decide_the_kind(message, kind):
-    assert custom_change(message).kind == kind
+def test_the_release_lists_decide_the_kind(message: str, kind: str) -> None:
+    assert releasing(message, CUSTOM.commits, CUSTOM.minor_types, CUSTOM.patch_types).kind == kind
 
 
-def test_a_type_in_no_release_list_releases_nothing():
+def test_a_type_in_no_release_list_releases_nothing() -> None:
     assert custom_change("docs: explain (#1)") is None
 
 
-def test_git_revert_counts_as_the_type_revert():
+def test_git_revert_counts_as_the_type_revert() -> None:
     message = 'Revert "feat: add a (#1)"'
-    assert release.change(message, minor_types=("feat", "revert"), patch_types=()).kind == release.FEATURE
+    assert releasing(message, minor_types=("feat", "revert"), patch_types=()).kind == release.FEATURE
     assert release.change(message, patch_types=("fix",)) is None
 
 
-def test_the_release_reads_the_release_lists_on_main():
+def test_the_release_reads_the_release_lists_on_main() -> None:
     gitea = fake_gitea(
         config='[release]\npatch_types = ["fix", "build"]\n',
         history=(history_commit(2, "build: bump b (#2)"), history_commit(1, "feat: start (#1)")),
@@ -528,7 +547,9 @@ def test_the_release_reads_the_release_lists_on_main():
     assert posts(gitea) == [("v1.0.1", sha(2), "## Fixes\n\n- bump b (#2)\n")]
 
 
-def test_a_type_no_longer_listed_releases_nothing_and_is_not_outside_the_rule(capsys):
+def test_a_type_no_longer_listed_releases_nothing_and_is_not_outside_the_rule(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     gitea = fake_gitea(
         config='[commits]\ntypes = ["feat", "fix"]\n',
         history=(history_commit(2, "perf: speed up (#2)"), history_commit(1, "feat: start (#1)")),

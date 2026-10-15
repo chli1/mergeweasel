@@ -6,6 +6,7 @@ docs/design.md, "What lands on main".
 
 import dataclasses
 import re
+from collections.abc import Callable, Iterable
 
 from mergeweasel import subject_template
 
@@ -41,13 +42,13 @@ class CommitRules:
     """The rule every subject is held to: the forms it may take and what its parts may name."""
 
     # The subject templates, in the configured order: the first that matches decides.
-    templates: tuple
+    templates: tuple[subject_template.Template, ...]
     # None: any scope passes; empty: none does.
-    scopes: tuple | None
+    scopes: tuple[str, ...] | None
     # None: any project passes.
-    projects: tuple | None
+    projects: tuple[str, ...] | None
     # None: any type passes.
-    types: tuple | None = TYPES
+    types: tuple[str, ...] | None = TYPES
     # The longest `## Commit` line that contains whitespace.
     max_line: int = MAX_LINE
     # Squash only: the subject is the title with " (#<pr>)" appended, unless it ends in it already.
@@ -57,12 +58,12 @@ class CommitRules:
 DEFAULT_COMMIT_RULES = CommitRules(tuple(subject_template.compile(text) for text in DEFAULT_SUBJECT), None, None)
 
 
-def subject_problem(subject, rules):
+def subject_problem(subject: str, rules: CommitRules) -> str:
     forms = " or ".join(f"'{template.describe()}'" for template in rules.templates)
     return f"subject must read {forms}, got: {subject!r}"
 
 
-def first_match(subject, rules=DEFAULT_COMMIT_RULES):
+def first_match(subject: str, rules: CommitRules = DEFAULT_COMMIT_RULES) -> subject_template.Parts | None:
     """The subject's parts by the first template it takes the form of; None for none."""
     for template in rules.templates:
         parts = template.match(subject)
@@ -71,7 +72,7 @@ def first_match(subject, rules=DEFAULT_COMMIT_RULES):
     return None
 
 
-def check_subject(subject, rules=DEFAULT_COMMIT_RULES):
+def check_subject(subject: str, rules: CommitRules = DEFAULT_COMMIT_RULES) -> str | None:
     if EXEMPT.match(subject):
         return None
     parts = first_match(subject, rules)
@@ -90,20 +91,20 @@ def check_subject(subject, rules=DEFAULT_COMMIT_RULES):
     return None
 
 
-def parse_subject(subject, rules=DEFAULT_COMMIT_RULES):
+def parse_subject(subject: str, rules: CommitRules = DEFAULT_COMMIT_RULES) -> subject_template.Parts | None:
     """The parts of a subject the rule accepts; None for any other, the exempt ones included."""
     if EXEMPT.match(subject) or check_subject(subject, rules):
         return None
     return first_match(subject, rules)
 
 
-def referenced_issues(subjects, rules=DEFAULT_COMMIT_RULES):
+def referenced_issues(subjects: Iterable[str], rules: CommitRules = DEFAULT_COMMIT_RULES) -> set[int]:
     """The distinct issue numbers the subjects reference - the ones check_reference needs to know.
 
     Stripped as squash_message strips the title, so a title's reference is looked up as it is checked.
     """
     found = (first_match(subject.strip(), rules) for subject in subjects if not EXEMPT.match(subject.strip()))
-    numbers = set()
+    numbers: set[int] = set()
     for parts in found:
         if parts and parts.issue is not None:
             numbers.add(int(parts.issue))
@@ -112,16 +113,22 @@ def referenced_issues(subjects, rules=DEFAULT_COMMIT_RULES):
     return numbers
 
 
-def known_issues(subjects, is_issue, rules=DEFAULT_COMMIT_RULES):
+def known_issues(
+    subjects: Iterable[str], is_issue: Callable[[int], bool], rules: CommitRules = DEFAULT_COMMIT_RULES
+) -> set[int]:
     """The referenced numbers that are issues, each looked up once: a lookup costs a request."""
     return {number for number in referenced_issues(subjects, rules) if is_issue(number)}
 
 
-def check_reference(subject, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
+def check_reference(
+    subject: str, known_issues: set[int], pr_number: int, rules: CommitRules = DEFAULT_COMMIT_RULES
+) -> str | None:
     problem = check_subject(subject, rules)
     if problem or EXEMPT.match(subject):
         return problem
     parts = first_match(subject, rules)
+    # check_subject found no problem: a template matched.
+    assert parts is not None
     if parts.issue is not None and int(parts.issue) not in known_issues:
         # Gitea answers 404 for an issue the token may not read, as for a missing one.
         return f"#{parts.issue} is not an issue of this repository, or the token cannot read its issues"
@@ -143,9 +150,11 @@ class Commit:
     parent_count: int
 
 
-def commit_problems(commits, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
+def commit_problems(
+    commits: Iterable[Commit], known_issues: set[int], pr_number: int, rules: CommitRules = DEFAULT_COMMIT_RULES
+) -> list[str]:
     """A keep-commits pull request: every commit lands as it is, so every commit is checked."""
-    problems = []
+    problems: list[str] = []
     for commit in commits:
         if commit.parent_count > 1:
             problems.append(f"{commit.sha[:7]}: {MERGE_REJECTED}")
@@ -156,13 +165,13 @@ def commit_problems(commits, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES
     return problems
 
 
-def commit_section(pr_body, max_line=MAX_LINE):
+def commit_section(pr_body: str | None, max_line: int = MAX_LINE) -> tuple[str, list[str]]:
     """The text of the PR body's `## Commit` section and its problems; "" without a section."""
     text = HTML_COMMENT.sub("", (pr_body or "").replace("\r\n", "\n"))
     if "<!--" in text:
         return "", ["the PR body has an unterminated HTML comment ('<!--' without '-->')"]
     lines = text.split("\n")
-    outside_fences = []
+    outside_fences: list[bool] = []
     in_fence = False
     for line in lines:
         if FENCE.match(line):
@@ -173,7 +182,7 @@ def commit_section(pr_body, max_line=MAX_LINE):
         return "", [f"the PR body has {len(headings)} '## Commit' sections, expected at most one"]
     if not headings:
         return "", []
-    section_lines = []
+    section_lines: list[str] = []
     for index in range(headings[0] + 1, len(lines)):
         if outside_fences[index] and SECTION_END.match(lines[index]):
             break
@@ -186,8 +195,8 @@ def commit_section(pr_body, max_line=MAX_LINE):
     return section, line_problems(section, max_line)
 
 
-def line_problems(section, max_line=MAX_LINE):
-    problems = []
+def line_problems(section: str, max_line: int = MAX_LINE) -> list[str]:
+    problems: list[str] = []
     for number, line in enumerate(section.split("\n"), start=1):
         if len(line) > max_line and re.search(r"\s", line.strip()):
             problems.append(f"'## Commit' line {number} is {len(line)} characters, wrap at {max_line}")
@@ -201,10 +210,10 @@ class SquashMessage:
     subject: str
     body: str
     # Empty when the message may land.
-    problems: tuple
+    problems: tuple[str, ...]
 
 
-def squash_subject(title, pr_number, rules=DEFAULT_COMMIT_RULES):
+def squash_subject(title: str | None, pr_number: int, rules: CommitRules = DEFAULT_COMMIT_RULES) -> str:
     """What a squash lands as its subject: the stripped title, with the pull reference if the rules append it."""
     subject = (title or "").strip()
     reference = f" (#{pr_number})"
@@ -213,14 +222,20 @@ def squash_subject(title, pr_number, rules=DEFAULT_COMMIT_RULES):
     return subject
 
 
-def squash_message(title, pr_body, known_issues, pr_number, rules=DEFAULT_COMMIT_RULES):
+def squash_message(
+    title: str | None,
+    pr_body: str | None,
+    known_issues: set[int],
+    pr_number: int,
+    rules: CommitRules = DEFAULT_COMMIT_RULES,
+) -> SquashMessage:
     """The squash commit a pull request lands as: its title - with the pull reference appended if the rules
     say so -, then its `## Commit` section."""
     subject = squash_subject(title, pr_number, rules)
     body, problems = commit_section(pr_body, rules.max_line)
     # No fixup!/squash!/Revert exemption: those inherit a branch commit's reference, a title has none.
     if EXEMPT.match(subject):
-        title_problem = subject_problem(subject, rules)
+        title_problem: str | None = subject_problem(subject, rules)
     else:
         title_problem = check_reference(subject, known_issues, pr_number, rules)
     if title_problem:

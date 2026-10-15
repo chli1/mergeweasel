@@ -26,6 +26,18 @@ ignore = ["PLW1510"]
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["mergeweasel.settings.Settings"]
 
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+# As pytest's pythonpath; explicit_package_bases keeps tests/unit and tests/integration's test_queue.py apart.
+mypy_path = ["src", "tests/support"]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# The forge's JSON is Any by design: api.py turns it into dataclasses, the tests' driver reads it as is.
+module = ["mergeweasel.api", "driver"]
+warn_return_any = false
+
 [tool.pytest.ini_options]
 # importlib: tests/unit and tests/integration both have a test_queue.py.
 addopts = "--import-mode=importlib"
