@@ -4,6 +4,8 @@
   "semanticCommits": "enabled",
   "commitMessageSuffix": "(#16)",
   "dependencyDashboard": true,
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 0,
   "automerge": false,
   "packageRules": [
     {
