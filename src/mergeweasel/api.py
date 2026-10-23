@@ -405,6 +405,8 @@ class Client(abc.ABC):
                 "MergeMessageField": message.body,
                 "head_commit_id": head_sha,
             }
+        # Explicit: Gitea falls back to the repository's setting, Forgejo keeps the branch.
+        request["delete_branch_after_merge"] = self._json("GET", "")["default_delete_branch_after_merge"]
         try:
             self._json("POST", f"/pulls/{number}/merge", request)
         except ApiError as error:

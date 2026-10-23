@@ -431,6 +431,9 @@ needs a fix.
   produces exactly that message. The author is the pull request's poster, the committer the merging
   account. By default (the server setting `ADD_CO_COMMITTER_TRAILERS`), Gitea appends a
   `Co-authored-by` trailer to every queue merge.
+- **Branch deletion**: the merge deletes the pull request's branch if `delete_branch_after_merge`
+  says so, and without the field if the repository's `default_delete_branch_after_merge` does. The
+  queue reads that setting before each merge and always sends the field.
 - **Merge refusal**: `405` with "Please try again later" while the mergeable check still runs; `409`
   when `head_commit_id` is no longer the head.
 - **Refs**: `GET git/refs/heads/<branch>` matches by prefix and reads the repository directly,
@@ -469,6 +472,8 @@ run against it too.
   labels only, so an organization label's id answers `422`. A name resolves in the repository,
   then in the organization; the queue removes labels by name.
 - **Squash**: Forgejo appends no `Co-authored-by` trailer.
+- **Branch deletion**: a merge without `delete_branch_after_merge` keeps the branch, whatever the
+  repository's `default_delete_branch_after_merge` says.
 
 ## Security model
 

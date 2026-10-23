@@ -7,7 +7,7 @@ asserted only for the cause they name - their wording is the unit tests' busines
 from collections.abc import Callable
 
 import pytest
-from driver import ApiError, Repo, eventually
+from driver import ADMIN, ApiError, Repo, eventually
 from server import Server
 
 TITLE = "feat: add a (#1)"
@@ -60,6 +60,28 @@ def test_keep_commits_fast_forwards(repo: Repo, run_pass: Callable[..., str]) ->
     assert [parent["sha"] for parent in repo.git_commit(second)["parents"]] == [first]
     assert repo.pull(number)["merged"]
     assert "automerge" not in repo.labels(number)
+
+
+@pytest.mark.needs_new_image  # on Forgejo: deleting the merged branch
+def test_the_repository_setting_decides_whether_the_branch_goes(repo: Repo, run_pass: Callable[..., str]) -> None:
+    repo.commit("author", "main", {"a.txt": "a\n"}, "add a", new_branch="add-a")
+    number = repo.open_pull("author", "add-a", TITLE, BODY)
+    repo.ready(number)
+
+    run_pass(mergeable=number)
+
+    assert repo.pull(number)["merged"]
+    assert "add-a" not in repo.branches()
+
+    repo.call(ADMIN, "PATCH", "", {"default_delete_branch_after_merge": False})
+    repo.commit("author", "main", {"b.txt": "b\n"}, "add b", new_branch="add-b")
+    number = repo.open_pull("author", "add-b", "feat: add b (#1)", BODY)
+    repo.ready(number)
+
+    run_pass(mergeable=number)
+
+    assert repo.pull(number)["merged"]
+    assert "add-b" in repo.branches()
 
 
 @pytest.mark.needs_new_image  # on Forgejo: the Forgejo client, removing labels by name

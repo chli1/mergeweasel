@@ -85,7 +85,11 @@ def create_repo(
     admin.call("POST", f"/orgs/{ORGANIZATION}/repos", {"name": name, "auto_init": True, "default_branch": branch})
     full_name = f"{ORGANIZATION}/{name}"
     path = f"/repos/{full_name}"
-    admin.call("PATCH", path, {"allow_squash_merge": True, "allow_fast_forward_only_merge": True})
+    admin.call(
+        "PATCH",
+        path,
+        {"allow_squash_merge": True, "allow_fast_forward_only_merge": True, "default_delete_branch_after_merge": True},
+    )
     for account in ACCOUNTS:
         admin.call("PUT", f"{path}/collaborators/{account}", {"permission": "write"})
     # The automerge label is the organization's, the others the repository's: each label removal the
@@ -222,6 +226,9 @@ class Repo:
 
     def main_sha(self) -> str:
         return self.read(f"/branches/{self.branch}")["commit"]["id"]
+
+    def branches(self) -> set[str]:
+        return {branch["name"] for branch in self.read("/branches")}
 
     def git_commit(self, sha: str) -> Any:
         return self.read(f"/git/commits/{sha}")

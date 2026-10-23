@@ -385,10 +385,12 @@ def test_writes_send_their_request(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = serve(monkeypatch, None, None)
+    keep = {"default_delete_branch_after_merge": False}
+    seen = serve(monkeypatch, keep, None, keep, None)
     client().merge(6, "h" * 40, SquashMessage("ci: land (#1)", "Why.", ()))
     client().merge(6, "h" * 40, None)
     assert seen == [
+        ("GET", API, None),
         (
             "POST",
             f"{API}/pulls/6/merge",
@@ -397,10 +399,22 @@ def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch: pytest.Mo
                 "MergeTitleField": "ci: land (#1)",
                 "MergeMessageField": "Why.",
                 "head_commit_id": "h" * 40,
+                "delete_branch_after_merge": False,
             },
         ),
-        ("POST", f"{API}/pulls/6/merge", {"Do": "fast-forward-only", "head_commit_id": "h" * 40}),
+        ("GET", API, None),
+        (
+            "POST",
+            f"{API}/pulls/6/merge",
+            {"Do": "fast-forward-only", "head_commit_id": "h" * 40, "delete_branch_after_merge": False},
+        ),
     ]
+
+
+def test_merge_deletes_the_branch_if_the_repository_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = serve(monkeypatch, {"default_delete_branch_after_merge": True}, None)
+    client().merge(6, "h" * 40, None)
+    assert seen[-1][2]["delete_branch_after_merge"] is True
 
 
 @pytest.mark.parametrize(
@@ -413,7 +427,7 @@ def test_merge_squashes_with_the_message_or_fast_forwards(monkeypatch: pytest.Mo
     ],
 )
 def test_merge_errors(monkeypatch: pytest.MonkeyPatch, code: int, message: str, kind: type[api.ApiError]) -> None:
-    serve(monkeypatch, http_error(code, message))
+    serve(monkeypatch, {"default_delete_branch_after_merge": False}, http_error(code, message))
     with pytest.raises(kind) as raised:
         client().merge(6, "h" * 40, None)
     assert type(raised.value) is kind and raised.value.message == message

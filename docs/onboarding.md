@@ -116,7 +116,8 @@ creates the tag, so workflows that run on tag pushes start for it.
 
 In the repository settings, allow squash and fast-forward-only merges. The queue squashes by
 default and fast-forwards pull requests labelled `keep-commits`. Also turn on *Delete pull request
-branch after merge by default*, so Gitea deletes the branch of every pull request the queue merges.
+branch after merge by default*, so the forge deletes the branch of every pull request the queue
+merges.
 
 ## The workflows
 
